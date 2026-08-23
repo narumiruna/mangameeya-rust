@@ -1,0 +1,23 @@
+{
+  "name": "mangameeya-rust",
+  "version": "0.1.0",
+  "private": true,
+  "description": "A Windows manga reader inspired by MangaMeeyaCE, built with Rust and Tauri 2",
+  "license": "AGPL-3.0-only",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview",
+    "tauri": "tauri"
+  },
+  "dependencies": {
+    "@tauri-apps/api": "^2.11.1",
+    "@tauri-apps/plugin-dialog": "^2.7.2"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2.11.4",
+    "typescript": "^7.0.2",
+    "vite": "^8.2.2"
+  }
+}

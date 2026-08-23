@@ -1,0 +1,60 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "MangaMeeya Rust",
+  "version": "0.1.0",
+  "identifier": "io.github.mangameeya.rust",
+  "build": {
+    "beforeDevCommand": "npm run dev",
+    "devUrl": "http://localhost:1420",
+    "beforeBuildCommand": "npm run build",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "security": {
+      "csp": "default-src 'self'; img-src 'self' data: asset: http://asset.localhost; style-src 'self' 'unsafe-inline'"
+    },
+    "windows": [
+      {
+        "label": "main",
+        "title": "MangaMeeya Rust",
+        "width": 1280,
+        "height": 800,
+        "minWidth": 760,
+        "minHeight": 520,
+        "resizable": true,
+        "maximized": false,
+        "fullscreen": false,
+        "dragDropEnabled": true,
+        "useHttpsScheme": true
+      }
+    ]
+  },
+  "bundle": {
+    "active": true,
+    "targets": ["nsis", "msi"],
+    "category": "Photography",
+    "shortDescription": "Fast keyboard-first manga reader",
+    "longDescription": "MangaMeeya Rust is a native Windows manga reader for image folders and comic archives.",
+    "copyright": "Copyright © 2026 MangaMeeya Rust contributors",
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.ico"
+    ],
+    "fileAssociations": [
+      {
+        "ext": ["jpg", "jpeg", "jpe", "png", "gif", "bmp", "webp", "zip", "cbz", "rar", "cbr"],
+        "name": "Comic book or image",
+        "description": "Open with MangaMeeya Rust",
+        "role": "Viewer"
+      }
+    ],
+    "windows": {
+      "nsis": {
+        "installMode": "currentUser",
+        "displayLanguageSelector": false
+      }
+    }
+  }
+}
