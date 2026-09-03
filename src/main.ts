@@ -38,6 +38,7 @@ interface DirectoryListing {
 
 interface Preferences {
   spread: boolean;
+  continuous: boolean;
   rtl: boolean;
   fit: FitMode;
   sidebar: boolean;
@@ -50,6 +51,7 @@ interface Preferences {
 
 const defaultPreferences: Preferences = {
   spread: false,
+  continuous: false,
   rtl: true,
   fit: "window",
   sidebar: true,
@@ -96,6 +98,7 @@ app.innerHTML = `
           ["toggle-sidebar", "顯示側欄", "Tab"],
           ["mode-thumbs", "縮圖模式", "T"],
           ["toggle-spread", "雙頁跨頁", "S"],
+          ["toggle-continuous", "連續頁面", "C"],
           ["toggle-rtl", "右向左閱讀", "D"],
           ["separator", "", ""],
           ["fullscreen", "全螢幕", "F11"],
@@ -138,6 +141,7 @@ app.innerHTML = `
         ${tool("next", "▶", "下一頁")}
         <span class="tool-separator"></span>
         ${tool("toggle-spread", "▣", "單頁／雙頁")}
+        ${tool("toggle-continuous", "▤", "連續頁面")}
         ${tool("toggle-rtl", "R⇄L", "閱讀方向")}
         ${tool("fit-window", "⊡", "適合視窗")}
         ${tool("fit-width", "↔", "適合寬度")}
@@ -209,7 +213,7 @@ app.innerHTML = `
       <label>閱讀區背景
         <select id="pref-background"><option value="black">黑色</option><option value="gray">深灰</option><option value="paper">紙色</option></select>
       </label>
-      <p class="hint">滑鼠滾輪翻頁；按住 Ctrl 並滾動可縮放。</p>
+      <p class="hint">滑鼠滾輪會捲動閱讀區；按住 Ctrl 並滾動可縮放。</p>
       <footer><button value="cancel">取消</button><button id="save-settings" value="default" class="primary">儲存</button></footer>
     </form>
   </dialog>
@@ -263,6 +267,8 @@ const zoomOutput = document.querySelector<HTMLOutputElement>("#zoom-output")!;
 const toast = document.querySelector<HTMLDivElement>("#toast")!;
 
 let toastTimer = 0;
+let continuousObserver: IntersectionObserver | null = null;
+let continuousScrollFrame = 0;
 function notify(message: string, error = false): void {
   window.clearTimeout(toastTimer);
   toast.textContent = message;
@@ -340,6 +346,9 @@ async function openPath(path: string): Promise<void> {
 
 async function closeBook(): Promise<void> {
   stopSlideshow();
+  continuousObserver?.disconnect();
+  continuousObserver = null;
+  viewer.classList.remove("continuous-mode");
   await invoke("close_book");
   state.book = null;
   state.cache.clear();
@@ -354,7 +363,7 @@ async function closeBook(): Promise<void> {
 function visibleIndices(): number[] {
   if (!state.book) return [];
   const indices = [state.current];
-  if (preferences.spread && state.current + 1 < state.book.pageNames.length) indices.push(state.current + 1);
+  if (!preferences.continuous && preferences.spread && state.current + 1 < state.book.pageNames.length) indices.push(state.current + 1);
   return indices;
 }
 
@@ -371,32 +380,34 @@ async function pageData(index: number): Promise<PageData> {
   return data;
 }
 
+function createPageImage(page: PageData): HTMLImageElement {
+  const image = document.createElement("img");
+  image.src = page.dataUrl;
+  image.alt = `第 ${page.index + 1} 頁：${page.name}`;
+  image.draggable = false;
+  image.style.transform = `rotate(${state.rotation}deg) scale(${preferences.fit === "custom" ? state.zoom : 1})`;
+  image.style.filter = `brightness(${state.brightness}%) contrast(${state.contrast}%) grayscale(${state.grayscale}%)`;
+  return image;
+}
+
+function createPagePlaceholder(index: number): HTMLElement {
+  const placeholder = document.createElement("span");
+  placeholder.className = "page-placeholder";
+  placeholder.textContent = String(index + 1);
+  return placeholder;
+}
+
 async function renderPages(): Promise<void> {
   if (!state.book) return;
   const token = ++state.loadingToken;
+  continuousObserver?.disconnect();
+  continuousObserver = null;
   loading.classList.remove("hidden");
   pagesElement.classList.add("hidden");
   try {
-    const data = await Promise.all(visibleIndices().map(pageData));
+    if (preferences.continuous) await renderContinuousPages(token);
+    else await renderPagedPages(token);
     if (token !== state.loadingToken) return;
-    pagesElement.replaceChildren(
-      ...data.map((page) => {
-        const wrapper = document.createElement("figure");
-        wrapper.className = "page-frame";
-        const image = document.createElement("img");
-        image.src = page.dataUrl;
-        image.alt = `第 ${page.index + 1} 頁：${page.name}`;
-        image.draggable = false;
-        image.style.transform = `rotate(${state.rotation}deg) scale(${preferences.fit === "custom" ? state.zoom : 1})`;
-        image.style.filter = `brightness(${state.brightness}%) contrast(${state.contrast}%) grayscale(${state.grayscale}%)`;
-        wrapper.append(image);
-        return wrapper;
-      }),
-    );
-    pagesElement.className = `pages fit-${preferences.fit} ${preferences.spread ? "spread" : "single"} ${preferences.rtl ? "rtl" : "ltr"}`;
-    const bytes = data.reduce((sum, page) => sum + page.byteSize, 0);
-    statusSize.textContent = formatBytes(bytes);
-    statusName.textContent = data.map((page) => page.name).join("  ·  ");
     statusMessage.textContent = "就緒";
     rememberPosition();
     updateControls();
@@ -407,6 +418,119 @@ async function renderPages(): Promise<void> {
   } finally {
     if (token === state.loadingToken) loading.classList.add("hidden");
   }
+}
+
+async function renderPagedPages(token: number): Promise<void> {
+  const data = await Promise.all(visibleIndices().map(pageData));
+  if (token !== state.loadingToken) return;
+  pagesElement.replaceChildren(
+    ...data.map((page) => {
+      const wrapper = document.createElement("figure");
+      wrapper.className = "page-frame";
+      wrapper.append(createPageImage(page));
+      return wrapper;
+    }),
+  );
+  pagesElement.className = `pages fit-${preferences.fit} ${preferences.spread ? "spread" : "single"} ${preferences.rtl ? "rtl" : "ltr"}`;
+  viewer.classList.remove("continuous-mode");
+  viewer.scrollTo({ top: 0, left: 0 });
+  statusSize.textContent = formatBytes(data.reduce((sum, page) => sum + page.byteSize, 0));
+  statusName.textContent = data.map((page) => page.name).join("  ·  ");
+}
+
+async function renderContinuousPages(token: number): Promise<void> {
+  if (!state.book) return;
+  const frames = state.book.pageNames.map((name, index) => {
+    const frame = document.createElement("figure");
+    frame.className = "page-frame page-pending";
+    frame.dataset.continuousPage = String(index);
+    frame.setAttribute("aria-label", `第 ${index + 1} 頁：${name}`);
+    frame.append(createPagePlaceholder(index));
+    return frame;
+  });
+  pagesElement.replaceChildren(...frames);
+  pagesElement.className = `pages continuous fit-${preferences.fit}`;
+  viewer.classList.add("continuous-mode");
+  viewer.scrollTop = frames[state.current]?.offsetTop ?? 0;
+  statusName.textContent = state.book.pageNames[state.current];
+  statusSize.textContent = state.cache.has(state.current) ? formatBytes(state.cache.get(state.current)!.byteSize) : "—";
+
+  continuousObserver = new IntersectionObserver((entries) => {
+    for (const entry of entries) {
+      if (!entry.isIntersecting) continue;
+      const frame = entry.target as HTMLElement;
+      void loadContinuousPage(frame, Number(frame.dataset.continuousPage), token);
+    }
+  }, { root: viewer, rootMargin: "100% 0px" });
+  frames.forEach((frame) => continuousObserver?.observe(frame));
+  await loadContinuousPage(frames[state.current], state.current, token);
+}
+
+async function loadContinuousPage(frame: HTMLElement | undefined, index: number, token: number): Promise<void> {
+  if (!frame || frame.dataset.loading === "true" || frame.classList.contains("loaded")) return;
+  frame.dataset.loading = "true";
+  try {
+    const page = await pageData(index);
+    if (token !== state.loadingToken || !frame.isConnected) return;
+    const image = createPageImage(page);
+    const finishLoading = () => {
+      frame.style.removeProperty("height");
+      frame.classList.remove("page-pending");
+      frame.classList.add("loaded");
+    };
+    image.addEventListener("load", finishLoading, { once: true });
+    frame.replaceChildren(image);
+    if (image.complete) finishLoading();
+    if (index === state.current) {
+      statusName.textContent = page.name;
+      statusSize.textContent = formatBytes(page.byteSize);
+    }
+  } catch (error) {
+    if (token !== state.loadingToken || !frame.isConnected) return;
+    frame.classList.add("page-error");
+    frame.replaceChildren(document.createTextNode(`第 ${index + 1} 頁讀取失敗`));
+    notify(`無法顯示第 ${index + 1} 頁：${String(error)}`, true);
+  } finally {
+    delete frame.dataset.loading;
+  }
+}
+
+function updateContinuousPosition(): void {
+  continuousScrollFrame = 0;
+  if (!preferences.continuous || !state.book) return;
+  const frames = pagesElement.querySelectorAll<HTMLElement>("[data-continuous-page]");
+  if (!frames.length) return;
+  const center = viewer.scrollTop + viewer.clientHeight / 2 - pagesElement.offsetTop;
+  let low = 0;
+  let high = frames.length - 1;
+  while (low < high) {
+    const middle = Math.floor((low + high) / 2);
+    const frame = frames[middle];
+    if (center > frame.offsetTop + frame.offsetHeight) low = middle + 1;
+    else high = middle;
+  }
+  const index = Number(frames[low].dataset.continuousPage);
+  if (index === state.current) return;
+  state.current = index;
+  const cached = state.cache.get(index);
+  statusName.textContent = cached?.name ?? state.book.pageNames[index];
+  statusSize.textContent = cached ? formatBytes(cached.byteSize) : "—";
+  rememberPosition();
+  updateControls();
+  highlightThumbnail();
+  preloadNearby();
+  unloadDistantContinuousPages(index);
+}
+
+function unloadDistantContinuousPages(current: number): void {
+  pagesElement.querySelectorAll<HTMLElement>(".page-frame.loaded").forEach((frame) => {
+    const index = Number(frame.dataset.continuousPage);
+    if (Math.abs(index - current) <= 8) return;
+    frame.style.height = `${frame.offsetHeight}px`;
+    frame.classList.remove("loaded");
+    frame.classList.add("page-pending");
+    frame.replaceChildren(createPagePlaceholder(index));
+  });
 }
 
 function preloadNearby(): void {
@@ -430,7 +554,16 @@ function navigate(target: number): void {
   const next = clamp(target, 0, state.book.pageNames.length - 1);
   if (next === state.current) return;
   state.current = next;
-  void renderPages();
+  if (preferences.continuous) {
+    const frame = pagesElement.querySelector<HTMLElement>(`[data-continuous-page="${next}"]`);
+    frame?.scrollIntoView({ block: "start" });
+    if (frame) void loadContinuousPage(frame, next, state.loadingToken);
+    rememberPosition();
+    updateControls();
+    preloadNearby();
+  } else {
+    void renderPages();
+  }
   highlightThumbnail();
 }
 
@@ -466,8 +599,9 @@ function updateControls(): void {
   pageSlider.value = String(state.current + 1);
   pageTotal.textContent = `/ ${count}`;
   zoomOutput.textContent = `${Math.round(state.zoom * 100)}%`;
-  statusMode.textContent = `${preferences.spread ? "雙頁" : "單頁"} · ${preferences.rtl ? "R→L" : "L→R"}`;
+  statusMode.textContent = `${preferences.continuous ? "連續" : preferences.spread ? "雙頁" : "單頁"} · ${preferences.rtl ? "R→L" : "L→R"}`;
   document.querySelectorAll<HTMLElement>("[data-action='toggle-spread']").forEach((element) => element.classList.toggle("active", preferences.spread));
+  document.querySelectorAll<HTMLElement>("[data-action='toggle-continuous']").forEach((element) => element.classList.toggle("active", preferences.continuous));
   document.querySelectorAll<HTMLElement>("[data-action='toggle-rtl']").forEach((element) => element.classList.toggle("active", preferences.rtl));
   document.querySelectorAll<HTMLElement>("[data-action='toggle-slideshow']").forEach((element) => element.classList.toggle("active", Boolean(state.slideshow)));
   document.querySelectorAll<HTMLElement>("[data-sidebar]").forEach((element) => element.classList.toggle("active", element.dataset.sidebar === preferences.sidebarMode));
@@ -605,7 +739,18 @@ async function action(name: string): Promise<void> {
       persistPreferences();
       break;
     case "mode-thumbs": preferences.sidebarMode = "thumbs"; preferences.sidebar = true; sidebar.classList.remove("hidden"); persistPreferences(); renderSidebar(); break;
-    case "toggle-spread": preferences.spread = !preferences.spread; persistPreferences(); await renderPages(); break;
+    case "toggle-spread":
+      preferences.spread = !preferences.spread;
+      if (preferences.spread) preferences.continuous = false;
+      persistPreferences();
+      await renderPages();
+      break;
+    case "toggle-continuous":
+      preferences.continuous = !preferences.continuous;
+      if (preferences.continuous) preferences.spread = false;
+      persistPreferences();
+      await renderPages();
+      break;
     case "toggle-rtl": preferences.rtl = !preferences.rtl; persistPreferences(); await renderPages(); break;
     case "fullscreen": await getCurrentWindow().setFullscreen(!(await getCurrentWindow().isFullscreen())); break;
     case "fit-window": setFit("window"); break;
@@ -700,14 +845,14 @@ for (const id of ["brightness", "contrast", "grayscale"] as const) {
 pageInput.addEventListener("change", () => navigate(Number(pageInput.value) - 1));
 pageSlider.addEventListener("input", () => navigate(Number(pageSlider.value) - 1));
 viewer.addEventListener("wheel", (event) => {
-  if (event.ctrlKey) {
-    event.preventDefault();
-    setZoom(event.deltaY < 0 ? 1.1 : 1 / 1.1);
-  } else if (Math.abs(event.deltaY) > 16) {
-    event.preventDefault();
-    if (event.deltaY > 0) nextPage(); else previousPage();
-  }
+  if (!event.ctrlKey) return;
+  event.preventDefault();
+  setZoom(event.deltaY < 0 ? 1.1 : 1 / 1.1);
 }, { passive: false });
+viewer.addEventListener("scroll", () => {
+  if (!preferences.continuous || continuousScrollFrame) return;
+  continuousScrollFrame = window.requestAnimationFrame(updateContinuousPosition);
+});
 
 document.querySelector<HTMLButtonElement>("#save-settings")!.addEventListener("click", () => {
   preferences.rememberPosition = document.querySelector<HTMLInputElement>("#pref-remember")!.checked;
@@ -735,6 +880,7 @@ document.addEventListener("keydown", (event) => {
   else if (event.key === "F11") { event.preventDefault(); void action("fullscreen"); }
   else if (event.key === "Tab") { event.preventDefault(); void action("toggle-sidebar"); }
   else if (key === "s") void action("toggle-spread");
+  else if (key === "c") void action("toggle-continuous");
   else if (key === "d") void action("toggle-rtl");
   else if (key === "f") void action("fit-window");
   else if (key === "w") void action("fit-width");
