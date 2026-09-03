@@ -1,5 +1,6 @@
 import "./styles.css";
-import { distantPageIndices, isPageNavigationKey, loadOnce, transformedPageSize, usesResponsivePageSize, waitForImageLoad } from "./continuous-pages";
+import { appTemplate } from "./app-template";
+import { distantPageIndices, fittedPageLayout, isPageNavigationKey, loadOnce, pageScrollProgress, pageScrollTop, usesResponsivePageSize, waitForImageLoad } from "./continuous-pages";
 import { baseName, clamp, escapeAttribute, escapeHtml, formatBytes, readJson } from "./utils";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
@@ -36,6 +37,12 @@ interface DirectoryListing {
   path: string;
   parent: string | null;
   entries: DirectoryEntry[];
+}
+
+interface ContinuousScrollAnchor {
+  index: number;
+  progress: number;
+  left: number;
 }
 
 interface Preferences {
@@ -86,173 +93,7 @@ const state = {
 };
 
 const app = document.querySelector<HTMLDivElement>("#app")!;
-app.innerHTML = `
-  <div class="app-shell background-${preferences.background}">
-    <header class="chrome">
-      <nav class="menubar" aria-label="主選單">
-        ${menu("檔案(&F)", [
-          ["open-file", "開啟檔案…", "Ctrl+O"],
-          ["open-folder", "開啟資料夾…", "Ctrl+Shift+O"],
-          ["save-page", "另存目前圖片…", "Ctrl+S"],
-          ["separator", "", ""],
-          ["close-book", "關閉漫畫", "Ctrl+W"],
-          ["quit", "結束", "Alt+F4"],
-        ])}
-        ${menu("檢視(&V)", [
-          ["toggle-sidebar", "顯示側欄", "Tab"],
-          ["mode-thumbs", "縮圖模式", "T"],
-          ["toggle-spread", "雙頁跨頁", "S"],
-          ["toggle-continuous", "連續頁面", "C"],
-          ["toggle-rtl", "右向左閱讀", "D"],
-          ["separator", "", ""],
-          ["fullscreen", "全螢幕", "F11"],
-        ])}
-        ${menu("縮放(&S)", [
-          ["fit-window", "適合視窗", "F"],
-          ["fit-width", "適合寬度", "W"],
-          ["fit-height", "適合高度", "H"],
-          ["fit-original", "原始大小", "1"],
-          ["separator", "", ""],
-          ["zoom-in", "放大", "+"],
-          ["zoom-out", "縮小", "−"],
-          ["zoom-reset", "重設縮放", "0"],
-        ])}
-        ${menu("移動(&M)", [
-          ["first", "第一頁", "Home"],
-          ["previous", "上一頁", "←"],
-          ["next", "下一頁", "→ / Space"],
-          ["last", "最後一頁", "End"],
-          ["separator", "", ""],
-          ["toggle-slideshow", "開始／停止投影片", "P"],
-        ])}
-        ${menu("書籤(&B)", [
-          ["bookmark", "加入／更新書籤", "B"],
-          ["resume", "跳至書籤", "Shift+B"],
-          ["clear-bookmark", "刪除本書書籤", ""],
-        ])}
-        ${menu("工具(&T)", [
-          ["rotate-left", "向左旋轉", "["],
-          ["rotate-right", "向右旋轉", "]"],
-          ["reset-filter", "重設影像濾鏡", ""],
-          ["separator", "", ""],
-          ["settings", "偏好設定…", ""],
-        ])}
-        ${menu("說明(&H)", [["about", "關於 MangaMeeya Rust", ""]])}
-      </nav>
-      <div class="toolbar" role="toolbar" aria-label="閱讀工具">
-        ${tool("open-file", "📂", "開啟漫畫")}
-        ${tool("previous", "◀", "上一頁")}
-        ${tool("next", "▶", "下一頁")}
-        <span class="tool-separator"></span>
-        ${tool("toggle-spread", "▣", "單頁／雙頁")}
-        ${tool("toggle-continuous", "▤", "連續頁面")}
-        ${tool("toggle-rtl", "R⇄L", "閱讀方向")}
-        ${tool("fit-window", "⊡", "適合視窗")}
-        ${tool("fit-width", "↔", "適合寬度")}
-        ${tool("fit-original", "1:1", "原始大小")}
-        ${tool("zoom-out", "−", "縮小")}
-        <output id="zoom-output" class="zoom-output">100%</output>
-        ${tool("zoom-in", "+", "放大")}
-        <span class="tool-separator"></span>
-        ${tool("rotate-left", "↶", "向左旋轉")}
-        ${tool("rotate-right", "↷", "向右旋轉")}
-        ${tool("bookmark", "★", "書籤")}
-        ${tool("toggle-slideshow", "▷", "投影片")}
-        ${tool("fullscreen", "⛶", "全螢幕")}
-      </div>
-    </header>
-
-    <main class="workspace">
-      <aside id="sidebar" class="sidebar ${preferences.sidebar ? "" : "hidden"}">
-        <div class="sidebar-tabs" role="tablist">
-          <button data-sidebar="files">檔案</button>
-          <button data-sidebar="thumbs">縮圖</button>
-          <button data-sidebar="recent">歷史</button>
-        </div>
-        <section id="sidebar-content" class="sidebar-content"></section>
-      </aside>
-
-      <section id="viewer" class="viewer" tabindex="0" aria-label="漫畫閱讀區">
-        <div id="empty-state" class="empty-state">
-          <img src="/app-icon.svg" alt="" />
-          <h1>MangaMeeya Rust</h1>
-          <p>將漫畫拖放到這裡，或開啟圖片資料夾與封存檔。</p>
-          <div class="empty-actions">
-            <button class="primary" data-action="open-file">開啟漫畫</button>
-            <button data-action="open-folder">開啟資料夾</button>
-          </div>
-          <small>JPG · PNG · GIF · BMP · WebP · ZIP/CBZ · RAR/CBR</small>
-        </div>
-        <div id="loading" class="loading hidden"><span></span><p>正在讀取圖片…</p></div>
-        <div id="pages" class="pages hidden" aria-live="polite"></div>
-        <button class="page-zone page-zone-left" data-zone="left" aria-label="左側翻頁"></button>
-        <button class="page-zone page-zone-right" data-zone="right" aria-label="右側翻頁"></button>
-        <div id="drop-overlay" class="drop-overlay hidden"><strong>放開以開啟</strong></div>
-      </section>
-
-      <aside class="filter-panel" aria-label="影像調整">
-        <h2>影像調整</h2>
-        ${range("brightness", "亮度", 50, 150, state.brightness)}
-        ${range("contrast", "對比", 50, 150, state.contrast)}
-        ${range("grayscale", "灰階", 0, 100, state.grayscale)}
-        <button data-action="reset-filter">重設</button>
-      </aside>
-    </main>
-
-    <footer class="statusbar">
-      <span id="status-message">就緒</span>
-      <span id="status-name">尚未開啟漫畫</span>
-      <label class="page-jump">頁碼 <input id="page-input" type="number" min="1" value="1" disabled /> <span id="page-total">/ 0</span></label>
-      <input id="page-slider" class="page-slider" type="range" min="1" max="1" value="1" disabled aria-label="頁面位置" />
-      <span id="status-size">—</span>
-      <span id="status-mode">單頁 · R→L</span>
-    </footer>
-  </div>
-
-  <dialog id="settings-dialog">
-    <form method="dialog" class="dialog-card">
-      <header><h2>偏好設定</h2><button value="cancel" aria-label="關閉">×</button></header>
-      <label><input id="pref-remember" type="checkbox" /> 記住每本漫畫的閱讀位置</label>
-      <label>投影片間隔 <input id="pref-interval" type="number" min="1" max="120" /> 秒</label>
-      <label>閱讀區背景
-        <select id="pref-background"><option value="black">黑色</option><option value="gray">深灰</option><option value="paper">紙色</option></select>
-      </label>
-      <p class="hint">滑鼠滾輪會捲動閱讀區；按住 Ctrl 並滾動可縮放。</p>
-      <footer><button value="cancel">取消</button><button id="save-settings" value="default" class="primary">儲存</button></footer>
-    </form>
-  </dialog>
-
-  <dialog id="about-dialog">
-    <form method="dialog" class="dialog-card about-card">
-      <img src="/app-icon.svg" alt="" />
-      <h2>MangaMeeya Rust</h2>
-      <p>以 Rust 與 Tauri 2 重製的 Windows 漫畫閱讀器。</p>
-      <p class="hint">快速、離線、鍵盤優先。原始圖片永不被修改。</p>
-      <button class="primary">確定</button>
-    </form>
-  </dialog>
-
-  <div id="toast" class="toast hidden" role="status"></div>
-`;
-
-function menu(label: string, items: string[][]): string {
-  return `<div class="menu"><button class="menu-label">${label}</button><div class="menu-popup">${items
-    .map(([action, text, shortcut]) =>
-      action === "separator"
-        ? `<hr />`
-        : `<button data-action="${action}"><span>${text}</span><kbd>${shortcut}</kbd></button>`,
-    )
-    .join("")}</div></div>`;
-}
-
-function tool(action: string, icon: string, title: string): string {
-  return `<button class="tool-button" data-action="${action}" title="${title}" aria-label="${title}">${icon}</button>`;
-}
-
-function range(id: string, label: string, min: number, max: number, value: number): string {
-  return `<label class="filter-control"><span>${label}<output id="${id}-value">${value}%</output></span><input id="${id}" type="range" min="${min}" max="${max}" value="${value}" /></label>`;
-}
-
+app.innerHTML = appTemplate(preferences, state);
 const shell = document.querySelector<HTMLDivElement>(".app-shell")!;
 const viewer = document.querySelector<HTMLElement>("#viewer")!;
 const pagesElement = document.querySelector<HTMLDivElement>("#pages")!;
@@ -273,12 +114,15 @@ const toast = document.querySelector<HTMLDivElement>("#toast")!;
 let toastTimer = 0;
 let continuousObserver: IntersectionObserver | null = null;
 let continuousScrollFrame = 0;
+let continuousNavigationTarget: number | null = null;
 let viewerResizeTimer = 0;
 
 new ResizeObserver(() => {
   window.clearTimeout(viewerResizeTimer);
   viewerResizeTimer = window.setTimeout(() => {
-    if (state.book && preferences.continuous && usesResponsivePageSize(preferences.fit)) void renderPages();
+    if (state.book && preferences.continuous && usesResponsivePageSize(preferences.fit)) {
+      void renderPages(captureContinuousScrollAnchor());
+    }
   }, 120);
 }).observe(viewer);
 function notify(message: string, error = false): void {
@@ -362,6 +206,7 @@ async function closeBook(): Promise<void> {
   stopSlideshow();
   continuousObserver?.disconnect();
   continuousObserver = null;
+  continuousNavigationTarget = null;
   viewer.classList.remove("continuous-mode");
   await invoke("close_book");
   state.bookGeneration += 1;
@@ -398,9 +243,9 @@ async function pageData(index: number): Promise<PageData> {
   return data;
 }
 
-function pageTransform(centered = false): string {
+function pageTransform(centered = false, scale = preferences.fit === "custom" ? state.zoom : 1): string {
   const position = centered ? "translate(-50%, -50%) " : "";
-  return `${position}rotate(${state.rotation}deg) scale(${preferences.fit === "custom" ? state.zoom : 1})`;
+  return `${position}rotate(${state.rotation}deg) scale(${scale})`;
 }
 
 function createPageImage(page: PageData): HTMLImageElement {
@@ -414,18 +259,23 @@ function createPageImage(page: PageData): HTMLImageElement {
 }
 
 function layoutContinuousPage(frame: HTMLElement, image: HTMLImageElement): void {
-  const width = image.offsetWidth;
-  const height = image.offsetHeight;
-  const scale = preferences.fit === "custom" ? state.zoom : 1;
-  const layout = transformedPageSize(width, height, state.rotation, scale);
+  const layout = fittedPageLayout(
+    image.naturalWidth,
+    image.naturalHeight,
+    state.rotation,
+    preferences.fit,
+    state.zoom,
+    frame.clientWidth,
+    frame.clientHeight,
+  );
   const content = document.createElement("div");
   content.className = "continuous-page-content";
   content.style.width = `${layout.width}px`;
   content.style.height = `${layout.height}px`;
   image.classList.add("continuous-page-image");
-  image.style.width = `${width}px`;
-  image.style.height = `${height}px`;
-  image.style.transform = pageTransform(true);
+  image.style.width = `${image.naturalWidth}px`;
+  image.style.height = `${image.naturalHeight}px`;
+  image.style.transform = pageTransform(true, layout.scale);
   content.append(image);
   frame.replaceChildren(content);
   frame.style.removeProperty("height");
@@ -440,7 +290,7 @@ function createPagePlaceholder(index: number): HTMLElement {
   return placeholder;
 }
 
-async function renderPages(): Promise<void> {
+async function renderPages(anchor?: ContinuousScrollAnchor): Promise<void> {
   if (!state.book) return;
   const token = ++state.loadingToken;
   continuousObserver?.disconnect();
@@ -449,7 +299,7 @@ async function renderPages(): Promise<void> {
   pagesElement.classList.add("hidden");
   try {
     let ready = true;
-    if (preferences.continuous) ready = await renderContinuousPages(token);
+    if (preferences.continuous) ready = await renderContinuousPages(token, anchor);
     else await renderPagedPages(token);
     if (token !== state.loadingToken) return;
     if (ready) statusMessage.textContent = "就緒";
@@ -476,13 +326,14 @@ async function renderPagedPages(token: number): Promise<void> {
     }),
   );
   pagesElement.className = `pages fit-${preferences.fit} ${preferences.spread ? "spread" : "single"} ${preferences.rtl ? "rtl" : "ltr"}`;
+  continuousNavigationTarget = null;
   viewer.classList.remove("continuous-mode");
   viewer.scrollTo({ top: 0, left: 0 });
   statusSize.textContent = formatBytes(data.reduce((sum, page) => sum + page.byteSize, 0));
   statusName.textContent = data.map((page) => page.name).join("  ·  ");
 }
 
-async function renderContinuousPages(token: number): Promise<boolean> {
+async function renderContinuousPages(token: number, anchor?: ContinuousScrollAnchor): Promise<boolean> {
   if (!state.book) return false;
   const frames = state.book.pageNames.map((name, index) => {
     const frame = document.createElement("figure");
@@ -495,7 +346,8 @@ async function renderContinuousPages(token: number): Promise<boolean> {
   pagesElement.replaceChildren(...frames);
   pagesElement.className = `pages continuous fit-${preferences.fit}`;
   viewer.classList.add("continuous-mode");
-  viewer.scrollTo({ top: frames[state.current]?.offsetTop ?? 0, left: 0 });
+  continuousNavigationTarget = state.current;
+  viewer.scrollTo({ top: frames[state.current] ? continuousFrameTop(frames[state.current]) : 0, left: 0 });
   updateContinuousStatus(state.current);
 
   continuousObserver = new IntersectionObserver((entries) => {
@@ -506,7 +358,13 @@ async function renderContinuousPages(token: number): Promise<boolean> {
     }
   }, { root: viewer, rootMargin: "100% 0px" });
   frames.forEach((frame) => continuousObserver?.observe(frame));
-  return loadContinuousPage(frames[state.current], state.current, token);
+  const ready = await loadContinuousPage(frames[state.current], state.current, token);
+  if (ready && token === state.loadingToken && anchor?.index === state.current) {
+    const frame = frames[state.current];
+    continuousNavigationTarget = state.current;
+    viewer.scrollTo({ top: pageScrollTop(continuousFrameTop(frame), frame.offsetHeight, anchor.progress), left: anchor.left });
+  }
+  return ready;
 }
 
 async function loadContinuousPage(frame: HTMLElement | undefined, index: number, token: number): Promise<boolean> {
@@ -556,9 +414,28 @@ function updateContinuousStatus(index: number, message?: string): void {
   statusMessage.textContent = message ?? (cached ? "就緒" : "正在讀取…");
 }
 
+function continuousFrameTop(frame: HTMLElement): number {
+  return pagesElement.offsetTop + frame.offsetTop;
+}
+
+function captureContinuousScrollAnchor(): ContinuousScrollAnchor | undefined {
+  if (!preferences.continuous || !state.book) return undefined;
+  const frame = pagesElement.querySelector<HTMLElement>(`[data-continuous-page="${state.current}"]`);
+  if (!frame) return undefined;
+  return {
+    index: state.current,
+    progress: pageScrollProgress(viewer.scrollTop, continuousFrameTop(frame), frame.offsetHeight),
+    left: viewer.scrollLeft,
+  };
+}
+
 function updateContinuousPosition(): void {
   continuousScrollFrame = 0;
   if (!preferences.continuous || !state.book) return;
+  if (continuousNavigationTarget !== null) {
+    unloadDistantContinuousPages(continuousNavigationTarget);
+    return;
+  }
   const frames = pagesElement.querySelectorAll<HTMLElement>("[data-continuous-page]");
   if (!frames.length) return;
   const center = viewer.scrollTop + viewer.clientHeight / 2 - pagesElement.offsetTop;
@@ -620,6 +497,7 @@ function navigate(target: number): void {
     const frame = pagesElement.querySelector<HTMLElement>(`[data-continuous-page="${next}"]`);
     unloadDistantContinuousPages(next);
     updateContinuousStatus(next);
+    continuousNavigationTarget = next;
     frame?.scrollIntoView({ block: "start" });
     if (frame) void loadContinuousPage(frame, next, state.loadingToken);
     rememberPosition();
@@ -909,7 +787,10 @@ for (const id of ["brightness", "contrast", "grayscale"] as const) {
 pageInput.addEventListener("change", () => navigate(Number(pageInput.value) - 1));
 pageSlider.addEventListener("input", () => navigate(Number(pageSlider.value) - 1));
 viewer.addEventListener("wheel", (event) => {
-  if (!event.ctrlKey) return;
+  if (!event.ctrlKey) {
+    continuousNavigationTarget = null;
+    return;
+  }
   event.preventDefault();
   setZoom(event.deltaY < 0 ? 1.1 : 1 / 1.1);
 }, { passive: false });
@@ -917,6 +798,7 @@ viewer.addEventListener("scroll", () => {
   if (!preferences.continuous || continuousScrollFrame) return;
   continuousScrollFrame = window.requestAnimationFrame(updateContinuousPosition);
 });
+viewer.addEventListener("pointerdown", () => { continuousNavigationTarget = null; });
 
 document.querySelector<HTMLButtonElement>("#save-settings")!.addEventListener("click", () => {
   preferences.rememberPosition = document.querySelector<HTMLInputElement>("#pref-remember")!.checked;

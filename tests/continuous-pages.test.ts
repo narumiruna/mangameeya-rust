@@ -1,11 +1,25 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { distantPageIndices, isPageNavigationKey, loadOnce, transformedPageSize, usesResponsivePageSize, waitForImageLoad } from "../src/continuous-pages.ts";
+import { distantPageIndices, fittedPageLayout, isPageNavigationKey, loadOnce, pageScrollProgress, pageScrollTop, transformedPageSize, usesResponsivePageSize, waitForImageLoad } from "../src/continuous-pages.ts";
 
 test("transformedPageSize reserves scaled and rotated layout space", () => {
   assert.deepEqual(transformedPageSize(800, 1200, 0, 1.5), { width: 1200, height: 1800 });
   assert.deepEqual(transformedPageSize(800, 1200, 90, 1), { width: 1200, height: 800 });
   assert.deepEqual(transformedPageSize(800, 1200, -270, 2), { width: 2400, height: 1600 });
+});
+
+test("fittedPageLayout fits quarter-turned pages using rotated dimensions", () => {
+  assert.deepEqual(fittedPageLayout(800, 1200, 90, "width", 1, 600, 900), { width: 600, height: 400, scale: 0.5 });
+  assert.deepEqual(fittedPageLayout(800, 1200, 90, "height", 1, 600, 600), { width: 900, height: 600, scale: 0.75 });
+  assert.deepEqual(fittedPageLayout(800, 1200, 90, "window", 1, 600, 600), { width: 600, height: 400, scale: 0.5 });
+});
+
+test("page scroll progress restores an intra-page resize offset", () => {
+  const progress = pageScrollProgress(350, 100, 1000);
+  assert.equal(progress, 0.25);
+  assert.equal(pageScrollTop(200, 800, progress), 400);
+  assert.equal(pageScrollProgress(50, 100, 1000), 0);
+  assert.equal(pageScrollTop(200, 800, 2), 1000);
 });
 
 test("responsive fit modes are relaid out when the viewer changes size", () => {
