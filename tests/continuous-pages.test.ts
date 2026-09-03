@@ -1,11 +1,47 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { distantPageIndices, loadOnce, transformedPageSize } from "../src/continuous-pages.ts";
+import { distantPageIndices, isPageNavigationKey, loadOnce, transformedPageSize, usesResponsivePageSize, waitForImageLoad } from "../src/continuous-pages.ts";
 
 test("transformedPageSize reserves scaled and rotated layout space", () => {
   assert.deepEqual(transformedPageSize(800, 1200, 0, 1.5), { width: 1200, height: 1800 });
   assert.deepEqual(transformedPageSize(800, 1200, 90, 1), { width: 1200, height: 800 });
   assert.deepEqual(transformedPageSize(800, 1200, -270, 2), { width: 2400, height: 1600 });
+});
+
+test("responsive fit modes are relaid out when the viewer changes size", () => {
+  assert.equal(usesResponsivePageSize("window"), true);
+  assert.equal(usesResponsivePageSize("width"), true);
+  assert.equal(usesResponsivePageSize("height"), true);
+  assert.equal(usesResponsivePageSize("original"), false);
+  assert.equal(usesResponsivePageSize("custom"), false);
+});
+
+test("page navigation keys suppress native viewer scrolling", () => {
+  for (const key of ["ArrowRight", "ArrowLeft", "PageDown", "PageUp", " ", "Home", "End"]) {
+    assert.equal(isPageNavigationKey(key), true);
+  }
+  assert.equal(isPageNavigationKey("c"), false);
+});
+
+test("waitForImageLoad distinguishes decoded and failed images", async () => {
+  class MockImage extends EventTarget {
+    complete = false;
+    naturalWidth = 0;
+  }
+  const loadedImage = new MockImage();
+  const loaded = waitForImageLoad(loadedImage as unknown as HTMLImageElement);
+  loadedImage.naturalWidth = 800;
+  loadedImage.dispatchEvent(new Event("load"));
+  assert.equal(await loaded, true);
+
+  const failedImage = new MockImage();
+  const failed = waitForImageLoad(failedImage as unknown as HTMLImageElement);
+  failedImage.dispatchEvent(new Event("error"));
+  assert.equal(await failed, false);
+
+  const corruptCompletedImage = new MockImage();
+  corruptCompletedImage.complete = true;
+  assert.equal(await waitForImageLoad(corruptCompletedImage as unknown as HTMLImageElement), false);
 });
 
 test("distantPageIndices keeps only pages outside the retention window", () => {

@@ -1,5 +1,5 @@
 import "./styles.css";
-import { distantPageIndices, loadOnce, transformedPageSize } from "./continuous-pages";
+import { distantPageIndices, isPageNavigationKey, loadOnce, transformedPageSize, usesResponsivePageSize, waitForImageLoad } from "./continuous-pages";
 import { baseName, clamp, escapeAttribute, escapeHtml, formatBytes, readJson } from "./utils";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
@@ -273,6 +273,14 @@ const toast = document.querySelector<HTMLDivElement>("#toast")!;
 let toastTimer = 0;
 let continuousObserver: IntersectionObserver | null = null;
 let continuousScrollFrame = 0;
+let viewerResizeTimer = 0;
+
+new ResizeObserver(() => {
+  window.clearTimeout(viewerResizeTimer);
+  viewerResizeTimer = window.setTimeout(() => {
+    if (state.book && preferences.continuous && usesResponsivePageSize(preferences.fit)) void renderPages();
+  }, 120);
+}).observe(viewer);
 function notify(message: string, error = false): void {
   window.clearTimeout(toastTimer);
   toast.textContent = message;
@@ -487,7 +495,7 @@ async function renderContinuousPages(token: number): Promise<boolean> {
   pagesElement.replaceChildren(...frames);
   pagesElement.className = `pages continuous fit-${preferences.fit}`;
   viewer.classList.add("continuous-mode");
-  viewer.scrollTop = frames[state.current]?.offsetTop ?? 0;
+  viewer.scrollTo({ top: frames[state.current]?.offsetTop ?? 0, left: 0 });
   updateContinuousStatus(state.current);
 
   continuousObserver = new IntersectionObserver((entries) => {
@@ -509,14 +517,15 @@ async function loadContinuousPage(frame: HTMLElement | undefined, index: number,
     const page = await pageData(index);
     if (token !== state.loadingToken || !frame.isConnected) return false;
     const image = createPageImage(page);
-    const finishLoading = () => {
-      if (token !== state.loadingToken || !frame.isConnected || frame.classList.contains("loaded")) return;
-      layoutContinuousPage(frame, image);
-      unloadDistantContinuousPages(state.current);
-    };
-    image.addEventListener("load", finishLoading, { once: true });
     frame.replaceChildren(image);
-    if (image.complete) finishLoading();
+    const loaded = await waitForImageLoad(image);
+    if (token !== state.loadingToken || !frame.isConnected) return false;
+    if (!loaded) {
+      showContinuousPageError(frame, index, "圖片解碼失敗");
+      return false;
+    }
+    layoutContinuousPage(frame, image);
+    unloadDistantContinuousPages(state.current);
     if (index === state.current) {
       statusName.textContent = page.name;
       statusSize.textContent = formatBytes(page.byteSize);
@@ -525,16 +534,18 @@ async function loadContinuousPage(frame: HTMLElement | undefined, index: number,
     return true;
   } catch (error) {
     if (token !== state.loadingToken || !frame.isConnected) return false;
-    frame.classList.add("page-error");
-    frame.replaceChildren(document.createTextNode(`第 ${index + 1} 頁讀取失敗`));
-    if (index === state.current) {
-      updateContinuousStatus(index, "讀取失敗");
-    }
-    notify(`無法顯示第 ${index + 1} 頁：${String(error)}`, true);
+    showContinuousPageError(frame, index, String(error));
     return false;
   } finally {
     delete frame.dataset.loading;
   }
+}
+
+function showContinuousPageError(frame: HTMLElement, index: number, error: string): void {
+  frame.classList.add("page-error");
+  frame.replaceChildren(document.createTextNode(`第 ${index + 1} 頁讀取失敗`));
+  if (index === state.current) updateContinuousStatus(index, "讀取失敗");
+  notify(`無法顯示第 ${index + 1} 頁：${error}`, true);
 }
 
 function updateContinuousStatus(index: number, message?: string): void {
@@ -924,9 +935,10 @@ document.addEventListener("keydown", (event) => {
   if (event.ctrlKey && key === "o") { event.preventDefault(); void chooseFile(); return; }
   if (event.ctrlKey && key === "s") { event.preventDefault(); void saveCurrentPage(); return; }
   if (event.ctrlKey && key === "w") { event.preventDefault(); void closeBook(); return; }
+  if (isPageNavigationKey(event.key)) event.preventDefault();
   if (event.key === "ArrowRight") preferences.rtl ? previousPage() : nextPage();
   else if (event.key === "ArrowLeft") preferences.rtl ? nextPage() : previousPage();
-  else if (event.key === "PageDown" || event.key === " ") { event.preventDefault(); nextPage(); }
+  else if (event.key === "PageDown" || event.key === " ") nextPage();
   else if (event.key === "PageUp") previousPage();
   else if (event.key === "Home") navigate(0);
   else if (event.key === "End" && state.book) navigate(state.book.pageNames.length - 1);

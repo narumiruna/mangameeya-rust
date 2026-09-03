@@ -11,6 +11,29 @@ export function transformedPageSize(width: number, height: number, rotation: num
   };
 }
 
+export function usesResponsivePageSize(fit: string): boolean {
+  return fit === "window" || fit === "width" || fit === "height";
+}
+
+export function isPageNavigationKey(key: string): boolean {
+  return ["ArrowRight", "ArrowLeft", "PageDown", "PageUp", " ", "Home", "End"].includes(key);
+}
+
+export function waitForImageLoad(image: HTMLImageElement): Promise<boolean> {
+  if (image.complete) return Promise.resolve(image.naturalWidth > 0);
+  return new Promise((resolve) => {
+    const finish = (loaded: boolean) => {
+      image.removeEventListener("load", loadedImage);
+      image.removeEventListener("error", failedImage);
+      resolve(loaded);
+    };
+    const loadedImage = () => finish(image.naturalWidth > 0);
+    const failedImage = () => finish(false);
+    image.addEventListener("load", loadedImage, { once: true });
+    image.addEventListener("error", failedImage, { once: true });
+  });
+}
+
 export function distantPageIndices(indices: Iterable<number>, current: number, retention: number): number[] {
   return [...indices].filter((index) => Math.abs(index - current) > retention);
 }
