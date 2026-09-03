@@ -257,6 +257,7 @@ button.primary { border-color: #d28535; background: linear-gradient(#db8e34, #a8
 .pages.fit-custom .page-frame { padding: max(0px, calc((100vh - 180px) * .05)); }
 .pages.continuous {
   flex-direction: column;
+  align-items: safe center;
   justify-content: flex-start;
   width: 100%;
   height: auto;
@@ -266,13 +267,16 @@ button.primary { border-color: #d28535; background: linear-gradient(#db8e34, #a8
 }
 .pages.continuous .page-frame {
   flex: 0 0 auto;
+  justify-content: safe center;
   width: 100%;
   min-height: min(80vh, 900px);
   box-shadow: 0 3px 16px #000c, 0 0 0 1px #ffffff0d;
 }
-.pages.continuous .page-frame.loaded { min-height: 0; }
+.pages.continuous .page-frame.loaded { height: auto; min-height: 0; }
 .pages.continuous.fit-original, .pages.continuous.fit-custom { width: 100%; height: auto; }
-.pages.continuous.fit-original .page-frame, .pages.continuous.fit-custom .page-frame { width: max-content; max-width: none; }
+.pages.continuous.fit-original .page-frame, .pages.continuous.fit-custom .page-frame { width: max-content; max-width: none; align-self: safe center; }
+.continuous-page-content { position: relative; flex: 0 0 auto; }
+.continuous-page-image { position: absolute; top: 50%; left: 50%; max-width: none !important; max-height: none !important; }
 .page-placeholder { color: #777; font: 32px Georgia, serif; }
 .page-error { color: #ef8c83; font-size: 13px; }
 .viewer.continuous-mode .page-zone { display: none; }

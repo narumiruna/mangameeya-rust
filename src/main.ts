@@ -1,4 +1,6 @@
 import "./styles.css";
+import { distantPageIndices, loadOnce, transformedPageSize } from "./continuous-pages";
+import { baseName, clamp, escapeAttribute, escapeHtml, formatBytes, readJson } from "./utils";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
@@ -77,7 +79,9 @@ const state = {
   grayscale: 0,
   slideshow: 0 as ReturnType<typeof setInterval> | 0,
   loadingToken: 0,
+  bookGeneration: 0,
   cache: new Map<number, PageData>(),
+  pageRequests: new Map<number, Promise<PageData>>(),
   listing: null as DirectoryListing | null,
 };
 
@@ -319,8 +323,10 @@ async function openPath(path: string): Promise<void> {
   pagesElement.classList.add("hidden");
   try {
     const book = await invoke<BookInfo>("open_book", { path });
+    state.bookGeneration += 1;
     state.book = book;
     state.cache.clear();
+    state.pageRequests.clear();
     const saved = positions()[book.path];
     state.current = preferences.rememberPosition && saved !== undefined
       ? clamp(saved, 0, book.pageNames.length - 1)
@@ -350,8 +356,10 @@ async function closeBook(): Promise<void> {
   continuousObserver = null;
   viewer.classList.remove("continuous-mode");
   await invoke("close_book");
+  state.bookGeneration += 1;
   state.book = null;
   state.cache.clear();
+  state.pageRequests.clear();
   pagesElement.replaceChildren();
   pagesElement.classList.add("hidden");
   emptyState.classList.remove("hidden");
@@ -370,7 +378,9 @@ function visibleIndices(): number[] {
 async function pageData(index: number): Promise<PageData> {
   const cached = state.cache.get(index);
   if (cached) return cached;
-  const data = await invoke<PageData>("get_page", { index });
+  const generation = state.bookGeneration;
+  const data = await loadOnce(state.pageRequests, index, () => invoke<PageData>("get_page", { index }));
+  if (generation !== state.bookGeneration) return data;
   state.cache.set(index, data);
   if (state.cache.size > 24) {
     const keep = new Set([...visibleIndices(), index]);
@@ -380,14 +390,39 @@ async function pageData(index: number): Promise<PageData> {
   return data;
 }
 
+function pageTransform(centered = false): string {
+  const position = centered ? "translate(-50%, -50%) " : "";
+  return `${position}rotate(${state.rotation}deg) scale(${preferences.fit === "custom" ? state.zoom : 1})`;
+}
+
 function createPageImage(page: PageData): HTMLImageElement {
   const image = document.createElement("img");
   image.src = page.dataUrl;
   image.alt = `第 ${page.index + 1} 頁：${page.name}`;
   image.draggable = false;
-  image.style.transform = `rotate(${state.rotation}deg) scale(${preferences.fit === "custom" ? state.zoom : 1})`;
+  image.style.transform = pageTransform();
   image.style.filter = `brightness(${state.brightness}%) contrast(${state.contrast}%) grayscale(${state.grayscale}%)`;
   return image;
+}
+
+function layoutContinuousPage(frame: HTMLElement, image: HTMLImageElement): void {
+  const width = image.offsetWidth;
+  const height = image.offsetHeight;
+  const scale = preferences.fit === "custom" ? state.zoom : 1;
+  const layout = transformedPageSize(width, height, state.rotation, scale);
+  const content = document.createElement("div");
+  content.className = "continuous-page-content";
+  content.style.width = `${layout.width}px`;
+  content.style.height = `${layout.height}px`;
+  image.classList.add("continuous-page-image");
+  image.style.width = `${width}px`;
+  image.style.height = `${height}px`;
+  image.style.transform = pageTransform(true);
+  content.append(image);
+  frame.replaceChildren(content);
+  frame.style.removeProperty("height");
+  frame.classList.remove("page-pending", "page-error");
+  frame.classList.add("loaded");
 }
 
 function createPagePlaceholder(index: number): HTMLElement {
@@ -405,10 +440,11 @@ async function renderPages(): Promise<void> {
   loading.classList.remove("hidden");
   pagesElement.classList.add("hidden");
   try {
-    if (preferences.continuous) await renderContinuousPages(token);
+    let ready = true;
+    if (preferences.continuous) ready = await renderContinuousPages(token);
     else await renderPagedPages(token);
     if (token !== state.loadingToken) return;
-    statusMessage.textContent = "就緒";
+    if (ready) statusMessage.textContent = "就緒";
     rememberPosition();
     updateControls();
     preloadNearby();
@@ -438,8 +474,8 @@ async function renderPagedPages(token: number): Promise<void> {
   statusName.textContent = data.map((page) => page.name).join("  ·  ");
 }
 
-async function renderContinuousPages(token: number): Promise<void> {
-  if (!state.book) return;
+async function renderContinuousPages(token: number): Promise<boolean> {
+  if (!state.book) return false;
   const frames = state.book.pageNames.map((name, index) => {
     const frame = document.createElement("figure");
     frame.className = "page-frame page-pending";
@@ -452,8 +488,7 @@ async function renderContinuousPages(token: number): Promise<void> {
   pagesElement.className = `pages continuous fit-${preferences.fit}`;
   viewer.classList.add("continuous-mode");
   viewer.scrollTop = frames[state.current]?.offsetTop ?? 0;
-  statusName.textContent = state.book.pageNames[state.current];
-  statusSize.textContent = state.cache.has(state.current) ? formatBytes(state.cache.get(state.current)!.byteSize) : "—";
+  updateContinuousStatus(state.current);
 
   continuousObserver = new IntersectionObserver((entries) => {
     for (const entry of entries) {
@@ -463,20 +498,21 @@ async function renderContinuousPages(token: number): Promise<void> {
     }
   }, { root: viewer, rootMargin: "100% 0px" });
   frames.forEach((frame) => continuousObserver?.observe(frame));
-  await loadContinuousPage(frames[state.current], state.current, token);
+  return loadContinuousPage(frames[state.current], state.current, token);
 }
 
-async function loadContinuousPage(frame: HTMLElement | undefined, index: number, token: number): Promise<void> {
-  if (!frame || frame.dataset.loading === "true" || frame.classList.contains("loaded")) return;
+async function loadContinuousPage(frame: HTMLElement | undefined, index: number, token: number): Promise<boolean> {
+  if (!frame) return false;
+  if (frame.dataset.loading === "true" || frame.classList.contains("loaded")) return true;
   frame.dataset.loading = "true";
   try {
     const page = await pageData(index);
-    if (token !== state.loadingToken || !frame.isConnected) return;
+    if (token !== state.loadingToken || !frame.isConnected) return false;
     const image = createPageImage(page);
     const finishLoading = () => {
-      frame.style.removeProperty("height");
-      frame.classList.remove("page-pending");
-      frame.classList.add("loaded");
+      if (token !== state.loadingToken || !frame.isConnected || frame.classList.contains("loaded")) return;
+      layoutContinuousPage(frame, image);
+      unloadDistantContinuousPages(state.current);
     };
     image.addEventListener("load", finishLoading, { once: true });
     frame.replaceChildren(image);
@@ -484,15 +520,29 @@ async function loadContinuousPage(frame: HTMLElement | undefined, index: number,
     if (index === state.current) {
       statusName.textContent = page.name;
       statusSize.textContent = formatBytes(page.byteSize);
+      statusMessage.textContent = "就緒";
     }
+    return true;
   } catch (error) {
-    if (token !== state.loadingToken || !frame.isConnected) return;
+    if (token !== state.loadingToken || !frame.isConnected) return false;
     frame.classList.add("page-error");
     frame.replaceChildren(document.createTextNode(`第 ${index + 1} 頁讀取失敗`));
+    if (index === state.current) {
+      updateContinuousStatus(index, "讀取失敗");
+    }
     notify(`無法顯示第 ${index + 1} 頁：${String(error)}`, true);
+    return false;
   } finally {
     delete frame.dataset.loading;
   }
+}
+
+function updateContinuousStatus(index: number, message?: string): void {
+  if (!state.book) return;
+  const cached = state.cache.get(index);
+  statusName.textContent = cached?.name ?? state.book.pageNames[index];
+  statusSize.textContent = cached ? formatBytes(cached.byteSize) : "—";
+  statusMessage.textContent = message ?? (cached ? "就緒" : "正在讀取…");
 }
 
 function updateContinuousPosition(): void {
@@ -510,27 +560,28 @@ function updateContinuousPosition(): void {
     else high = middle;
   }
   const index = Number(frames[low].dataset.continuousPage);
+  unloadDistantContinuousPages(index);
   if (index === state.current) return;
   state.current = index;
-  const cached = state.cache.get(index);
-  statusName.textContent = cached?.name ?? state.book.pageNames[index];
-  statusSize.textContent = cached ? formatBytes(cached.byteSize) : "—";
+  updateContinuousStatus(index);
   rememberPosition();
   updateControls();
   highlightThumbnail();
   preloadNearby();
-  unloadDistantContinuousPages(index);
 }
 
 function unloadDistantContinuousPages(current: number): void {
-  pagesElement.querySelectorAll<HTMLElement>(".page-frame.loaded").forEach((frame) => {
-    const index = Number(frame.dataset.continuousPage);
-    if (Math.abs(index - current) <= 8) return;
+  const frames = new Map(
+    [...pagesElement.querySelectorAll<HTMLElement>(".page-frame.loaded")]
+      .map((frame) => [Number(frame.dataset.continuousPage), frame] as const),
+  );
+  for (const index of distantPageIndices(frames.keys(), current, 8)) {
+    const frame = frames.get(index)!;
     frame.style.height = `${frame.offsetHeight}px`;
     frame.classList.remove("loaded");
     frame.classList.add("page-pending");
     frame.replaceChildren(createPagePlaceholder(index));
-  });
+  }
 }
 
 function preloadNearby(): void {
@@ -556,6 +607,8 @@ function navigate(target: number): void {
   state.current = next;
   if (preferences.continuous) {
     const frame = pagesElement.querySelector<HTMLElement>(`[data-continuous-page="${next}"]`);
+    unloadDistantContinuousPages(next);
+    updateContinuousStatus(next);
     frame?.scrollIntoView({ block: "start" });
     if (frame) void loadContinuousPage(frame, next, state.loadingToken);
     rememberPosition();
@@ -911,40 +964,6 @@ void listen<string[]>("open-args", (event) => {
   const path = event.payload.slice(1).find((candidate) => candidate && !candidate.startsWith("-"));
   if (path) void openPath(path);
 });
-
-function readJson<T>(key: string, fallback: T): T {
-  try {
-    const value = localStorage.getItem(key);
-    return value === null ? fallback : JSON.parse(value) as T;
-  } catch {
-    localStorage.removeItem(key);
-    return fallback;
-  }
-}
-
-function clamp(value: number, min: number, max: number): number {
-  return Math.min(max, Math.max(min, value));
-}
-
-function baseName(path: string): string {
-  return path.replace(/\\/g, "/").split("/").pop() || path;
-}
-
-function formatBytes(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 ** 2) return `${(bytes / 1024).toFixed(1)} KiB`;
-  return `${(bytes / 1024 ** 2).toFixed(1)} MiB`;
-}
-
-function escapeHtml(value: string): string {
-  const element = document.createElement("span");
-  element.textContent = value;
-  return element.innerHTML;
-}
-
-function escapeAttribute(value: string): string {
-  return escapeHtml(value).replaceAll('"', "&quot;");
-}
 
 window.addEventListener("unhandledrejection", (event) => {
   notify(String(event.reason), true);

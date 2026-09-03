@@ -37,6 +37,9 @@ jobs:
       - name: Check formatting
         run: cargo fmt --manifest-path src-tauri/Cargo.toml -- --check
 
+      - name: Test frontend
+        run: npm test
+
       - name: Build frontend
         run: npm run build
 
