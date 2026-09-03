@@ -1,4 +1,7 @@
 import "./styles.css";
+import { appTemplate } from "./app-template";
+import { continuousPageLoadState, distantPageIndices, fittedPageLayout, isNativeScrollKey, isPageNavigationKey, loadOnce, pageScrollProgress, pageScrollTop, usesResponsivePageSize, waitForImageLoad } from "./continuous-pages";
+import { baseName, clamp, escapeAttribute, escapeHtml, formatBytes, readJson } from "./utils";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
@@ -36,8 +39,15 @@ interface DirectoryListing {
   entries: DirectoryEntry[];
 }
 
+interface ContinuousScrollAnchor {
+  index: number;
+  progress: number;
+  left: number;
+}
+
 interface Preferences {
   spread: boolean;
+  continuous: boolean;
   rtl: boolean;
   fit: FitMode;
   sidebar: boolean;
@@ -50,6 +60,7 @@ interface Preferences {
 
 const defaultPreferences: Preferences = {
   spread: false,
+  continuous: false,
   rtl: true,
   fit: "window",
   sidebar: true,
@@ -75,176 +86,15 @@ const state = {
   grayscale: 0,
   slideshow: 0 as ReturnType<typeof setInterval> | 0,
   loadingToken: 0,
+  bookGeneration: 0,
   cache: new Map<number, PageData>(),
+  pageErrors: new Set<number>(),
+  pageRequests: new Map<number, Promise<PageData>>(),
   listing: null as DirectoryListing | null,
 };
 
 const app = document.querySelector<HTMLDivElement>("#app")!;
-app.innerHTML = `
-  <div class="app-shell background-${preferences.background}">
-    <header class="chrome">
-      <nav class="menubar" aria-label="主選單">
-        ${menu("檔案(&F)", [
-          ["open-file", "開啟檔案…", "Ctrl+O"],
-          ["open-folder", "開啟資料夾…", "Ctrl+Shift+O"],
-          ["save-page", "另存目前圖片…", "Ctrl+S"],
-          ["separator", "", ""],
-          ["close-book", "關閉漫畫", "Ctrl+W"],
-          ["quit", "結束", "Alt+F4"],
-        ])}
-        ${menu("檢視(&V)", [
-          ["toggle-sidebar", "顯示側欄", "Tab"],
-          ["mode-thumbs", "縮圖模式", "T"],
-          ["toggle-spread", "雙頁跨頁", "S"],
-          ["toggle-rtl", "右向左閱讀", "D"],
-          ["separator", "", ""],
-          ["fullscreen", "全螢幕", "F11"],
-        ])}
-        ${menu("縮放(&S)", [
-          ["fit-window", "適合視窗", "F"],
-          ["fit-width", "適合寬度", "W"],
-          ["fit-height", "適合高度", "H"],
-          ["fit-original", "原始大小", "1"],
-          ["separator", "", ""],
-          ["zoom-in", "放大", "+"],
-          ["zoom-out", "縮小", "−"],
-          ["zoom-reset", "重設縮放", "0"],
-        ])}
-        ${menu("移動(&M)", [
-          ["first", "第一頁", "Home"],
-          ["previous", "上一頁", "←"],
-          ["next", "下一頁", "→ / Space"],
-          ["last", "最後一頁", "End"],
-          ["separator", "", ""],
-          ["toggle-slideshow", "開始／停止投影片", "P"],
-        ])}
-        ${menu("書籤(&B)", [
-          ["bookmark", "加入／更新書籤", "B"],
-          ["resume", "跳至書籤", "Shift+B"],
-          ["clear-bookmark", "刪除本書書籤", ""],
-        ])}
-        ${menu("工具(&T)", [
-          ["rotate-left", "向左旋轉", "["],
-          ["rotate-right", "向右旋轉", "]"],
-          ["reset-filter", "重設影像濾鏡", ""],
-          ["separator", "", ""],
-          ["settings", "偏好設定…", ""],
-        ])}
-        ${menu("說明(&H)", [["about", "關於 MangaMeeya Rust", ""]])}
-      </nav>
-      <div class="toolbar" role="toolbar" aria-label="閱讀工具">
-        ${tool("open-file", "📂", "開啟漫畫")}
-        ${tool("previous", "◀", "上一頁")}
-        ${tool("next", "▶", "下一頁")}
-        <span class="tool-separator"></span>
-        ${tool("toggle-spread", "▣", "單頁／雙頁")}
-        ${tool("toggle-rtl", "R⇄L", "閱讀方向")}
-        ${tool("fit-window", "⊡", "適合視窗")}
-        ${tool("fit-width", "↔", "適合寬度")}
-        ${tool("fit-original", "1:1", "原始大小")}
-        ${tool("zoom-out", "−", "縮小")}
-        <output id="zoom-output" class="zoom-output">100%</output>
-        ${tool("zoom-in", "+", "放大")}
-        <span class="tool-separator"></span>
-        ${tool("rotate-left", "↶", "向左旋轉")}
-        ${tool("rotate-right", "↷", "向右旋轉")}
-        ${tool("bookmark", "★", "書籤")}
-        ${tool("toggle-slideshow", "▷", "投影片")}
-        ${tool("fullscreen", "⛶", "全螢幕")}
-      </div>
-    </header>
-
-    <main class="workspace">
-      <aside id="sidebar" class="sidebar ${preferences.sidebar ? "" : "hidden"}">
-        <div class="sidebar-tabs" role="tablist">
-          <button data-sidebar="files">檔案</button>
-          <button data-sidebar="thumbs">縮圖</button>
-          <button data-sidebar="recent">歷史</button>
-        </div>
-        <section id="sidebar-content" class="sidebar-content"></section>
-      </aside>
-
-      <section id="viewer" class="viewer" tabindex="0" aria-label="漫畫閱讀區">
-        <div id="empty-state" class="empty-state">
-          <img src="/app-icon.svg" alt="" />
-          <h1>MangaMeeya Rust</h1>
-          <p>將漫畫拖放到這裡，或開啟圖片資料夾與封存檔。</p>
-          <div class="empty-actions">
-            <button class="primary" data-action="open-file">開啟漫畫</button>
-            <button data-action="open-folder">開啟資料夾</button>
-          </div>
-          <small>JPG · PNG · GIF · BMP · WebP · ZIP/CBZ · RAR/CBR</small>
-        </div>
-        <div id="loading" class="loading hidden"><span></span><p>正在讀取圖片…</p></div>
-        <div id="pages" class="pages hidden" aria-live="polite"></div>
-        <button class="page-zone page-zone-left" data-zone="left" aria-label="左側翻頁"></button>
-        <button class="page-zone page-zone-right" data-zone="right" aria-label="右側翻頁"></button>
-        <div id="drop-overlay" class="drop-overlay hidden"><strong>放開以開啟</strong></div>
-      </section>
-
-      <aside class="filter-panel" aria-label="影像調整">
-        <h2>影像調整</h2>
-        ${range("brightness", "亮度", 50, 150, state.brightness)}
-        ${range("contrast", "對比", 50, 150, state.contrast)}
-        ${range("grayscale", "灰階", 0, 100, state.grayscale)}
-        <button data-action="reset-filter">重設</button>
-      </aside>
-    </main>
-
-    <footer class="statusbar">
-      <span id="status-message">就緒</span>
-      <span id="status-name">尚未開啟漫畫</span>
-      <label class="page-jump">頁碼 <input id="page-input" type="number" min="1" value="1" disabled /> <span id="page-total">/ 0</span></label>
-      <input id="page-slider" class="page-slider" type="range" min="1" max="1" value="1" disabled aria-label="頁面位置" />
-      <span id="status-size">—</span>
-      <span id="status-mode">單頁 · R→L</span>
-    </footer>
-  </div>
-
-  <dialog id="settings-dialog">
-    <form method="dialog" class="dialog-card">
-      <header><h2>偏好設定</h2><button value="cancel" aria-label="關閉">×</button></header>
-      <label><input id="pref-remember" type="checkbox" /> 記住每本漫畫的閱讀位置</label>
-      <label>投影片間隔 <input id="pref-interval" type="number" min="1" max="120" /> 秒</label>
-      <label>閱讀區背景
-        <select id="pref-background"><option value="black">黑色</option><option value="gray">深灰</option><option value="paper">紙色</option></select>
-      </label>
-      <p class="hint">滑鼠滾輪翻頁；按住 Ctrl 並滾動可縮放。</p>
-      <footer><button value="cancel">取消</button><button id="save-settings" value="default" class="primary">儲存</button></footer>
-    </form>
-  </dialog>
-
-  <dialog id="about-dialog">
-    <form method="dialog" class="dialog-card about-card">
-      <img src="/app-icon.svg" alt="" />
-      <h2>MangaMeeya Rust</h2>
-      <p>以 Rust 與 Tauri 2 重製的 Windows 漫畫閱讀器。</p>
-      <p class="hint">快速、離線、鍵盤優先。原始圖片永不被修改。</p>
-      <button class="primary">確定</button>
-    </form>
-  </dialog>
-
-  <div id="toast" class="toast hidden" role="status"></div>
-`;
-
-function menu(label: string, items: string[][]): string {
-  return `<div class="menu"><button class="menu-label">${label}</button><div class="menu-popup">${items
-    .map(([action, text, shortcut]) =>
-      action === "separator"
-        ? `<hr />`
-        : `<button data-action="${action}"><span>${text}</span><kbd>${shortcut}</kbd></button>`,
-    )
-    .join("")}</div></div>`;
-}
-
-function tool(action: string, icon: string, title: string): string {
-  return `<button class="tool-button" data-action="${action}" title="${title}" aria-label="${title}">${icon}</button>`;
-}
-
-function range(id: string, label: string, min: number, max: number, value: number): string {
-  return `<label class="filter-control"><span>${label}<output id="${id}-value">${value}%</output></span><input id="${id}" type="range" min="${min}" max="${max}" value="${value}" /></label>`;
-}
-
+app.innerHTML = appTemplate(preferences, state);
 const shell = document.querySelector<HTMLDivElement>(".app-shell")!;
 const viewer = document.querySelector<HTMLElement>("#viewer")!;
 const pagesElement = document.querySelector<HTMLDivElement>("#pages")!;
@@ -263,6 +113,19 @@ const zoomOutput = document.querySelector<HTMLOutputElement>("#zoom-output")!;
 const toast = document.querySelector<HTMLDivElement>("#toast")!;
 
 let toastTimer = 0;
+let continuousObserver: IntersectionObserver | null = null;
+let continuousScrollFrame = 0;
+let continuousNavigationTarget: number | null = null;
+let viewerResizeTimer = 0;
+
+new ResizeObserver(() => {
+  window.clearTimeout(viewerResizeTimer);
+  viewerResizeTimer = window.setTimeout(() => {
+    if (state.book && preferences.continuous && usesResponsivePageSize(preferences.fit)) {
+      void renderPages(captureContinuousScrollAnchor());
+    }
+  }, 120);
+}).observe(viewer);
 function notify(message: string, error = false): void {
   window.clearTimeout(toastTimer);
   toast.textContent = message;
@@ -313,8 +176,11 @@ async function openPath(path: string): Promise<void> {
   pagesElement.classList.add("hidden");
   try {
     const book = await invoke<BookInfo>("open_book", { path });
+    state.bookGeneration += 1;
     state.book = book;
     state.cache.clear();
+    state.pageErrors.clear();
+    state.pageRequests.clear();
     const saved = positions()[book.path];
     state.current = preferences.rememberPosition && saved !== undefined
       ? clamp(saved, 0, book.pageNames.length - 1)
@@ -340,9 +206,16 @@ async function openPath(path: string): Promise<void> {
 
 async function closeBook(): Promise<void> {
   stopSlideshow();
+  continuousObserver?.disconnect();
+  continuousObserver = null;
+  continuousNavigationTarget = null;
+  viewer.classList.remove("continuous-mode");
   await invoke("close_book");
+  state.bookGeneration += 1;
   state.book = null;
   state.cache.clear();
+  state.pageErrors.clear();
+  state.pageRequests.clear();
   pagesElement.replaceChildren();
   pagesElement.classList.add("hidden");
   emptyState.classList.remove("hidden");
@@ -354,14 +227,16 @@ async function closeBook(): Promise<void> {
 function visibleIndices(): number[] {
   if (!state.book) return [];
   const indices = [state.current];
-  if (preferences.spread && state.current + 1 < state.book.pageNames.length) indices.push(state.current + 1);
+  if (!preferences.continuous && preferences.spread && state.current + 1 < state.book.pageNames.length) indices.push(state.current + 1);
   return indices;
 }
 
 async function pageData(index: number): Promise<PageData> {
   const cached = state.cache.get(index);
   if (cached) return cached;
-  const data = await invoke<PageData>("get_page", { index });
+  const generation = state.bookGeneration;
+  const data = await loadOnce(state.pageRequests, index, () => invoke<PageData>("get_page", { index }));
+  if (generation !== state.bookGeneration) return data;
   state.cache.set(index, data);
   if (state.cache.size > 24) {
     const keep = new Set([...visibleIndices(), index]);
@@ -371,33 +246,66 @@ async function pageData(index: number): Promise<PageData> {
   return data;
 }
 
-async function renderPages(): Promise<void> {
+function pageTransform(centered = false, scale = preferences.fit === "custom" ? state.zoom : 1): string {
+  const position = centered ? "translate(-50%, -50%) " : "";
+  return `${position}rotate(${state.rotation}deg) scale(${scale})`;
+}
+
+function createPageImage(page: PageData): HTMLImageElement {
+  const image = document.createElement("img");
+  image.src = page.dataUrl;
+  image.alt = `第 ${page.index + 1} 頁：${page.name}`;
+  image.draggable = false;
+  image.style.transform = pageTransform();
+  image.style.filter = `brightness(${state.brightness}%) contrast(${state.contrast}%) grayscale(${state.grayscale}%)`;
+  return image;
+}
+
+function layoutContinuousPage(frame: HTMLElement, image: HTMLImageElement): void {
+  const layout = fittedPageLayout(
+    image.naturalWidth,
+    image.naturalHeight,
+    state.rotation,
+    preferences.fit,
+    state.zoom,
+    frame.clientWidth,
+    frame.clientHeight,
+  );
+  const content = document.createElement("div");
+  content.className = "continuous-page-content";
+  content.style.width = `${layout.width}px`;
+  content.style.height = `${layout.height}px`;
+  image.classList.add("continuous-page-image");
+  image.style.width = `${image.naturalWidth}px`;
+  image.style.height = `${image.naturalHeight}px`;
+  image.style.transform = pageTransform(true, layout.scale);
+  content.append(image);
+  frame.replaceChildren(content);
+  frame.style.removeProperty("height");
+  frame.classList.remove("page-pending", "page-error");
+  frame.classList.add("loaded");
+}
+
+function createPagePlaceholder(index: number): HTMLElement {
+  const placeholder = document.createElement("span");
+  placeholder.className = "page-placeholder";
+  placeholder.textContent = String(index + 1);
+  return placeholder;
+}
+
+async function renderPages(anchor?: ContinuousScrollAnchor): Promise<void> {
   if (!state.book) return;
   const token = ++state.loadingToken;
+  continuousObserver?.disconnect();
+  continuousObserver = null;
   loading.classList.remove("hidden");
   pagesElement.classList.add("hidden");
   try {
-    const data = await Promise.all(visibleIndices().map(pageData));
+    let ready = true;
+    if (preferences.continuous) ready = await renderContinuousPages(token, anchor);
+    else await renderPagedPages(token);
     if (token !== state.loadingToken) return;
-    pagesElement.replaceChildren(
-      ...data.map((page) => {
-        const wrapper = document.createElement("figure");
-        wrapper.className = "page-frame";
-        const image = document.createElement("img");
-        image.src = page.dataUrl;
-        image.alt = `第 ${page.index + 1} 頁：${page.name}`;
-        image.draggable = false;
-        image.style.transform = `rotate(${state.rotation}deg) scale(${preferences.fit === "custom" ? state.zoom : 1})`;
-        image.style.filter = `brightness(${state.brightness}%) contrast(${state.contrast}%) grayscale(${state.grayscale}%)`;
-        wrapper.append(image);
-        return wrapper;
-      }),
-    );
-    pagesElement.className = `pages fit-${preferences.fit} ${preferences.spread ? "spread" : "single"} ${preferences.rtl ? "rtl" : "ltr"}`;
-    const bytes = data.reduce((sum, page) => sum + page.byteSize, 0);
-    statusSize.textContent = formatBytes(bytes);
-    statusName.textContent = data.map((page) => page.name).join("  ·  ");
-    statusMessage.textContent = "就緒";
+    if (ready) statusMessage.textContent = "就緒";
     rememberPosition();
     updateControls();
     preloadNearby();
@@ -406,6 +314,168 @@ async function renderPages(): Promise<void> {
     statusMessage.textContent = "讀取失敗";
   } finally {
     if (token === state.loadingToken) loading.classList.add("hidden");
+  }
+}
+
+async function renderPagedPages(token: number): Promise<void> {
+  const data = await Promise.all(visibleIndices().map(pageData));
+  if (token !== state.loadingToken) return;
+  pagesElement.replaceChildren(
+    ...data.map((page) => {
+      const wrapper = document.createElement("figure");
+      wrapper.className = "page-frame";
+      wrapper.append(createPageImage(page));
+      return wrapper;
+    }),
+  );
+  pagesElement.className = `pages fit-${preferences.fit} ${preferences.spread ? "spread" : "single"} ${preferences.rtl ? "rtl" : "ltr"}`;
+  continuousNavigationTarget = null;
+  viewer.classList.remove("continuous-mode");
+  viewer.scrollTo({ top: 0, left: 0 });
+  statusSize.textContent = formatBytes(data.reduce((sum, page) => sum + page.byteSize, 0));
+  statusName.textContent = data.map((page) => page.name).join("  ·  ");
+}
+
+async function renderContinuousPages(token: number, anchor?: ContinuousScrollAnchor): Promise<boolean> {
+  if (!state.book) return false;
+  const frames = state.book.pageNames.map((name, index) => {
+    const frame = document.createElement("figure");
+    frame.className = "page-frame page-pending";
+    frame.dataset.continuousPage = String(index);
+    frame.setAttribute("aria-label", `第 ${index + 1} 頁：${name}`);
+    frame.append(createPagePlaceholder(index));
+    return frame;
+  });
+  pagesElement.replaceChildren(...frames);
+  pagesElement.className = `pages continuous fit-${preferences.fit}`;
+  viewer.classList.add("continuous-mode");
+  continuousNavigationTarget = state.current;
+  viewer.scrollTo({ top: frames[state.current] ? continuousFrameTop(frames[state.current]) : 0, left: 0 });
+  updateContinuousStatus(state.current);
+
+  continuousObserver = new IntersectionObserver((entries) => {
+    for (const entry of entries) {
+      if (!entry.isIntersecting) continue;
+      const frame = entry.target as HTMLElement;
+      void loadContinuousPage(frame, Number(frame.dataset.continuousPage), token);
+    }
+  }, { root: viewer, rootMargin: "100% 0px" });
+  frames.forEach((frame) => continuousObserver?.observe(frame));
+  const ready = await loadContinuousPage(frames[state.current], state.current, token);
+  if (ready && token === state.loadingToken && anchor?.index === state.current) {
+    const frame = frames[state.current];
+    continuousNavigationTarget = state.current;
+    viewer.scrollTo({ top: pageScrollTop(continuousFrameTop(frame), frame.offsetHeight, anchor.progress), left: anchor.left });
+  }
+  return ready;
+}
+
+async function loadContinuousPage(frame: HTMLElement | undefined, index: number, token: number): Promise<boolean> {
+  if (!frame) return false;
+  if (frame.dataset.loading === "true" || frame.classList.contains("loaded")) return true;
+  state.pageErrors.delete(index);
+  if (index === state.current) updateContinuousStatus(index, "正在讀取…");
+  frame.dataset.loading = "true";
+  try {
+    const page = await pageData(index);
+    if (token !== state.loadingToken || !frame.isConnected) return false;
+    const image = createPageImage(page);
+    frame.replaceChildren(image);
+    const loaded = await waitForImageLoad(image);
+    if (token !== state.loadingToken || !frame.isConnected) return false;
+    if (!loaded) {
+      showContinuousPageError(frame, index, "圖片解碼失敗");
+      return false;
+    }
+    layoutContinuousPage(frame, image);
+    unloadDistantContinuousPages(state.current);
+    if (index === state.current) {
+      statusName.textContent = page.name;
+      statusSize.textContent = formatBytes(page.byteSize);
+      statusMessage.textContent = "就緒";
+    }
+    return true;
+  } catch (error) {
+    if (token !== state.loadingToken || !frame.isConnected) return false;
+    showContinuousPageError(frame, index, String(error));
+    return false;
+  } finally {
+    delete frame.dataset.loading;
+  }
+}
+
+function showContinuousPageError(frame: HTMLElement, index: number, error: string): void {
+  state.pageErrors.add(index);
+  frame.classList.add("page-error");
+  frame.replaceChildren(document.createTextNode(`第 ${index + 1} 頁讀取失敗`));
+  if (index === state.current) updateContinuousStatus(index, "讀取失敗");
+  notify(`無法顯示第 ${index + 1} 頁：${error}`, true);
+}
+
+function updateContinuousStatus(index: number, message?: string): void {
+  if (!state.book) return;
+  const cached = state.cache.get(index);
+  const loadState = continuousPageLoadState(state.pageErrors.has(index), Boolean(cached));
+  statusName.textContent = cached?.name ?? state.book.pageNames[index];
+  statusSize.textContent = cached ? formatBytes(cached.byteSize) : "—";
+  statusMessage.textContent = message ?? (loadState === "error" ? "讀取失敗" : loadState === "ready" ? "就緒" : "正在讀取…");
+}
+
+function continuousFrameTop(frame: HTMLElement): number {
+  return pagesElement.offsetTop + frame.offsetTop;
+}
+
+function captureContinuousScrollAnchor(): ContinuousScrollAnchor | undefined {
+  if (!preferences.continuous || !state.book) return undefined;
+  const frame = pagesElement.querySelector<HTMLElement>(`[data-continuous-page="${state.current}"]`);
+  if (!frame) return undefined;
+  return {
+    index: state.current,
+    progress: pageScrollProgress(viewer.scrollTop, continuousFrameTop(frame), frame.offsetHeight),
+    left: viewer.scrollLeft,
+  };
+}
+
+function updateContinuousPosition(): void {
+  continuousScrollFrame = 0;
+  if (!preferences.continuous || !state.book) return;
+  if (continuousNavigationTarget !== null) {
+    unloadDistantContinuousPages(continuousNavigationTarget);
+    return;
+  }
+  const frames = pagesElement.querySelectorAll<HTMLElement>("[data-continuous-page]");
+  if (!frames.length) return;
+  const center = viewer.scrollTop + viewer.clientHeight / 2 - pagesElement.offsetTop;
+  let low = 0;
+  let high = frames.length - 1;
+  while (low < high) {
+    const middle = Math.floor((low + high) / 2);
+    const frame = frames[middle];
+    if (center > frame.offsetTop + frame.offsetHeight) low = middle + 1;
+    else high = middle;
+  }
+  const index = Number(frames[low].dataset.continuousPage);
+  unloadDistantContinuousPages(index);
+  if (index === state.current) return;
+  state.current = index;
+  updateContinuousStatus(index);
+  rememberPosition();
+  updateControls();
+  highlightThumbnail();
+  preloadNearby();
+}
+
+function unloadDistantContinuousPages(current: number): void {
+  const frames = new Map(
+    [...pagesElement.querySelectorAll<HTMLElement>(".page-frame.loaded")]
+      .map((frame) => [Number(frame.dataset.continuousPage), frame] as const),
+  );
+  for (const index of distantPageIndices(frames.keys(), current, 8)) {
+    const frame = frames.get(index)!;
+    frame.style.height = `${frame.offsetHeight}px`;
+    frame.classList.remove("loaded");
+    frame.classList.add("page-pending");
+    frame.replaceChildren(createPagePlaceholder(index));
   }
 }
 
@@ -430,7 +500,19 @@ function navigate(target: number): void {
   const next = clamp(target, 0, state.book.pageNames.length - 1);
   if (next === state.current) return;
   state.current = next;
-  void renderPages();
+  if (preferences.continuous) {
+    const frame = pagesElement.querySelector<HTMLElement>(`[data-continuous-page="${next}"]`);
+    unloadDistantContinuousPages(next);
+    updateContinuousStatus(next);
+    continuousNavigationTarget = next;
+    frame?.scrollIntoView({ block: "start" });
+    if (frame) void loadContinuousPage(frame, next, state.loadingToken);
+    rememberPosition();
+    updateControls();
+    preloadNearby();
+  } else {
+    void renderPages();
+  }
   highlightThumbnail();
 }
 
@@ -466,8 +548,9 @@ function updateControls(): void {
   pageSlider.value = String(state.current + 1);
   pageTotal.textContent = `/ ${count}`;
   zoomOutput.textContent = `${Math.round(state.zoom * 100)}%`;
-  statusMode.textContent = `${preferences.spread ? "雙頁" : "單頁"} · ${preferences.rtl ? "R→L" : "L→R"}`;
+  statusMode.textContent = `${preferences.continuous ? "連續" : preferences.spread ? "雙頁" : "單頁"} · ${preferences.rtl ? "R→L" : "L→R"}`;
   document.querySelectorAll<HTMLElement>("[data-action='toggle-spread']").forEach((element) => element.classList.toggle("active", preferences.spread));
+  document.querySelectorAll<HTMLElement>("[data-action='toggle-continuous']").forEach((element) => element.classList.toggle("active", preferences.continuous));
   document.querySelectorAll<HTMLElement>("[data-action='toggle-rtl']").forEach((element) => element.classList.toggle("active", preferences.rtl));
   document.querySelectorAll<HTMLElement>("[data-action='toggle-slideshow']").forEach((element) => element.classList.toggle("active", Boolean(state.slideshow)));
   document.querySelectorAll<HTMLElement>("[data-sidebar]").forEach((element) => element.classList.toggle("active", element.dataset.sidebar === preferences.sidebarMode));
@@ -605,7 +688,18 @@ async function action(name: string): Promise<void> {
       persistPreferences();
       break;
     case "mode-thumbs": preferences.sidebarMode = "thumbs"; preferences.sidebar = true; sidebar.classList.remove("hidden"); persistPreferences(); renderSidebar(); break;
-    case "toggle-spread": preferences.spread = !preferences.spread; persistPreferences(); await renderPages(); break;
+    case "toggle-spread":
+      preferences.spread = !preferences.spread;
+      if (preferences.spread) preferences.continuous = false;
+      persistPreferences();
+      await renderPages();
+      break;
+    case "toggle-continuous":
+      preferences.continuous = !preferences.continuous;
+      if (preferences.continuous) preferences.spread = false;
+      persistPreferences();
+      await renderPages();
+      break;
     case "toggle-rtl": preferences.rtl = !preferences.rtl; persistPreferences(); await renderPages(); break;
     case "fullscreen": await getCurrentWindow().setFullscreen(!(await getCurrentWindow().isFullscreen())); break;
     case "fit-window": setFit("window"); break;
@@ -700,14 +794,18 @@ for (const id of ["brightness", "contrast", "grayscale"] as const) {
 pageInput.addEventListener("change", () => navigate(Number(pageInput.value) - 1));
 pageSlider.addEventListener("input", () => navigate(Number(pageSlider.value) - 1));
 viewer.addEventListener("wheel", (event) => {
-  if (event.ctrlKey) {
-    event.preventDefault();
-    setZoom(event.deltaY < 0 ? 1.1 : 1 / 1.1);
-  } else if (Math.abs(event.deltaY) > 16) {
-    event.preventDefault();
-    if (event.deltaY > 0) nextPage(); else previousPage();
+  if (!event.ctrlKey) {
+    continuousNavigationTarget = null;
+    return;
   }
+  event.preventDefault();
+  setZoom(event.deltaY < 0 ? 1.1 : 1 / 1.1);
 }, { passive: false });
+viewer.addEventListener("scroll", () => {
+  if (!preferences.continuous || continuousScrollFrame) return;
+  continuousScrollFrame = window.requestAnimationFrame(updateContinuousPosition);
+});
+viewer.addEventListener("pointerdown", () => { continuousNavigationTarget = null; });
 
 document.querySelector<HTMLButtonElement>("#save-settings")!.addEventListener("click", () => {
   preferences.rememberPosition = document.querySelector<HTMLInputElement>("#pref-remember")!.checked;
@@ -726,15 +824,18 @@ document.addEventListener("keydown", (event) => {
   if (event.ctrlKey && key === "o") { event.preventDefault(); void chooseFile(); return; }
   if (event.ctrlKey && key === "s") { event.preventDefault(); void saveCurrentPage(); return; }
   if (event.ctrlKey && key === "w") { event.preventDefault(); void closeBook(); return; }
+  if (isNativeScrollKey(event.key)) continuousNavigationTarget = null;
+  if (isPageNavigationKey(event.key)) event.preventDefault();
   if (event.key === "ArrowRight") preferences.rtl ? previousPage() : nextPage();
   else if (event.key === "ArrowLeft") preferences.rtl ? nextPage() : previousPage();
-  else if (event.key === "PageDown" || event.key === " ") { event.preventDefault(); nextPage(); }
+  else if (event.key === "PageDown" || event.key === " ") nextPage();
   else if (event.key === "PageUp") previousPage();
   else if (event.key === "Home") navigate(0);
   else if (event.key === "End" && state.book) navigate(state.book.pageNames.length - 1);
   else if (event.key === "F11") { event.preventDefault(); void action("fullscreen"); }
   else if (event.key === "Tab") { event.preventDefault(); void action("toggle-sidebar"); }
   else if (key === "s") void action("toggle-spread");
+  else if (key === "c") void action("toggle-continuous");
   else if (key === "d") void action("toggle-rtl");
   else if (key === "f") void action("fit-window");
   else if (key === "w") void action("fit-width");
@@ -765,40 +866,6 @@ void listen<string[]>("open-args", (event) => {
   const path = event.payload.slice(1).find((candidate) => candidate && !candidate.startsWith("-"));
   if (path) void openPath(path);
 });
-
-function readJson<T>(key: string, fallback: T): T {
-  try {
-    const value = localStorage.getItem(key);
-    return value === null ? fallback : JSON.parse(value) as T;
-  } catch {
-    localStorage.removeItem(key);
-    return fallback;
-  }
-}
-
-function clamp(value: number, min: number, max: number): number {
-  return Math.min(max, Math.max(min, value));
-}
-
-function baseName(path: string): string {
-  return path.replace(/\\/g, "/").split("/").pop() || path;
-}
-
-function formatBytes(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 ** 2) return `${(bytes / 1024).toFixed(1)} KiB`;
-  return `${(bytes / 1024 ** 2).toFixed(1)} MiB`;
-}
-
-function escapeHtml(value: string): string {
-  const element = document.createElement("span");
-  element.textContent = value;
-  return element.innerHTML;
-}
-
-function escapeAttribute(value: string): string {
-  return escapeHtml(value).replaceAll('"', "&quot;");
-}
 
 window.addEventListener("unhandledrejection", (event) => {
   notify(String(event.reason), true);

@@ -12,10 +12,10 @@ jobs:
     timeout-minutes: 45
     steps:
       - name: Check out repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Set up Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v5
         with:
           node-version: 22
           cache: npm
@@ -37,6 +37,9 @@ jobs:
       - name: Check formatting
         run: cargo fmt --manifest-path src-tauri/Cargo.toml -- --check
 
+      - name: Test frontend
+        run: npm test
+
       - name: Build frontend
         run: npm run build
 
@@ -50,7 +53,7 @@ jobs:
         run: npm run tauri build -- --bundles nsis
 
       - name: Upload Windows installer
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: mangameeya-rust-windows
           path: src-tauri/target/release/bundle/nsis/*.exe
