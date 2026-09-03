@@ -1,6 +1,6 @@
 import "./styles.css";
 import { appTemplate } from "./app-template";
-import { distantPageIndices, fittedPageLayout, isPageNavigationKey, loadOnce, pageScrollProgress, pageScrollTop, usesResponsivePageSize, waitForImageLoad } from "./continuous-pages";
+import { continuousPageLoadState, distantPageIndices, fittedPageLayout, isNativeScrollKey, isPageNavigationKey, loadOnce, pageScrollProgress, pageScrollTop, usesResponsivePageSize, waitForImageLoad } from "./continuous-pages";
 import { baseName, clamp, escapeAttribute, escapeHtml, formatBytes, readJson } from "./utils";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
@@ -88,6 +88,7 @@ const state = {
   loadingToken: 0,
   bookGeneration: 0,
   cache: new Map<number, PageData>(),
+  pageErrors: new Set<number>(),
   pageRequests: new Map<number, Promise<PageData>>(),
   listing: null as DirectoryListing | null,
 };
@@ -178,6 +179,7 @@ async function openPath(path: string): Promise<void> {
     state.bookGeneration += 1;
     state.book = book;
     state.cache.clear();
+    state.pageErrors.clear();
     state.pageRequests.clear();
     const saved = positions()[book.path];
     state.current = preferences.rememberPosition && saved !== undefined
@@ -212,6 +214,7 @@ async function closeBook(): Promise<void> {
   state.bookGeneration += 1;
   state.book = null;
   state.cache.clear();
+  state.pageErrors.clear();
   state.pageRequests.clear();
   pagesElement.replaceChildren();
   pagesElement.classList.add("hidden");
@@ -370,6 +373,8 @@ async function renderContinuousPages(token: number, anchor?: ContinuousScrollAnc
 async function loadContinuousPage(frame: HTMLElement | undefined, index: number, token: number): Promise<boolean> {
   if (!frame) return false;
   if (frame.dataset.loading === "true" || frame.classList.contains("loaded")) return true;
+  state.pageErrors.delete(index);
+  if (index === state.current) updateContinuousStatus(index, "正在讀取…");
   frame.dataset.loading = "true";
   try {
     const page = await pageData(index);
@@ -400,6 +405,7 @@ async function loadContinuousPage(frame: HTMLElement | undefined, index: number,
 }
 
 function showContinuousPageError(frame: HTMLElement, index: number, error: string): void {
+  state.pageErrors.add(index);
   frame.classList.add("page-error");
   frame.replaceChildren(document.createTextNode(`第 ${index + 1} 頁讀取失敗`));
   if (index === state.current) updateContinuousStatus(index, "讀取失敗");
@@ -409,9 +415,10 @@ function showContinuousPageError(frame: HTMLElement, index: number, error: strin
 function updateContinuousStatus(index: number, message?: string): void {
   if (!state.book) return;
   const cached = state.cache.get(index);
+  const loadState = continuousPageLoadState(state.pageErrors.has(index), Boolean(cached));
   statusName.textContent = cached?.name ?? state.book.pageNames[index];
   statusSize.textContent = cached ? formatBytes(cached.byteSize) : "—";
-  statusMessage.textContent = message ?? (cached ? "就緒" : "正在讀取…");
+  statusMessage.textContent = message ?? (loadState === "error" ? "讀取失敗" : loadState === "ready" ? "就緒" : "正在讀取…");
 }
 
 function continuousFrameTop(frame: HTMLElement): number {
@@ -817,6 +824,7 @@ document.addEventListener("keydown", (event) => {
   if (event.ctrlKey && key === "o") { event.preventDefault(); void chooseFile(); return; }
   if (event.ctrlKey && key === "s") { event.preventDefault(); void saveCurrentPage(); return; }
   if (event.ctrlKey && key === "w") { event.preventDefault(); void closeBook(); return; }
+  if (isNativeScrollKey(event.key)) continuousNavigationTarget = null;
   if (isPageNavigationKey(event.key)) event.preventDefault();
   if (event.key === "ArrowRight") preferences.rtl ? previousPage() : nextPage();
   else if (event.key === "ArrowLeft") preferences.rtl ? nextPage() : previousPage();

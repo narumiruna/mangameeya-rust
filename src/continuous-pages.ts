@@ -57,6 +57,15 @@ export function isPageNavigationKey(key: string): boolean {
   return ["ArrowRight", "ArrowLeft", "PageDown", "PageUp", " ", "Home", "End"].includes(key);
 }
 
+export function isNativeScrollKey(key: string): boolean {
+  return key === "ArrowUp" || key === "ArrowDown";
+}
+
+export function continuousPageLoadState(failed: boolean, cached: boolean): "error" | "ready" | "loading" {
+  if (failed) return "error";
+  return cached ? "ready" : "loading";
+}
+
 export function waitForImageLoad(image: HTMLImageElement): Promise<boolean> {
   if (image.complete) return Promise.resolve(image.naturalWidth > 0);
   return new Promise((resolve) => {

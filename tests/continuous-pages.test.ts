@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { distantPageIndices, fittedPageLayout, isPageNavigationKey, loadOnce, pageScrollProgress, pageScrollTop, transformedPageSize, usesResponsivePageSize, waitForImageLoad } from "../src/continuous-pages.ts";
+import { continuousPageLoadState, distantPageIndices, fittedPageLayout, isNativeScrollKey, isPageNavigationKey, loadOnce, pageScrollProgress, pageScrollTop, transformedPageSize, usesResponsivePageSize, waitForImageLoad } from "../src/continuous-pages.ts";
 
 test("transformedPageSize reserves scaled and rotated layout space", () => {
   assert.deepEqual(transformedPageSize(800, 1200, 0, 1.5), { width: 1200, height: 1800 });
@@ -30,11 +30,21 @@ test("responsive fit modes are relaid out when the viewer changes size", () => {
   assert.equal(usesResponsivePageSize("custom"), false);
 });
 
-test("page navigation keys suppress native viewer scrolling", () => {
+test("page navigation and native scrolling keys are classified separately", () => {
   for (const key of ["ArrowRight", "ArrowLeft", "PageDown", "PageUp", " ", "Home", "End"]) {
     assert.equal(isPageNavigationKey(key), true);
+    assert.equal(isNativeScrollKey(key), false);
   }
+  assert.equal(isNativeScrollKey("ArrowUp"), true);
+  assert.equal(isNativeScrollKey("ArrowDown"), true);
   assert.equal(isPageNavigationKey("c"), false);
+});
+
+test("failed continuous pages take precedence over cached data", () => {
+  assert.equal(continuousPageLoadState(true, true), "error");
+  assert.equal(continuousPageLoadState(true, false), "error");
+  assert.equal(continuousPageLoadState(false, true), "ready");
+  assert.equal(continuousPageLoadState(false, false), "loading");
 });
 
 test("waitForImageLoad distinguishes decoded and failed images", async () => {
