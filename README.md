@@ -69,7 +69,7 @@ cargo test --manifest-path src-tauri/Cargo.toml --all-targets --all-features
 cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets --all-features -- -D warnings
 ```
 
-`npm ci` 會透過 Husky 安裝 Git hooks。Commit 前會執行 Biome、Rust 格式檢查與 Clippy，push 前會執行 Rust 測試。若要自動格式化前端檔案，可執行 `npm run format`。
+`npm ci` 會透過 Husky 安裝 Git hooks。Commit 前會執行 Biome 與 Rust 格式檢查，push 前會執行 Rust 測試。Clippy 保留在 CI 執行。若要自動格式化前端檔案，可執行 `npm run format`。
 
 ### 建立安裝檔
 
