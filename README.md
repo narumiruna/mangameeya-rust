@@ -61,12 +61,15 @@ npm run tauri dev
 ### 檢查
 
 ```powershell
+npm run check
 npm test
 npm run build
-cargo fmt --manifest-path src-tauri/Cargo.toml -- --check
-cargo test --manifest-path src-tauri/Cargo.toml
-cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
+cargo fmt --manifest-path src-tauri/Cargo.toml --all -- --check
+cargo test --manifest-path src-tauri/Cargo.toml --all-targets --all-features
+cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets --all-features -- -D warnings
 ```
+
+`npm ci` 會透過 Husky 安裝 Git hooks。Commit 前會執行 Biome、Rust 格式檢查與 Clippy，push 前會執行 Rust 測試。若要自動格式化前端檔案，可執行 `npm run format`。
 
 ### 建立安裝檔
 
@@ -84,7 +87,7 @@ NSIS 安裝檔會出現在 `src-tauri/target/release/bundle/nsis/`。
 
 ## 專案結構
 
-- `src/`：TypeScript 使用者介面與閱讀操作。
+- `src/`：TypeScript 使用者介面與閱讀操作。`src/main.ts` 的 DOM 狀態、Tauri 呼叫與事件生命週期緊密相依，因此目前集中管理，待形成穩定的責任邊界後再拆分。
 - `src-tauri/src/lib.rs`：圖片、資料夾與封存檔讀取，以及 Tauri commands。
 - `src-tauri/tauri.conf.json`：Windows 視窗、安裝程式及檔案關聯。
 - `data/MangaMeeyaCE/`：僅供本機行為與外觀參考，不納入 Git。

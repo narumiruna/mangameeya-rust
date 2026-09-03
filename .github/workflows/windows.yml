@@ -34,7 +34,10 @@ jobs:
       - name: Install frontend dependencies
         run: npm ci
 
-      - name: Check formatting
+      - name: Check frontend formatting and lint
+        run: npm run check
+
+      - name: Check Rust formatting
         run: cargo fmt --manifest-path src-tauri/Cargo.toml -- --check
 
       - name: Test frontend

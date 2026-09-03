@@ -1,7 +1,7 @@
 export function readJson<T>(key: string, fallback: T): T {
   try {
     const value = localStorage.getItem(key);
-    return value === null ? fallback : JSON.parse(value) as T;
+    return value === null ? fallback : (JSON.parse(value) as T);
   } catch {
     localStorage.removeItem(key);
     return fallback;
