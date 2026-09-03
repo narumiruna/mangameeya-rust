@@ -37,7 +37,10 @@ export function fittedPageLayout(
   } else if (fit === "custom") {
     scale = zoom;
   }
-  return { ...transformedPageSize(naturalWidth, naturalHeight, rotation, scale), scale };
+  return {
+    ...transformedPageSize(naturalWidth, naturalHeight, rotation, scale),
+    scale,
+  };
 }
 
 export function pageScrollProgress(scrollTop: number, pageTop: number, pageHeight: number): number {

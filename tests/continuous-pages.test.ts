@@ -1,17 +1,50 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { continuousPageLoadState, distantPageIndices, fittedPageLayout, isNativeScrollKey, isPageNavigationKey, loadOnce, pageScrollProgress, pageScrollTop, transformedPageSize, usesResponsivePageSize, waitForImageLoad } from "../src/continuous-pages.ts";
+import {
+  continuousPageLoadState,
+  distantPageIndices,
+  fittedPageLayout,
+  isNativeScrollKey,
+  isPageNavigationKey,
+  loadOnce,
+  pageScrollProgress,
+  pageScrollTop,
+  transformedPageSize,
+  usesResponsivePageSize,
+  waitForImageLoad,
+} from "../src/continuous-pages.ts";
 
 test("transformedPageSize reserves scaled and rotated layout space", () => {
-  assert.deepEqual(transformedPageSize(800, 1200, 0, 1.5), { width: 1200, height: 1800 });
-  assert.deepEqual(transformedPageSize(800, 1200, 90, 1), { width: 1200, height: 800 });
-  assert.deepEqual(transformedPageSize(800, 1200, -270, 2), { width: 2400, height: 1600 });
+  assert.deepEqual(transformedPageSize(800, 1200, 0, 1.5), {
+    width: 1200,
+    height: 1800,
+  });
+  assert.deepEqual(transformedPageSize(800, 1200, 90, 1), {
+    width: 1200,
+    height: 800,
+  });
+  assert.deepEqual(transformedPageSize(800, 1200, -270, 2), {
+    width: 2400,
+    height: 1600,
+  });
 });
 
 test("fittedPageLayout fits quarter-turned pages using rotated dimensions", () => {
-  assert.deepEqual(fittedPageLayout(800, 1200, 90, "width", 1, 600, 900), { width: 600, height: 400, scale: 0.5 });
-  assert.deepEqual(fittedPageLayout(800, 1200, 90, "height", 1, 600, 600), { width: 900, height: 600, scale: 0.75 });
-  assert.deepEqual(fittedPageLayout(800, 1200, 90, "window", 1, 600, 600), { width: 600, height: 400, scale: 0.5 });
+  assert.deepEqual(fittedPageLayout(800, 1200, 90, "width", 1, 600, 900), {
+    width: 600,
+    height: 400,
+    scale: 0.5,
+  });
+  assert.deepEqual(fittedPageLayout(800, 1200, 90, "height", 1, 600, 600), {
+    width: 900,
+    height: 600,
+    scale: 0.75,
+  });
+  assert.deepEqual(fittedPageLayout(800, 1200, 90, "window", 1, 600, 600), {
+    width: 600,
+    height: 400,
+    scale: 0.5,
+  });
 });
 
 test("page scroll progress restores an intra-page resize offset", () => {
@@ -78,7 +111,9 @@ test("loadOnce shares an in-flight request and clears it after success", async (
   let resolveRequest!: (value: string) => void;
   const loader = () => {
     calls += 1;
-    return new Promise<string>((resolve) => { resolveRequest = resolve; });
+    return new Promise<string>((resolve) => {
+      resolveRequest = resolve;
+    });
   };
 
   const first = loadOnce(inFlight, 4, loader);

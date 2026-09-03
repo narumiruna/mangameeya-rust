@@ -1,12 +1,23 @@
 import "./styles.css";
-import { appTemplate } from "./app-template";
-import { continuousPageLoadState, distantPageIndices, fittedPageLayout, isNativeScrollKey, isPageNavigationKey, loadOnce, pageScrollProgress, pageScrollTop, usesResponsivePageSize, waitForImageLoad } from "./continuous-pages";
-import { baseName, clamp, escapeAttribute, escapeHtml, formatBytes, readJson } from "./utils";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { open, save } from "@tauri-apps/plugin-dialog";
+import { appTemplate } from "./app-template";
+import {
+  continuousPageLoadState,
+  distantPageIndices,
+  fittedPageLayout,
+  isNativeScrollKey,
+  isPageNavigationKey,
+  loadOnce,
+  pageScrollProgress,
+  pageScrollTop,
+  usesResponsivePageSize,
+  waitForImageLoad,
+} from "./continuous-pages";
+import { baseName, clamp, escapeAttribute, escapeHtml, formatBytes, readJson } from "./utils";
 
 type FitMode = "window" | "width" | "height" | "original" | "custom";
 type SidebarMode = "files" | "thumbs" | "recent";
@@ -158,7 +169,12 @@ async function chooseFile(): Promise<void> {
   const selected = await open({
     multiple: false,
     directory: false,
-    filters: [{ name: "漫畫與圖片", extensions: ["jpg", "jpeg", "jpe", "png", "gif", "bmp", "webp", "zip", "cbz", "rar", "cbr"] }],
+    filters: [
+      {
+        name: "漫畫與圖片",
+        extensions: ["jpg", "jpeg", "jpe", "png", "gif", "bmp", "webp", "zip", "cbz", "rar", "cbr"],
+      },
+    ],
   });
   if (typeof selected === "string") await openPath(selected);
 }
@@ -182,9 +198,10 @@ async function openPath(path: string): Promise<void> {
     state.pageErrors.clear();
     state.pageRequests.clear();
     const saved = positions()[book.path];
-    state.current = preferences.rememberPosition && saved !== undefined
-      ? clamp(saved, 0, book.pageNames.length - 1)
-      : book.initialPage;
+    state.current =
+      preferences.rememberPosition && saved !== undefined
+        ? clamp(saved, 0, book.pageNames.length - 1)
+        : book.initialPage;
     state.zoom = 1;
     state.rotation = 0;
     addRecent(book.path);
@@ -227,7 +244,8 @@ async function closeBook(): Promise<void> {
 function visibleIndices(): number[] {
   if (!state.book) return [];
   const indices = [state.current];
-  if (!preferences.continuous && preferences.spread && state.current + 1 < state.book.pageNames.length) indices.push(state.current + 1);
+  if (!preferences.continuous && preferences.spread && state.current + 1 < state.book.pageNames.length)
+    indices.push(state.current + 1);
   return indices;
 }
 
@@ -350,22 +368,33 @@ async function renderContinuousPages(token: number, anchor?: ContinuousScrollAnc
   pagesElement.className = `pages continuous fit-${preferences.fit}`;
   viewer.classList.add("continuous-mode");
   continuousNavigationTarget = state.current;
-  viewer.scrollTo({ top: frames[state.current] ? continuousFrameTop(frames[state.current]) : 0, left: 0 });
+  viewer.scrollTo({
+    top: frames[state.current] ? continuousFrameTop(frames[state.current]) : 0,
+    left: 0,
+  });
   updateContinuousStatus(state.current);
 
-  continuousObserver = new IntersectionObserver((entries) => {
-    for (const entry of entries) {
-      if (!entry.isIntersecting) continue;
-      const frame = entry.target as HTMLElement;
-      void loadContinuousPage(frame, Number(frame.dataset.continuousPage), token);
-    }
-  }, { root: viewer, rootMargin: "100% 0px" });
-  frames.forEach((frame) => continuousObserver?.observe(frame));
+  continuousObserver = new IntersectionObserver(
+    (entries) => {
+      for (const entry of entries) {
+        if (!entry.isIntersecting) continue;
+        const frame = entry.target as HTMLElement;
+        void loadContinuousPage(frame, Number(frame.dataset.continuousPage), token);
+      }
+    },
+    { root: viewer, rootMargin: "100% 0px" },
+  );
+  frames.forEach((frame) => {
+    continuousObserver?.observe(frame);
+  });
   const ready = await loadContinuousPage(frames[state.current], state.current, token);
   if (ready && token === state.loadingToken && anchor?.index === state.current) {
     const frame = frames[state.current];
     continuousNavigationTarget = state.current;
-    viewer.scrollTo({ top: pageScrollTop(continuousFrameTop(frame), frame.offsetHeight, anchor.progress), left: anchor.left });
+    viewer.scrollTo({
+      top: pageScrollTop(continuousFrameTop(frame), frame.offsetHeight, anchor.progress),
+      left: anchor.left,
+    });
   }
   return ready;
 }
@@ -418,7 +447,8 @@ function updateContinuousStatus(index: number, message?: string): void {
   const loadState = continuousPageLoadState(state.pageErrors.has(index), Boolean(cached));
   statusName.textContent = cached?.name ?? state.book.pageNames[index];
   statusSize.textContent = cached ? formatBytes(cached.byteSize) : "—";
-  statusMessage.textContent = message ?? (loadState === "error" ? "讀取失敗" : loadState === "ready" ? "就緒" : "正在讀取…");
+  statusMessage.textContent =
+    message ?? (loadState === "error" ? "讀取失敗" : loadState === "ready" ? "就緒" : "正在讀取…");
 }
 
 function continuousFrameTop(frame: HTMLElement): number {
@@ -467,8 +497,9 @@ function updateContinuousPosition(): void {
 
 function unloadDistantContinuousPages(current: number): void {
   const frames = new Map(
-    [...pagesElement.querySelectorAll<HTMLElement>(".page-frame.loaded")]
-      .map((frame) => [Number(frame.dataset.continuousPage), frame] as const),
+    [...pagesElement.querySelectorAll<HTMLElement>(".page-frame.loaded")].map(
+      (frame) => [Number(frame.dataset.continuousPage), frame] as const,
+    ),
   );
   for (const index of distantPageIndices(frames.keys(), current, 8)) {
     const frame = frames.get(index)!;
@@ -549,11 +580,21 @@ function updateControls(): void {
   pageTotal.textContent = `/ ${count}`;
   zoomOutput.textContent = `${Math.round(state.zoom * 100)}%`;
   statusMode.textContent = `${preferences.continuous ? "連續" : preferences.spread ? "雙頁" : "單頁"} · ${preferences.rtl ? "R→L" : "L→R"}`;
-  document.querySelectorAll<HTMLElement>("[data-action='toggle-spread']").forEach((element) => element.classList.toggle("active", preferences.spread));
-  document.querySelectorAll<HTMLElement>("[data-action='toggle-continuous']").forEach((element) => element.classList.toggle("active", preferences.continuous));
-  document.querySelectorAll<HTMLElement>("[data-action='toggle-rtl']").forEach((element) => element.classList.toggle("active", preferences.rtl));
-  document.querySelectorAll<HTMLElement>("[data-action='toggle-slideshow']").forEach((element) => element.classList.toggle("active", Boolean(state.slideshow)));
-  document.querySelectorAll<HTMLElement>("[data-sidebar]").forEach((element) => element.classList.toggle("active", element.dataset.sidebar === preferences.sidebarMode));
+  document.querySelectorAll<HTMLElement>("[data-action='toggle-spread']").forEach((element) => {
+    element.classList.toggle("active", preferences.spread);
+  });
+  document.querySelectorAll<HTMLElement>("[data-action='toggle-continuous']").forEach((element) => {
+    element.classList.toggle("active", preferences.continuous);
+  });
+  document.querySelectorAll<HTMLElement>("[data-action='toggle-rtl']").forEach((element) => {
+    element.classList.toggle("active", preferences.rtl);
+  });
+  document.querySelectorAll<HTMLElement>("[data-action='toggle-slideshow']").forEach((element) => {
+    element.classList.toggle("active", Boolean(state.slideshow));
+  });
+  document.querySelectorAll<HTMLElement>("[data-sidebar]").forEach((element) => {
+    element.classList.toggle("active", element.dataset.sidebar === preferences.sidebarMode);
+  });
 }
 
 function renderSidebar(): void {
@@ -569,24 +610,32 @@ function renderThumbnails(): void {
     return;
   }
   sidebarContent.innerHTML = `<div class="thumbnail-list">${state.book.pageNames
-    .map((name, index) => `<button class="thumbnail ${index === state.current ? "current" : ""}" data-page="${index}" title="${escapeHtml(name)}"><span class="thumb-image" data-thumb="${index}"><i>${index + 1}</i></span><span>${index + 1}. ${escapeHtml(baseName(name))}</span></button>`)
+    .map(
+      (name, index) =>
+        `<button class="thumbnail ${index === state.current ? "current" : ""}" data-page="${index}" title="${escapeHtml(name)}"><span class="thumb-image" data-thumb="${index}"><i>${index + 1}</i></span><span>${index + 1}. ${escapeHtml(baseName(name))}</span></button>`,
+    )
     .join("")}</div>`;
-  const observer = new IntersectionObserver((entries) => {
-    for (const entry of entries) {
-      if (!entry.isIntersecting) continue;
-      const target = entry.target as HTMLElement;
-      const index = Number(target.dataset.thumb);
-      observer.unobserve(target);
-      void pageData(index).then((page) => {
-        if (!target.isConnected) return;
-        const image = document.createElement("img");
-        image.src = page.dataUrl;
-        image.alt = "";
-        target.replaceChildren(image);
-      });
-    }
-  }, { root: sidebarContent, rootMargin: "240px" });
-  document.querySelectorAll<HTMLElement>("[data-thumb]").forEach((element) => observer.observe(element));
+  const observer = new IntersectionObserver(
+    (entries) => {
+      for (const entry of entries) {
+        if (!entry.isIntersecting) continue;
+        const target = entry.target as HTMLElement;
+        const index = Number(target.dataset.thumb);
+        observer.unobserve(target);
+        void pageData(index).then((page) => {
+          if (!target.isConnected) return;
+          const image = document.createElement("img");
+          image.src = page.dataUrl;
+          image.alt = "";
+          target.replaceChildren(image);
+        });
+      }
+    },
+    { root: sidebarContent, rootMargin: "240px" },
+  );
+  document.querySelectorAll<HTMLElement>("[data-thumb]").forEach((element) => {
+    observer.observe(element);
+  });
   highlightThumbnail();
 }
 
@@ -608,7 +657,9 @@ function renderRecent(): void {
 async function renderFiles(path?: string): Promise<void> {
   sidebarContent.innerHTML = `<div class="sidebar-loading">正在讀取資料夾…</div>`;
   try {
-    const listing = await invoke<DirectoryListing>("browse_directory", { path: path ?? null });
+    const listing = await invoke<DirectoryListing>("browse_directory", {
+      path: path ?? null,
+    });
     state.listing = listing;
     sidebarContent.innerHTML = `<div class="pathbar"><button ${listing.parent ? "" : "disabled"} data-browse-path="${escapeAttribute(listing.parent ?? "")}">↑</button><input value="${escapeAttribute(listing.path)}" aria-label="目前資料夾" /></div><div class="file-list">${listing.entries.map((entry) => `<button ${entry.isDirectory ? `data-browse-path="${escapeAttribute(entry.path)}"` : `data-open-path="${escapeAttribute(entry.path)}"`}><span class="entry-icon">${entry.kind === "folder" ? "📁" : entry.kind === "archive" ? "▰" : "▧"}</span><span><strong>${escapeHtml(entry.name)}</strong><small>${entry.kind === "folder" ? "資料夾" : entry.kind === "archive" ? "漫畫封存檔" : "圖片"}</small></span></button>`).join("")}</div>`;
     const pathInput = sidebarContent.querySelector<HTMLInputElement>(".pathbar input");
@@ -677,17 +728,33 @@ function stopSlideshow(): void {
 async function action(name: string): Promise<void> {
   closeMenus();
   switch (name) {
-    case "open-file": await chooseFile(); break;
-    case "open-folder": await chooseFolder(); break;
-    case "save-page": await saveCurrentPage(); break;
-    case "close-book": await closeBook(); break;
-    case "quit": await getCurrentWindow().close(); break;
+    case "open-file":
+      await chooseFile();
+      break;
+    case "open-folder":
+      await chooseFolder();
+      break;
+    case "save-page":
+      await saveCurrentPage();
+      break;
+    case "close-book":
+      await closeBook();
+      break;
+    case "quit":
+      await getCurrentWindow().close();
+      break;
     case "toggle-sidebar":
       preferences.sidebar = !preferences.sidebar;
       sidebar.classList.toggle("hidden", !preferences.sidebar);
       persistPreferences();
       break;
-    case "mode-thumbs": preferences.sidebarMode = "thumbs"; preferences.sidebar = true; sidebar.classList.remove("hidden"); persistPreferences(); renderSidebar(); break;
+    case "mode-thumbs":
+      preferences.sidebarMode = "thumbs";
+      preferences.sidebar = true;
+      sidebar.classList.remove("hidden");
+      persistPreferences();
+      renderSidebar();
+      break;
     case "toggle-spread":
       preferences.spread = !preferences.spread;
       if (preferences.spread) preferences.continuous = false;
@@ -700,29 +767,81 @@ async function action(name: string): Promise<void> {
       persistPreferences();
       await renderPages();
       break;
-    case "toggle-rtl": preferences.rtl = !preferences.rtl; persistPreferences(); await renderPages(); break;
-    case "fullscreen": await getCurrentWindow().setFullscreen(!(await getCurrentWindow().isFullscreen())); break;
-    case "fit-window": setFit("window"); break;
-    case "fit-width": setFit("width"); break;
-    case "fit-height": setFit("height"); break;
-    case "fit-original": setFit("original"); break;
-    case "zoom-in": setZoom(1.15); break;
-    case "zoom-out": setZoom(1 / 1.15); break;
-    case "zoom-reset": state.zoom = 1; setFit("custom"); break;
-    case "first": navigate(0); break;
-    case "previous": previousPage(); break;
-    case "next": nextPage(); break;
-    case "last": if (state.book) navigate(state.book.pageNames.length - 1); break;
-    case "toggle-slideshow": toggleSlideshow(); break;
-    case "bookmark": toggleBookmark(); break;
-    case "resume": resumeBookmark(); break;
-    case "clear-bookmark": clearBookmark(); break;
-    case "rotate-left": state.rotation = (state.rotation - 90) % 360; await renderPages(); break;
-    case "rotate-right": state.rotation = (state.rotation + 90) % 360; await renderPages(); break;
-    case "reset-filter": resetFilters(); break;
-    case "settings": showSettings(); break;
-    case "about": document.querySelector<HTMLDialogElement>("#about-dialog")!.showModal(); break;
-    case "clear-history": localStorage.removeItem("mmr-recent"); renderRecent(); break;
+    case "toggle-rtl":
+      preferences.rtl = !preferences.rtl;
+      persistPreferences();
+      await renderPages();
+      break;
+    case "fullscreen":
+      await getCurrentWindow().setFullscreen(!(await getCurrentWindow().isFullscreen()));
+      break;
+    case "fit-window":
+      setFit("window");
+      break;
+    case "fit-width":
+      setFit("width");
+      break;
+    case "fit-height":
+      setFit("height");
+      break;
+    case "fit-original":
+      setFit("original");
+      break;
+    case "zoom-in":
+      setZoom(1.15);
+      break;
+    case "zoom-out":
+      setZoom(1 / 1.15);
+      break;
+    case "zoom-reset":
+      state.zoom = 1;
+      setFit("custom");
+      break;
+    case "first":
+      navigate(0);
+      break;
+    case "previous":
+      previousPage();
+      break;
+    case "next":
+      nextPage();
+      break;
+    case "last":
+      if (state.book) navigate(state.book.pageNames.length - 1);
+      break;
+    case "toggle-slideshow":
+      toggleSlideshow();
+      break;
+    case "bookmark":
+      toggleBookmark();
+      break;
+    case "resume":
+      resumeBookmark();
+      break;
+    case "clear-bookmark":
+      clearBookmark();
+      break;
+    case "rotate-left":
+      state.rotation = (state.rotation - 90) % 360;
+      await renderPages();
+      break;
+    case "rotate-right":
+      state.rotation = (state.rotation + 90) % 360;
+      await renderPages();
+      break;
+    case "reset-filter":
+      resetFilters();
+      break;
+    case "settings":
+      showSettings();
+      break;
+    case "about":
+      document.querySelector<HTMLDialogElement>("#about-dialog")!.showModal();
+      break;
+    case "clear-history":
+      localStorage.removeItem("mmr-recent");
+      renderRecent();
+      break;
   }
 }
 
@@ -747,7 +866,9 @@ function showSettings(): void {
 }
 
 function closeMenus(): void {
-  document.querySelectorAll(".menu.open").forEach((element) => element.classList.remove("open"));
+  document.querySelectorAll(".menu.open").forEach((element) => {
+    element.classList.remove("open");
+  });
 }
 
 app.addEventListener("click", (event) => {
@@ -777,7 +898,8 @@ app.addEventListener("click", (event) => {
   const zone = target.closest<HTMLElement>("[data-zone]");
   if (zone) {
     const left = zone.dataset.zone === "left";
-    if (left === preferences.rtl) nextPage(); else previousPage();
+    if (left === preferences.rtl) nextPage();
+    else previousPage();
   }
   if (!target.closest(".menu")) closeMenus();
 });
@@ -787,43 +909,71 @@ for (const id of ["brightness", "contrast", "grayscale"] as const) {
     state[id] = Number((event.target as HTMLInputElement).value);
     document.querySelector<HTMLOutputElement>(`#${id}-value`)!.textContent = `${state[id]}%`;
     const images = pagesElement.querySelectorAll<HTMLImageElement>("img");
-    images.forEach((image) => image.style.filter = `brightness(${state.brightness}%) contrast(${state.contrast}%) grayscale(${state.grayscale}%)`);
+    images.forEach((image) => {
+      image.style.filter = `brightness(${state.brightness}%) contrast(${state.contrast}%) grayscale(${state.grayscale}%)`;
+    });
   });
 }
 
 pageInput.addEventListener("change", () => navigate(Number(pageInput.value) - 1));
 pageSlider.addEventListener("input", () => navigate(Number(pageSlider.value) - 1));
-viewer.addEventListener("wheel", (event) => {
-  if (!event.ctrlKey) {
-    continuousNavigationTarget = null;
-    return;
-  }
-  event.preventDefault();
-  setZoom(event.deltaY < 0 ? 1.1 : 1 / 1.1);
-}, { passive: false });
+viewer.addEventListener(
+  "wheel",
+  (event) => {
+    if (!event.ctrlKey) {
+      continuousNavigationTarget = null;
+      return;
+    }
+    event.preventDefault();
+    setZoom(event.deltaY < 0 ? 1.1 : 1 / 1.1);
+  },
+  { passive: false },
+);
 viewer.addEventListener("scroll", () => {
   if (!preferences.continuous || continuousScrollFrame) return;
   continuousScrollFrame = window.requestAnimationFrame(updateContinuousPosition);
 });
-viewer.addEventListener("pointerdown", () => { continuousNavigationTarget = null; });
+viewer.addEventListener("pointerdown", () => {
+  continuousNavigationTarget = null;
+});
 
 document.querySelector<HTMLButtonElement>("#save-settings")!.addEventListener("click", () => {
   preferences.rememberPosition = document.querySelector<HTMLInputElement>("#pref-remember")!.checked;
   preferences.interval = clamp(Number(document.querySelector<HTMLInputElement>("#pref-interval")!.value) || 5, 1, 120);
-  preferences.background = document.querySelector<HTMLSelectElement>("#pref-background")!.value as Preferences["background"];
+  preferences.background = document.querySelector<HTMLSelectElement>("#pref-background")!
+    .value as Preferences["background"];
   shell.className = `app-shell background-${preferences.background}`;
   persistPreferences();
-  if (state.slideshow) { stopSlideshow(); toggleSlideshow(); }
+  if (state.slideshow) {
+    stopSlideshow();
+    toggleSlideshow();
+  }
 });
 
 document.addEventListener("keydown", (event) => {
   const target = event.target as HTMLElement;
   if (target.matches("input, select") || (target.matches("button") && [" ", "Enter"].includes(event.key))) return;
   const key = event.key.toLowerCase();
-  if (event.ctrlKey && event.shiftKey && key === "o") { event.preventDefault(); void chooseFolder(); return; }
-  if (event.ctrlKey && key === "o") { event.preventDefault(); void chooseFile(); return; }
-  if (event.ctrlKey && key === "s") { event.preventDefault(); void saveCurrentPage(); return; }
-  if (event.ctrlKey && key === "w") { event.preventDefault(); void closeBook(); return; }
+  if (event.ctrlKey && event.shiftKey && key === "o") {
+    event.preventDefault();
+    void chooseFolder();
+    return;
+  }
+  if (event.ctrlKey && key === "o") {
+    event.preventDefault();
+    void chooseFile();
+    return;
+  }
+  if (event.ctrlKey && key === "s") {
+    event.preventDefault();
+    void saveCurrentPage();
+    return;
+  }
+  if (event.ctrlKey && key === "w") {
+    event.preventDefault();
+    void closeBook();
+    return;
+  }
   if (isNativeScrollKey(event.key)) continuousNavigationTarget = null;
   if (isPageNavigationKey(event.key)) event.preventDefault();
   if (event.key === "ArrowRight") preferences.rtl ? previousPage() : nextPage();
@@ -832,9 +982,13 @@ document.addEventListener("keydown", (event) => {
   else if (event.key === "PageUp") previousPage();
   else if (event.key === "Home") navigate(0);
   else if (event.key === "End" && state.book) navigate(state.book.pageNames.length - 1);
-  else if (event.key === "F11") { event.preventDefault(); void action("fullscreen"); }
-  else if (event.key === "Tab") { event.preventDefault(); void action("toggle-sidebar"); }
-  else if (key === "s") void action("toggle-spread");
+  else if (event.key === "F11") {
+    event.preventDefault();
+    void action("fullscreen");
+  } else if (event.key === "Tab") {
+    event.preventDefault();
+    void action("toggle-sidebar");
+  } else if (key === "s") void action("toggle-spread");
   else if (key === "c") void action("toggle-continuous");
   else if (key === "d") void action("toggle-rtl");
   else if (key === "f") void action("fit-window");
@@ -849,7 +1003,10 @@ document.addEventListener("keydown", (event) => {
   else if (key === "p") void action("toggle-slideshow");
   else if (key === "b" && event.shiftKey) resumeBookmark();
   else if (key === "b") toggleBookmark();
-  else if (event.key === "Escape") { closeMenus(); void getCurrentWindow().setFullscreen(false); }
+  else if (event.key === "Escape") {
+    closeMenus();
+    void getCurrentWindow().setFullscreen(false);
+  }
 });
 
 void getCurrentWebview().onDragDropEvent((event) => {
@@ -876,4 +1033,6 @@ preferences.sidebarMode = preferences.sidebarMode ?? "thumbs";
 shell.className = `app-shell background-${preferences.background}`;
 renderSidebar();
 updateControls();
-void invoke<string | null>("launch_path").then((path) => { if (path) void openPath(path); });
+void invoke<string | null>("launch_path").then((path) => {
+  if (path) void openPath(path);
+});

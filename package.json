@@ -10,14 +10,21 @@
     "test": "tsx --test tests/**/*.test.ts",
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
-    "tauri": "tauri"
+    "tauri": "tauri",
+    "format": "biome format --write .",
+    "format:check": "biome format .",
+    "lint": "biome lint .",
+    "check": "biome check .",
+    "prepare": "husky"
   },
   "dependencies": {
     "@tauri-apps/api": "^2.11.1",
     "@tauri-apps/plugin-dialog": "^2.7.2"
   },
   "devDependencies": {
+    "@biomejs/biome": "^2.5.12",
     "@tauri-apps/cli": "^2.11.4",
+    "husky": "^9.1.7",
     "tsx": "^4.23.13",
     "typescript": "^7.0.2",
     "vite": "^8.2.2"
