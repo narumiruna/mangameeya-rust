@@ -15,7 +15,7 @@ MangaMeeya Rust 是以 Rust 與 Tauri 2 為 Windows 重製的離線漫畫閱讀�
 - 全螢幕、定時投影片及另存目前原始圖片。
 - 第二次開啟程式時會沿用既有視窗並載入新的漫畫。
 
-圖片資料只會在需要顯示時由 Rust 端讀取，並有每頁 128 MiB 的安全限制。
+圖片資料只會在需要顯示時由 Rust 端讀取，並透過自訂 protocol 直接送進 WebView，避免 Base64 與 IPC 的額外複製；ZIP/RAR 封存索引也會在開啟期間重用。每頁有 128 MiB 的安全限制。
 閱讀位置、書籤及偏好保存在 WebView 的 local storage，原始漫畫不會被修改。
 加密 RAR 目前會顯示明確錯誤，不會要求或保存密碼。
 

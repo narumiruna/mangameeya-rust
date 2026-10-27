@@ -19,7 +19,6 @@ desktop = ["dep:tauri", "dep:tauri-plugin-dialog", "dep:tauri-plugin-single-inst
 tauri-build = { version = "2.5.6", features = [] }
 
 [dependencies]
-base64 = "0.22.1"
 natord = "1.0.9"
 rars = "0.9.3"
 serde = { version = "1.0", features = ["derive"] }
