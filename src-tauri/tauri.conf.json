@@ -11,7 +11,7 @@
   },
   "app": {
     "security": {
-      "csp": "default-src 'self'; img-src 'self' data: asset: http://asset.localhost; style-src 'self' 'unsafe-inline'"
+      "csp": "default-src 'self'; img-src 'self' data: manga-page: http://manga-page.localhost https://manga-page.localhost; style-src 'self' 'unsafe-inline'"
     },
     "windows": [
       {
