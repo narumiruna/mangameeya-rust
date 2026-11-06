@@ -1,4 +1,4 @@
-name: Windows
+name: Native checks and packages
 
 on:
   push:
@@ -6,58 +6,107 @@ on:
   pull_request:
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 jobs:
-  test-and-bundle:
-    runs-on: windows-latest
-    timeout-minutes: 45
+  test-and-package:
+    name: ${{ matrix.target }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: windows-latest
+            target: x86_64-pc-windows-msvc
+            artifact_name: mangameeya-rust-windows
+            artifact_paths: target/release/bundle/nsis/*-setup.exe
+          - runner: macos-15
+            target: aarch64-apple-darwin
+            artifact_name: mangameeya-rust-macos-arm64
+            artifact_paths: |
+              target/release/bundle/macos/aarch64-apple-darwin/*.zip
+              target/release/bundle/macos/aarch64-apple-darwin/*.dmg
+          - runner: macos-15-intel
+            target: x86_64-apple-darwin
+            artifact_name: mangameeya-rust-macos-x86_64
+            artifact_paths: |
+              target/release/bundle/macos/x86_64-apple-darwin/*.zip
+              target/release/bundle/macos/x86_64-apple-darwin/*.dmg
     steps:
       - name: Check out repository
         uses: actions/checkout@v5
 
-      - name: Set up Node.js
-        uses: actions/setup-node@v5
-        with:
-          node-version: 22
-          cache: npm
+      - name: Select full Xcode and check Metal compiler
+        if: runner.os == 'macOS'
+        env:
+          DEVELOPER_DIR: /Applications/Xcode.app/Contents/Developer
+        run: |
+          echo "DEVELOPER_DIR=$DEVELOPER_DIR" >> "$GITHUB_ENV"
+          echo 'MACOSX_DEPLOYMENT_TARGET=12.0' >> "$GITHUB_ENV"
+          xcodebuild -version
+          xcrun --sdk macosx metal --version
 
       - name: Set up Rust
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@master
         with:
-          targets: x86_64-pc-windows-msvc
+          toolchain: '1.99.1'
+          targets: ${{ matrix.target }}
           components: clippy, rustfmt
 
       - name: Restore Rust cache
         uses: swatinem/rust-cache@v2
         with:
-          workspaces: src-tauri
-
-      - name: Install frontend dependencies
-        run: npm ci
-
-      - name: Check frontend formatting and lint
-        run: npm run check
+          shared-key: ${{ matrix.target }}
 
       - name: Check Rust formatting
-        run: cargo fmt --manifest-path src-tauri/Cargo.toml -- --check
+        run: cargo fmt --all -- --check
 
-      - name: Test frontend
-        run: npm test
+      - name: Test Rust application and launch IPC
+        run: cargo test --locked --all-features
 
-      - name: Build frontend
-        run: npm run build
-
-      - name: Test Rust core
-        run: cargo test --manifest-path src-tauri/Cargo.toml
+      - name: Test production UI interactions and macOS Metal rendering
+        run: cargo test --locked --test rendering
 
       - name: Lint Rust application
-        run: cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
+        run: cargo clippy --locked --all-targets --all-features -- -D warnings
 
-      - name: Build NSIS installer
-        run: npm run tauri build -- --bundles nsis
+      - name: Install NSIS
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          choco install nsis --yes --no-progress --limit-output
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
-      - name: Upload Windows installer
+      - name: Build Windows application and current-user installer
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: ./packaging/windows/build.ps1
+
+      - name: Test silent current-user install, associations, and uninstall
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $installers = @(Get-ChildItem target/release/bundle/nsis/*-setup.exe)
+          if ($installers.Count -ne 1) { throw 'Expected exactly one NSIS installer.' }
+          ./packaging/windows/test-installer.ps1 -InstallerPath $installers[0].FullName
+
+      - name: Build macOS application, ZIP, and DMG
+        if: runner.os == 'macOS'
+        run: bash packaging/macos/build.sh '${{ matrix.target }}'
+
+      - name: Upload native packages
         uses: actions/upload-artifact@v6
         with:
-          name: mangameeya-rust-windows
-          path: src-tauri/target/release/bundle/nsis/*.exe
+          name: ${{ matrix.artifact_name }}
+          path: ${{ matrix.artifact_paths }}
           if-no-files-found: error
+
+      - name: Upload macOS UI smoke screenshots
+        if: always() && runner.os == 'macOS'
+        uses: actions/upload-artifact@v6
+        with:
+          name: mangameeya-rust-ui-smoke-${{ matrix.target }}
+          path: target/ui-smoke/*.png
+          if-no-files-found: ignore
