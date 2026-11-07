@@ -92,10 +92,200 @@ impl Preferences {
 pub struct AppSettings {
     pub preferences: Preferences,
     /// Most recently opened book first. Paths are not required to still exist.
+    #[serde(with = "stored_paths::recent")]
     pub recent: Vec<PathBuf>,
     /// Page indices are zero-based and are checked against a book when opened.
+    #[serde(with = "stored_paths::pages")]
     pub positions: HashMap<PathBuf, usize>,
+    #[serde(with = "stored_paths::pages")]
     pub bookmarks: HashMap<PathBuf, usize>,
+}
+
+// UTF-8 paths retain the legacy JSON format. Native paths use exactly one
+// {"unix": [u8]} or {"windows": [u16]} encoding, with no reserved string prefixes.
+// Each page map stays a JSON object unless it needs native keys; then it uses
+// [path, page] pairs. A foreign native encoding is an error, never a lossy path.
+mod stored_paths {
+    use serde::de::{self, MapAccess, SeqAccess, Visitor};
+    use serde::ser::{SerializeMap, SerializeSeq};
+    use serde::{Deserialize, Deserializer, Serialize, Serializer};
+    use std::collections::HashMap;
+    use std::fmt;
+    use std::path::{Path, PathBuf};
+
+    struct PathRef<'a>(&'a Path);
+
+    impl Serialize for PathRef<'_> {
+        fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+            if let Some(path) = self.0.to_str() {
+                return serializer.serialize_str(path);
+            }
+            #[cfg(any(unix, windows))]
+            {
+                let mut map = serializer.serialize_map(Some(1))?;
+                #[cfg(unix)]
+                {
+                    use std::os::unix::ffi::OsStrExt;
+                    map.serialize_entry("unix", self.0.as_os_str().as_bytes())?;
+                }
+                #[cfg(windows)]
+                {
+                    use std::os::windows::ffi::OsStrExt;
+                    let units: Vec<u16> = self.0.as_os_str().encode_wide().collect();
+                    map.serialize_entry("windows", &units)?;
+                }
+                map.end()
+            }
+            #[cfg(not(any(unix, windows)))]
+            Err(serde::ser::Error::custom(
+                "Native paths are supported only on Unix and Windows",
+            ))
+        }
+    }
+
+    struct PathValue(PathBuf);
+
+    impl<'de> Deserialize<'de> for PathValue {
+        fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+            struct PathVisitor;
+
+            impl<'de> Visitor<'de> for PathVisitor {
+                type Value = PathValue;
+
+                fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+                    formatter.write_str("a UTF-8 path string or a native path object")
+                }
+
+                fn visit_str<E: de::Error>(self, path: &str) -> Result<Self::Value, E> {
+                    Ok(PathValue(path.into()))
+                }
+
+                fn visit_string<E: de::Error>(self, path: String) -> Result<Self::Value, E> {
+                    Ok(PathValue(path.into()))
+                }
+
+                fn visit_map<A: MapAccess<'de>>(self, mut map: A) -> Result<Self::Value, A::Error> {
+                    let encoding = map.next_key::<String>()?.ok_or_else(|| {
+                        de::Error::custom("Native path must contain one unix or windows encoding")
+                    })?;
+                    let path = match encoding.as_str() {
+                        "unix" => {
+                            let bytes = map.next_value::<Vec<u8>>()?;
+                            #[cfg(unix)]
+                            {
+                                use std::os::unix::ffi::OsStringExt;
+                                std::ffi::OsString::from_vec(bytes).into()
+                            }
+                            #[cfg(not(unix))]
+                            {
+                                let _ = bytes;
+                                return Err(de::Error::custom(
+                                    "Unix native paths cannot be loaded on this platform",
+                                ));
+                            }
+                        }
+                        "windows" => {
+                            let units = map.next_value::<Vec<u16>>()?;
+                            #[cfg(windows)]
+                            {
+                                use std::os::windows::ffi::OsStringExt;
+                                std::ffi::OsString::from_wide(&units).into()
+                            }
+                            #[cfg(not(windows))]
+                            {
+                                let _ = units;
+                                return Err(de::Error::custom(
+                                    "Windows native paths cannot be loaded on this platform",
+                                ));
+                            }
+                        }
+                        _ => {
+                            return Err(de::Error::unknown_field(&encoding, &["unix", "windows"]));
+                        }
+                    };
+                    if map.next_key::<de::IgnoredAny>()?.is_some() {
+                        return Err(de::Error::custom(
+                            "Native path must contain exactly one encoding and no other fields",
+                        ));
+                    }
+                    Ok(PathValue(path))
+                }
+            }
+
+            deserializer.deserialize_any(PathVisitor)
+        }
+    }
+
+    pub(super) mod recent {
+        use super::*;
+
+        pub fn serialize<S: Serializer>(
+            paths: &[PathBuf],
+            serializer: S,
+        ) -> Result<S::Ok, S::Error> {
+            let mut sequence = serializer.serialize_seq(Some(paths.len()))?;
+            for path in paths {
+                sequence.serialize_element(&PathRef(path))?;
+            }
+            sequence.end()
+        }
+
+        pub fn deserialize<'de, D: Deserializer<'de>>(
+            deserializer: D,
+        ) -> Result<Vec<PathBuf>, D::Error> {
+            Vec::<PathValue>::deserialize(deserializer)
+                .map(|paths| paths.into_iter().map(|path| path.0).collect())
+        }
+    }
+
+    pub(super) mod pages {
+        use super::*;
+
+        pub fn serialize<S: Serializer>(
+            pages: &HashMap<PathBuf, usize>,
+            serializer: S,
+        ) -> Result<S::Ok, S::Error> {
+            if pages.keys().all(|path| path.to_str().is_some()) {
+                return pages.serialize(serializer);
+            }
+            let mut sequence = serializer.serialize_seq(Some(pages.len()))?;
+            for (path, page) in pages {
+                sequence.serialize_element(&(PathRef(path), page))?;
+            }
+            sequence.end()
+        }
+
+        pub fn deserialize<'de, D: Deserializer<'de>>(
+            deserializer: D,
+        ) -> Result<HashMap<PathBuf, usize>, D::Error> {
+            struct PagesVisitor;
+
+            impl<'de> Visitor<'de> for PagesVisitor {
+                type Value = HashMap<PathBuf, usize>;
+
+                fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+                    formatter.write_str("a path-to-page object or an array of [path, page] pairs")
+                }
+
+                fn visit_map<A: MapAccess<'de>>(self, map: A) -> Result<Self::Value, A::Error> {
+                    HashMap::deserialize(de::value::MapAccessDeserializer::new(map))
+                }
+
+                fn visit_seq<A: SeqAccess<'de>>(
+                    self,
+                    mut sequence: A,
+                ) -> Result<Self::Value, A::Error> {
+                    let mut pages = HashMap::new();
+                    while let Some((PathValue(path), page)) = sequence.next_element()? {
+                        pages.insert(path, page);
+                    }
+                    Ok(pages)
+                }
+            }
+
+            deserializer.deserialize_any(PagesVisitor)
+        }
+    }
 }
 
 /// Return the current user's configuration file, without creating it.
@@ -338,6 +528,63 @@ mod tests {
     }
 
     #[test]
+    fn legacy_utf8_settings_keep_their_format_and_literal_path_strings() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("settings.json");
+        let legacy = serde_json::json!({
+            "preferences": {
+                "mode": "spread",
+                "rtl": false,
+                "fit": "width",
+                "sidebar": false,
+                "sidebar_mode": "files",
+                "background": "paper",
+                "recursive_folder": false,
+                "remember_position": false,
+                "interval": 17
+            },
+            "recent": ["books/日本語.cbz", "unix:[255]", "windows:[55296]", "{\"unix\":[255]}"],
+            "positions": {"books/日本語.cbz": 12, "unix:[255]": 3},
+            "bookmarks": {"windows:[55296]": 8, "{\"unix\":[255]}": 4}
+        });
+        fs::write(&path, serde_json::to_vec(&legacy).unwrap()).unwrap();
+        let settings = AppSettings::load_from(&path).unwrap();
+        assert_eq!(settings.preferences.mode, ReadingMode::Spread);
+        assert_eq!(settings.recent[0], Path::new("books/日本語.cbz"));
+        assert_eq!(settings.recent[1], Path::new("unix:[255]"));
+        assert_eq!(settings.recent[2], Path::new("windows:[55296]"));
+        assert_eq!(settings.recent[3], Path::new(r#"{"unix":[255]}"#));
+        assert_eq!(settings.positions[Path::new("books/日本語.cbz")], 12);
+        assert_eq!(settings.bookmarks[Path::new("windows:[55296]")], 8);
+        settings.save_to(&path).unwrap();
+        let saved: serde_json::Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+        assert_eq!(saved, legacy);
+        assert_eq!(AppSettings::load_from(&path).unwrap(), settings);
+    }
+
+    #[test]
+    fn utf8_pair_maps_load_and_save_as_legacy_objects() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("settings.json");
+        fs::write(
+            &path,
+            r#"{"positions":[["books/日本語.cbz",12]],"bookmarks":[["book.cbz",8]]}"#,
+        )
+        .unwrap();
+        let settings = AppSettings::load_from(&path).unwrap();
+        assert_eq!(settings.positions[Path::new("books/日本語.cbz")], 12);
+        assert_eq!(settings.bookmarks[Path::new("book.cbz")], 8);
+        settings.save_to(&path).unwrap();
+        let saved: serde_json::Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+        assert_eq!(
+            saved["positions"],
+            serde_json::json!({"books/日本語.cbz": 12})
+        );
+        assert_eq!(saved["bookmarks"], serde_json::json!({"book.cbz": 8}));
+        assert_eq!(AppSettings::load_from(&path).unwrap(), settings);
+    }
+
+    #[test]
     fn partial_settings_use_defaults_and_clamp_known_values() {
         let directory = tempfile::tempdir().unwrap();
         let path = directory.path().join("settings.json");
@@ -477,20 +724,201 @@ mod tests {
         );
     }
 
-    #[cfg(unix)]
-    #[test]
-    fn non_unicode_path_encoding_failure_preserves_previous_file() {
-        use std::os::unix::ffi::OsStringExt;
+    #[cfg(any(unix, windows))]
+    fn assert_native_path_round_trip(native: PathBuf, encoded: serde_json::Value) {
+        assert!(native.to_str().is_none());
         let directory = tempfile::tempdir().unwrap();
         let path = directory.path().join("settings.json");
-        AppSettings::default().save_to(&path).unwrap();
-        let before = fs::read(&path).unwrap();
-        let mut settings = AppSettings::default();
-        settings
-            .positions
-            .insert(PathBuf::from(std::ffi::OsString::from_vec(vec![0xff])), 10);
-        assert!(settings.save_to(&path).is_err());
-        assert_eq!(fs::read(&path).unwrap(), before);
+        let utf8 = PathBuf::from("books/日本語.cbz");
+        let mut settings = AppSettings {
+            preferences: Preferences {
+                mode: ReadingMode::Continuous,
+                rtl: false,
+                fit: FitMode::Width,
+                sidebar: false,
+                sidebar_mode: SidebarMode::Recent,
+                background: Background::Paper,
+                recursive_folder: false,
+                remember_position: true,
+                interval: 17,
+            },
+            ..AppSettings::default()
+        };
+        settings.add_recent(&utf8);
+        settings.add_recent(&native);
+        settings.positions.insert(utf8.clone(), 12);
+        settings.positions.insert(native.clone(), 20);
+        settings.bookmarks.insert(utf8.clone(), 8);
+        settings.bookmarks.insert(native.clone(), 15);
+        settings.save_to(&path).unwrap();
+        assert_eq!(AppSettings::load_from(&path).unwrap(), settings);
+
+        let saved: serde_json::Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+        assert_eq!(
+            saved["recent"],
+            serde_json::json!([encoded, "books/日本語.cbz"])
+        );
+        for (field, native_page, utf8_page) in [("positions", 20, 12), ("bookmarks", 15, 8)] {
+            let pairs = saved[field].as_array().unwrap();
+            assert_eq!(pairs.len(), 2);
+            assert!(pairs.contains(&serde_json::json!([encoded, native_page])));
+            assert!(pairs.contains(&serde_json::json!(["books/日本語.cbz", utf8_page])));
+        }
+
+        // Later preference edits and the final position save must also succeed.
+        let mut reopened = AppSettings::load_from(&path).unwrap();
+        reopened.preferences.fit = FitMode::Original;
+        reopened.preferences.interval = 23;
+        reopened.positions.insert(utf8.clone(), 13);
+        reopened.bookmarks.insert(native.clone(), 16);
+        reopened.save_to(&path).unwrap();
+        assert_eq!(AppSettings::load_from(&path).unwrap(), reopened);
+        let mut closing = AppSettings::load_from(&path).unwrap();
+        closing.positions.insert(native.clone(), 21);
+        closing.save_to(&path).unwrap();
+        let expected = closing.clone();
+        drop(closing);
+        let mut settings = AppSettings::load_from(&path).unwrap();
+        assert_eq!(settings, expected);
+
+        // Each map selects its format independently, even with native recents.
+        settings.positions.remove(&native);
+        settings.save_to(&path).unwrap();
+        let saved: serde_json::Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+        assert!(saved["positions"].is_object());
+        assert!(saved["bookmarks"].is_array());
+        assert_eq!(AppSettings::load_from(&path).unwrap(), settings);
+        settings.positions.insert(native.clone(), 22);
+        settings.bookmarks.remove(&native);
+        settings.save_to(&path).unwrap();
+        let saved: serde_json::Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+        assert!(saved["positions"].is_array());
+        assert!(saved["bookmarks"].is_object());
+        assert_eq!(AppSettings::load_from(&path).unwrap(), settings);
+        settings.positions.remove(&native);
+        settings.save_to(&path).unwrap();
+        let saved: serde_json::Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+        assert!(saved["positions"].is_object());
+        assert!(saved["bookmarks"].is_object());
+        assert_eq!(AppSettings::load_from(&path).unwrap(), settings);
+        assert_eq!(fs::read_dir(directory.path()).unwrap().count(), 1);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn non_utf8_unix_paths_preserve_all_settings_across_saves() {
+        use std::os::unix::ffi::OsStringExt;
+        let bytes = b"books/chapter-\xff-\xfe.cbz".to_vec();
+        let native = std::ffi::OsString::from_vec(bytes.clone()).into();
+        assert_native_path_round_trip(native, serde_json::json!({"unix": bytes}));
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn unpaired_utf16_windows_paths_preserve_all_settings_across_saves() {
+        use std::os::windows::ffi::OsStringExt;
+        let mut units: Vec<u16> = "books/book-".encode_utf16().collect();
+        units.extend([0xd800, u16::from(b'-'), 0xdc00]);
+        units.extend(".cbz".encode_utf16());
+        let native = std::ffi::OsString::from_wide(&units).into();
+        assert_native_path_round_trip(native, serde_json::json!({"windows": units}));
+    }
+
+    #[test]
+    fn malformed_native_paths_preserve_the_original_file() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("settings.json");
+        for encoding in [
+            "null",
+            "123",
+            "[]",
+            "{}",
+            r#"{"unknown":[255]}"#,
+            r#"{"unix":null}"#,
+            r#"{"unix":"255"}"#,
+            r#"{"unix":[-1]}"#,
+            r#"{"unix":[256]}"#,
+            r#"{"unix":[1.5]}"#,
+            r#"{"unix":["255"]}"#,
+            r#"{"windows":null}"#,
+            r#"{"windows":"55296"}"#,
+            r#"{"windows":[-1]}"#,
+            r#"{"windows":[65536]}"#,
+            r#"{"windows":[1.5]}"#,
+            r#"{"windows":["55296"]}"#,
+            r#"{"unix":[255],"extra":true}"#,
+            r#"{"windows":[55296],"extra":true}"#,
+            r#"{"unix":[255],"windows":[55296]}"#,
+            r#"{"unix":[255],"unix":[254]}"#,
+            r#"{"windows":[55296],"windows":[56320]}"#,
+        ] {
+            for source in [
+                format!(r#"{{"recent":[{encoding}]}}"#),
+                format!(r#"{{"positions":[[{encoding},1]]}}"#),
+                format!(r#"{{"bookmarks":[[{encoding},2]]}}"#),
+            ] {
+                fs::write(&path, &source).unwrap();
+                assert!(AppSettings::load_from(&path).is_err(), "{source}");
+                assert!(AppSettings::default().save_to(&path).is_err(), "{source}");
+                assert_eq!(fs::read(&path).unwrap(), source.as_bytes());
+            }
+        }
+        assert_eq!(fs::read_dir(directory.path()).unwrap().count(), 1);
+    }
+
+    #[test]
+    fn malformed_pair_maps_preserve_the_original_file() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("settings.json");
+        for pairs in [
+            "null",
+            "[null]",
+            r#"["book.cbz",1]"#,
+            r#"[["book.cbz"]]"#,
+            r#"[["book.cbz",1,2]]"#,
+            r#"[["book.cbz",-1]]"#,
+            r#"[["book.cbz","one"]]"#,
+            r#"[["book.cbz",1.5]]"#,
+            r#"[["book.cbz",null]]"#,
+            r#"[["book.cbz",{}]]"#,
+        ] {
+            for field in ["positions", "bookmarks"] {
+                let source = format!(r#"{{"{field}":{pairs}}}"#);
+                fs::write(&path, &source).unwrap();
+                assert!(AppSettings::load_from(&path).is_err(), "{source}");
+                assert!(AppSettings::default().save_to(&path).is_err(), "{source}");
+                assert_eq!(fs::read(&path).unwrap(), source.as_bytes());
+            }
+        }
+        assert_eq!(fs::read_dir(directory.path()).unwrap().count(), 1);
+    }
+
+    #[cfg(any(unix, windows))]
+    #[test]
+    fn foreign_native_paths_report_the_platform_error_and_preserve_the_file() {
+        #[cfg(unix)]
+        let encodings = [r#"{"windows":[98,111,111,107]}"#, r#"{"windows":[55296]}"#];
+        #[cfg(windows)]
+        let encodings = [r#"{"unix":[98,111,111,107]}"#, r#"{"unix":[255]}"#];
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("settings.json");
+        for encoding in encodings {
+            for source in [
+                format!(r#"{{"recent":[{encoding}]}}"#),
+                format!(r#"{{"positions":[[{encoding},1]]}}"#),
+                format!(r#"{{"bookmarks":[[{encoding},2]]}}"#),
+            ] {
+                fs::write(&path, &source).unwrap();
+                let error = AppSettings::load_from(&path).unwrap_err();
+                assert!(error.contains("native paths cannot be loaded on this platform"));
+                #[cfg(unix)]
+                assert!(error.contains("Windows native paths"));
+                #[cfg(windows)]
+                assert!(error.contains("Unix native paths"));
+                assert!(AppSettings::default().save_to(&path).is_err());
+                assert_eq!(fs::read(&path).unwrap(), source.as_bytes());
+            }
+        }
         assert_eq!(fs::read_dir(directory.path()).unwrap().count(), 1);
     }
 }

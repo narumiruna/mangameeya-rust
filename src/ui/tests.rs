@@ -59,6 +59,24 @@ fn book(fixture: &Fixture, name: &str, count: usize) -> PathBuf {
     folder
 }
 
+fn animated_thumbnail() -> CachedPage {
+    let frames = (0..200)
+        .map(|_| {
+            let pixels = vec![80; 144 * 144 * 4];
+            (
+                imaging::DecodedPage {
+                    width: 144,
+                    height: 144,
+                    byte_size: pixels.len(),
+                    pixels,
+                },
+                image::Delay::from_numer_denom_ms(100, 1),
+            )
+        })
+        .collect();
+    cached_page(frames, 1, 0).unwrap()
+}
+
 fn pump(fixture: &Fixture, cx: &mut TestAppContext) {
     for _ in 0..6 {
         cx.run_until_parked();
@@ -256,11 +274,170 @@ fn thumbnail_eviction_tracks_the_sidebar_viewport_instead_of_the_reading_page(
                 cached_page(vec![(page, image::Delay::from_numer_denom_ms(0, 1))], 4, 0).unwrap(),
             );
         }
-        view.evict_cache(true, cx);
+        view.evict_cache(true, None, cx);
         assert_eq!(view.thumbs.len(), 160);
         assert!(view.thumbs.contains_key(&900));
         assert!(!view.thumbs.contains_key(&0));
     });
+}
+
+#[gpui_kit::test]
+fn visible_animated_thumbnails_remain_cached_above_the_budget(cx: &mut TestAppContext) {
+    let fixture = fixture(cx);
+    let folder = book(&fixture, "animations", 3);
+    fixture.view.update(cx, |view, cx| {
+        view.reader
+            .set_book(Arc::new(Book::open(&folder, false).unwrap()), None);
+        for index in 0..3 {
+            view.thumbs.insert(index, animated_thumbnail());
+        }
+        let original = [
+            view.thumbs[&0].tiles[0].image.id,
+            view.thumbs[&1].tiles[0].image.id,
+        ];
+        assert!(view.thumbs[&0].allocation + view.thumbs[&1].allocation > THUMB_CACHE_BYTES);
+        for _ in 0..5 {
+            for index in 0..2 {
+                let _ = view.thumbnail(index, cx);
+            }
+            view.evict_cache(true, None, cx);
+            assert_eq!(view.thumbs.len(), 2);
+            assert_eq!(view.thumbs[&0].tiles[0].image.id, original[0]);
+            assert_eq!(view.thumbs[&1].tiles[0].image.id, original[1]);
+            view.load_requested(cx);
+            assert!(!view.inflight.iter().any(|key| key.3));
+            assert!(!view.wanted.borrow().iter().any(|(_, thumb)| *thumb));
+        }
+        // A thumbnail can be released once it leaves the rendered list range.
+        view.visible_thumbnails.borrow_mut().clear();
+        let _ = view.thumbnail(1, cx);
+        view.evict_cache(true, None, cx);
+        assert_eq!(view.thumbs.len(), 1);
+        assert!(view.thumbs.contains_key(&1));
+        assert!(
+            view.thumbs
+                .values()
+                .map(|page| page.allocation)
+                .sum::<usize>()
+                <= THUMB_CACHE_BYTES
+        );
+    });
+}
+
+#[gpui_kit::test]
+fn hiding_the_sidebar_trims_previously_visible_animated_thumbnails(cx: &mut TestAppContext) {
+    let fixture = fixture(cx);
+    let folder = book(&fixture, "animations", 2);
+    fixture.sender.send(vec![folder]).unwrap();
+    pump(&fixture, cx);
+    fixture.view.update(cx, |view, cx| {
+        for index in 0..2 {
+            view.thumbs
+                .insert(index, animated_thumbnail())
+                .unwrap()
+                .release(None, cx);
+        }
+        cx.notify();
+    });
+    pump(&fixture, cx);
+    let images = fixture.view.read_with(cx, |view, _| {
+        assert_eq!(view.visible_thumbnails.borrow().len(), 2);
+        assert!(
+            view.thumbs
+                .values()
+                .map(|page| page.allocation)
+                .sum::<usize>()
+                > THUMB_CACHE_BYTES
+        );
+        view.thumbs
+            .values()
+            .map(|page| page.tiles[0].image.clone())
+            .collect::<Vec<_>>()
+    });
+    cx.update_window(fixture.window, |_, window, cx| {
+        fixture
+            .view
+            .update(cx, |view, cx| view.perform(Command::Sidebar, window, cx));
+        window.render_frame(cx);
+    })
+    .unwrap();
+    pump(&fixture, cx);
+    let retained = fixture.view.read_with(cx, |view, _| {
+        assert!(view.visible_thumbnails.borrow().is_empty());
+        assert_eq!(view.thumbs.len(), 1);
+        assert!(
+            view.thumbs
+                .values()
+                .map(|page| page.allocation)
+                .sum::<usize>()
+                <= THUMB_CACHE_BYTES
+        );
+        view.thumbs.values().next().unwrap().tiles[0].image.id
+    });
+    cx.update_window(fixture.window, |_, window, _| {
+        for image in images.iter().filter(|image| image.id != retained) {
+            assert!(!window.has_image_atlas_entry(image));
+        }
+    })
+    .unwrap();
+}
+
+#[cfg(any(unix, windows))]
+#[gpui_kit::test]
+fn native_book_paths_do_not_block_settings_after_close(cx: &mut TestAppContext) {
+    let fixture = fixture(cx);
+    let folder = book(&fixture, "native", 3);
+    fixture.sender.send(vec![folder]).unwrap();
+    pump(&fixture, cx);
+    #[cfg(unix)]
+    let name = {
+        use std::os::unix::ffi::OsStringExt;
+        std::ffi::OsString::from_vec(b"native-\xff".to_vec())
+    };
+    #[cfg(windows)]
+    let name = {
+        use std::os::windows::ffi::OsStringExt;
+        std::ffi::OsString::from_wide(&[110, 97, 116, 105, 118, 101, 45, 0xd800])
+    };
+    let native = fixture.directory.path().join(name);
+    // Keep real page sources but use a native book identity. APFS rejects
+    // invalid UTF-8 filenames, so this checks settings without that dependency.
+    fixture.view.update(cx, |view, cx| {
+        let mut book = (**view.reader.book.as_ref().unwrap()).clone();
+        book.path = native.clone();
+        view.reader.set_book(Arc::new(book), None);
+        view.dirty = true;
+        cx.notify();
+    });
+    pump(&fixture, cx);
+    cx.update_window(fixture.window, |_, window, cx| {
+        window.press("b", cx);
+        window.press("pagedown", cx);
+        window.press(
+            if cfg!(target_os = "macos") {
+                "cmd-w"
+            } else {
+                "ctrl-w"
+            },
+            cx,
+        );
+        fixture.view.update(cx, |view, cx| {
+            view.reader.settings.preferences.interval = 17;
+            view.dirty = true;
+            cx.notify();
+        });
+    })
+    .unwrap();
+    pump(&fixture, cx);
+    fixture.view.read_with(cx, |view, _| {
+        assert!(view.reader.book.is_none());
+        assert!(view.save_error.is_none(), "{:?}", view.save_error);
+    });
+    let saved = AppSettings::load_from(&fixture.directory.path().join("settings.json")).unwrap();
+    assert!(saved.recent.contains(&native));
+    assert_eq!(saved.positions[&native], 1);
+    assert_eq!(saved.bookmarks[&native], 0);
+    assert_eq!(saved.preferences.interval, 17);
 }
 
 #[gpui_kit::test]

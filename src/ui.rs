@@ -191,6 +191,7 @@ pub struct ReaderView {
     thumbs: HashMap<usize, CachedPage>,
     geometry: HashMap<usize, PageGeometry>,
     visible: Rc<RefCell<HashSet<usize>>>,
+    visible_thumbnails: Rc<RefCell<HashSet<usize>>>,
     errors: HashMap<(usize, bool), String>,
     inflight: HashSet<RequestKey>,
     wanted: VisibleRequests,
@@ -376,6 +377,7 @@ impl ReaderView {
             thumbs: HashMap::new(),
             geometry: HashMap::new(),
             visible: Rc::default(),
+            visible_thumbnails: Rc::default(),
             errors: HashMap::new(),
             inflight: HashSet::new(),
             wanted: Rc::default(),
@@ -584,6 +586,7 @@ impl ReaderView {
             .detach();
         }
         self.load_requested(cx);
+        self.evict_cache(true, Some(window), cx);
     }
 
     fn open_path(&mut self, path: PathBuf, window: &mut Window, cx: &mut Context<Self>) {
@@ -620,6 +623,7 @@ impl ReaderView {
                         view.clear_images(None, cx);
                         view.geometry.clear();
                         view.visible.borrow_mut().clear();
+                        view.visible_thumbnails.borrow_mut().clear();
                         view.errors.clear();
                         view.wanted.borrow_mut().clear();
                         let count = view.page_count();
@@ -787,6 +791,7 @@ impl ReaderView {
                 self.clear_images(Some(window), cx);
                 self.geometry.clear();
                 self.visible.borrow_mut().clear();
+                self.visible_thumbnails.borrow_mut().clear();
                 self.errors.clear();
                 self.wanted.borrow_mut().clear();
                 self.continuous.reset(0);
@@ -968,7 +973,12 @@ impl ReaderView {
         };
         let thumb_top = self.thumbnails.logical_scroll_top().item_ix;
         self.wanted.borrow_mut().retain(|(index, thumb)| {
-            (!*thumb && self.visible.borrow().contains(index))
+            let visible = if *thumb {
+                &self.visible_thumbnails
+            } else {
+                &self.visible
+            };
+            visible.borrow().contains(index)
                 || index.abs_diff(if *thumb {
                     thumb_top
                 } else {
@@ -1057,7 +1067,7 @@ impl ReaderView {
                                     view.continuous.remeasure_items(index..index + 1);
                                 }
                             }
-                            view.evict_cache(thumb, cx);
+                            view.evict_cache(thumb, None, cx);
                         }
                         Err(error) => {
                             view.errors.insert((index, thumb), error);
@@ -1070,14 +1080,24 @@ impl ReaderView {
         }
     }
 
-    fn evict_cache(&mut self, thumb: bool, cx: &mut Context<Self>) {
+    fn evict_cache(
+        &mut self,
+        thumb: bool,
+        mut window: Option<&mut Window>,
+        cx: &mut Context<Self>,
+    ) {
         let current = if thumb {
             self.thumbnails.logical_scroll_top().item_ix
         } else {
             self.reader.current
         };
-        let mut visible = self.visible.borrow().clone();
-        visible.extend(self.reader.visible_indices());
+        let visible = if thumb {
+            self.visible_thumbnails.borrow().clone()
+        } else {
+            let mut visible = self.visible.borrow().clone();
+            visible.extend(self.reader.visible_indices());
+            visible
+        };
         let cache = if thumb {
             &mut self.thumbs
         } else {
@@ -1088,11 +1108,14 @@ impl ReaderView {
         } else {
             PAGE_CACHE_BYTES
         };
+        let count_limit = (if thumb { 160 } else { 12 }).max(visible.len());
         let mut bytes: usize = cache.values().map(|page| page.allocation).sum();
-        while bytes > limit || cache.len() > if thumb { 160 } else { 12.max(visible.len()) } {
+        // Visible working sets can exceed the budget. Keep them resident to
+        // avoid decoding and evicting the same animation on every render.
+        while bytes > limit || cache.len() > count_limit {
             let candidate = cache
                 .keys()
-                .filter(|index| thumb || !visible.contains(index))
+                .filter(|index| !visible.contains(index))
                 .max_by_key(|index| index.abs_diff(current))
                 .copied();
             let Some(index) = candidate else {
@@ -1100,7 +1123,7 @@ impl ReaderView {
             };
             let old = cache.remove(&index).unwrap();
             bytes -= old.allocation;
-            old.release(None, cx);
+            old.release(window.as_deref_mut(), cx);
         }
     }
 
@@ -1513,6 +1536,7 @@ impl ReaderView {
         let Some(page) = book.pages.get(index) else {
             return div().into_any_element();
         };
+        self.visible_thumbnails.borrow_mut().insert(index);
         self.wanted.borrow_mut().insert((index, true));
         let picture = match self.thumbs.get(&index) {
             Some(page) => img(page.tiles[0].image.clone())
@@ -2145,6 +2169,7 @@ impl ReaderView {
 
 impl Render for ReaderView {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        self.visible_thumbnails.borrow_mut().clear();
         let workspace = div()
             .flex()
             .items_stretch()

@@ -19,6 +19,7 @@
 來源圖片不會被修改；另存操作會拒絕覆寫本書的來源檔案，包括 symlink 與 hard link。
 加密 RAR 會顯示錯誤，不會要求或保存密碼。
 每頁原始資料限 128 MiB；解碼限 32 megapixels。動畫另限 256 frames 與合計 128 MiB 的解碼資料。
+圖片資料由 Rust 直接載入，不經過 Base64 或 WebView IPC 傳輸。
 載圖在背景執行。離開可見區的圖片會從 CPU cache 與 GPU atlas 釋放；連續頁面的尺寸資料會保留，以維持捲動位置。
 
 ## 執行

@@ -391,15 +391,40 @@ fn rar_members(archive: &Archive) -> impl Iterator<Item = rars::ArchiveMember> +
         .filter_map(move |(index, member)| (!redirections.contains(&index)).then_some(member))
 }
 
+fn check_rar_dictionary(archive: &Archive, entry_index: usize) -> Result<(), String> {
+    if let Archive::Rar50Plus(archive) = archive {
+        for file in archive
+            .files()
+            .filter(|file| !file.is_redirection())
+            .take(entry_index.saturating_add(1))
+        {
+            // Streaming discards output, but compressed members retain their
+            // dictionary. Stored attachments do not allocate decoder history.
+            if !file.is_stored()
+                && file
+                    .decoded_compression_info()
+                    .map_err(rar_error)?
+                    .dictionary_size
+                    > MAX_PAGE_BYTES
+            {
+                return Err("RAR/CBR dictionary exceeds the 128 MiB memory limit.".into());
+            }
+        }
+    }
+    Ok(())
+}
+
 fn read_rar_page(path: &Path, entry_index: usize, entry_name: &[u8]) -> Result<Vec<u8>, String> {
     let archive = open_rar(path)?;
+    check_rar_dictionary(&archive, entry_index)?;
     let bytes = Arc::new(Mutex::new(PageBuffer::new(MAX_PAGE_BYTES as usize)));
     let mut members = rar_members(&archive);
     let mut current = 0;
     let mut found = false;
     let mut stopped = false;
-    // Solid RAR members require the preceding entries. Stream them to a sink,
-    // and stop after the selected member has passed its checksum check.
+    // Solid RAR members require the preceding entries. Stream them to a sink
+    // without the page-size limit; only the selected member is kept in memory.
+    // Stop after the selected member has passed its checksum check.
     let result = archive.extract_to_with_options(rar_options(), |meta| {
         if found {
             stopped = true;
@@ -411,11 +436,11 @@ fn read_rar_page(path: &Path, entry_index: usize, entry_name: &[u8]) -> Result<V
         if member.meta.is_encrypted {
             return Err(rars::Error::NeedPassword);
         }
-        check_size(member.meta.unpacked_size)
-            .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
         let index = current;
         current += 1;
         if index == entry_index {
+            check_size(member.meta.unpacked_size)
+                .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
             if meta.is_directory || meta.name != entry_name {
                 return Err(rars::Error::InvalidHeader(
                     "RAR page changed; open the book again",
@@ -553,7 +578,7 @@ pub fn browse_directory(path: &Path) -> Result<DirectoryListing, String> {
 mod tests {
     use super::*;
     use rars::{ArchiveVersion, Builder};
-    use std::io::Cursor;
+    use std::io::{Cursor, Seek, SeekFrom};
     use tempfile::tempdir;
     use zip::{CompressionMethod, ZipWriter, write::SimpleFileOptions};
 
@@ -586,6 +611,40 @@ mod tests {
         rar_builder(ArchiveVersion::Rar29, entries)
             .write_to_path(path, None)
             .unwrap();
+    }
+
+    const SMALL_GIF: &[u8] = b"GIF89a\x01\0\x01\0\x80\0\0\0\0\0\xff\xff\xff\
+        !\xf9\x04\x01\0\0\0\0,\0\0\0\0\x01\0\x01\0\0\x02\x02D\x01\0;";
+
+    fn write_rar_with_large_non_image(path: &Path) {
+        let mut bytes = rar_builder(
+            ArchiveVersion::Rar29,
+            &[("notes.pdf", b""), ("1.gif", SMALL_GIF)],
+        )
+        .to_bytes()
+        .unwrap();
+        // The RAR signature and main header precede the first file header.
+        let offset = 7 + 13;
+        assert_eq!(&bytes[..7], b"Rar!\x1a\x07\x00");
+        assert_eq!(bytes[offset + 2], 0x74);
+        let header_size =
+            u16::from_le_bytes(bytes[offset + 5..offset + 7].try_into().unwrap()) as usize;
+        let header = &mut bytes[offset..offset + header_size];
+        let size = MAX_PAGE_BYTES + 1;
+        header[7..11].copy_from_slice(&(size as u32).to_le_bytes());
+        header[11..15].copy_from_slice(&(size as u32).to_le_bytes());
+        let mut checksum = rars::crc32::Crc32::new();
+        checksum.update_zeroes(size);
+        header[16..20].copy_from_slice(&checksum.finish().to_le_bytes());
+        let checksum = rars::crc32::crc32(&header[2..]) as u16;
+        header[..2].copy_from_slice(&checksum.to_le_bytes());
+
+        // Insert a sparse zero-filled stored payload, not a 128 MiB allocation.
+        let payload_offset = offset + header_size;
+        let mut file = File::create(path).unwrap();
+        file.write_all(&bytes[..payload_offset]).unwrap();
+        file.seek(SeekFrom::Current(size as i64)).unwrap();
+        file.write_all(&bytes[payload_offset..]).unwrap();
     }
 
     fn assert_error<T: std::fmt::Debug>(result: Result<T, String>, expected: &str) {
@@ -1030,6 +1089,98 @@ mod tests {
             assert_eq!(book.read_page(0).unwrap(), second, "{version:?}");
             assert_eq!(book.read_page(1).unwrap(), first, "{version:?}");
         }
+    }
+
+    #[test]
+    fn rar_dictionary_limits_apply_only_to_the_required_compressed_prefix() {
+        use rars::rar50::Block;
+        for version in [ArchiveVersion::Rar50, ArchiveVersion::Rar70] {
+            let temp = tempdir().unwrap();
+            let path = temp.path().join("dictionary.cbr");
+            fs::write(
+                &path,
+                rar_builder(version, &[("1.gif", SMALL_GIF), ("notes.pdf", b"small")])
+                    .to_bytes()
+                    .unwrap(),
+            )
+            .unwrap();
+            let mut archive = open_rar(&path).unwrap();
+            let Archive::Rar50Plus(inner) = &mut archive else {
+                panic!("Expected RAR5 headers");
+            };
+            let file = inner
+                .blocks
+                .iter_mut()
+                .filter_map(|block| match block {
+                    Block::File(file) => Some(file),
+                    _ => None,
+                })
+                .nth(1)
+                .unwrap();
+            let algorithm = u64::from(version == ArchiveVersion::Rar70);
+            // A large stored attachment is safe even with a large declared
+            // dictionary; the streaming stored path does not use that window.
+            file.unpacked_size = MAX_PAGE_BYTES + 1;
+            file.compression_info = algorithm | (11 << 10);
+            assert!(check_rar_dictionary(&archive, 1).is_ok());
+            let Archive::Rar50Plus(inner) = &mut archive else {
+                unreachable!()
+            };
+            let file = inner
+                .blocks
+                .iter_mut()
+                .filter_map(|block| match block {
+                    Block::File(file) => Some(file),
+                    _ => None,
+                })
+                .nth(1)
+                .unwrap();
+            file.compression_info |= 1 << 7;
+            // A later member cannot block an earlier page.
+            assert!(check_rar_dictionary(&archive, 0).is_ok());
+            assert_error(check_rar_dictionary(&archive, 1), "dictionary");
+            let Archive::Rar50Plus(inner) = &mut archive else {
+                unreachable!()
+            };
+            let file = inner
+                .blocks
+                .iter_mut()
+                .filter_map(|block| match block {
+                    Block::File(file) => Some(file),
+                    _ => None,
+                })
+                .nth(1)
+                .unwrap();
+            file.compression_info = algorithm | (1 << 7) | (10 << 10);
+            assert!(check_rar_dictionary(&archive, 1).is_ok());
+        }
+    }
+
+    #[test]
+    fn rar_pages_after_large_non_image_members_can_be_read() {
+        let temp = tempdir().unwrap();
+        let path = temp.path().join("large-non-image.cbr");
+        write_rar_with_large_non_image(&path);
+        let archive = open_rar(&path).unwrap();
+        let members: Vec<_> = rar_members(&archive).collect();
+        assert_eq!(members[0].meta.name, b"notes.pdf");
+        assert_eq!(members[0].meta.unpacked_size, MAX_PAGE_BYTES + 1);
+        assert_eq!(members[0].meta.packed_size, MAX_PAGE_BYTES + 1);
+        assert!(fs::metadata(&path).unwrap().len() > MAX_PAGE_BYTES + 1);
+        let book = Book::open(&path, false).unwrap();
+        assert_eq!(names(&book), ["1.gif"]);
+        assert_eq!(book.read_page(0).unwrap(), SMALL_GIF);
+    }
+
+    #[test]
+    fn rar_pages_after_large_non_image_members_can_be_exported() {
+        let temp = tempdir().unwrap();
+        let path = temp.path().join("large-non-image.cbr");
+        write_rar_with_large_non_image(&path);
+        let book = Book::open(&path, false).unwrap();
+        let destination = temp.path().join("export.gif");
+        book.save_page(0, &destination).unwrap();
+        assert_eq!(fs::read(destination).unwrap(), SMALL_GIF);
     }
 
     #[test]
