@@ -403,6 +403,21 @@ clicks needed an event turn between them, and a temporary-path assertion needed 
 canonical path. Those failures were corrected without removing behavior assertions.
 No final local check is failing or waived.
 
+The first PR CI run, [42404452120](https://github.com/narumiruna/mangameeya-rust/actions/runs/42404452120),
+passed Windows, Linux, Intel macOS, and release checks. macOS arm64 failed the
+pre-existing animation assertion because the two captured pixels were the same source
+frame. The expanded workflow now explicitly activates the reader and samples rendered
+frames for up to five seconds instead of assuming that one 550 ms sleep selects a
+different phase. Every sampled pixel must match one of the two decoded source colors,
+and a different source frame must be observed; a frozen animation still fails.
+The first local polling attempt did not redraw the scene and failed, which confirmed
+that a screenshot alone reads the cached scene. The corrected loop explicitly renders
+each sample and passed native Metal rendering. Failure evidence is retained in
+`target/preferences-ci-arm64.log` and `target/preferences-animation-first.log`; the
+corrected run is `target/preferences-animation-rendering.log`. This changes only the
+test observation method, not production animation or its acceptance requirement.
+Subsequent platform CI results are available in the pull request checks.
+
 The full diff was reviewed for correctness, security, lifecycle safety, compatibility,
 regressions, and scope, including an independent read-only review. Follow-up regression
 recommendations for pre-open drafts and delayed save completion were added and passed.

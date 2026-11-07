@@ -1441,12 +1441,18 @@ fn main() {
             (f32::from(bounds.center().x), f32::from(bounds.top()) + 60.)
         })
         .unwrap();
-    let before_animation = snapshot(&mut cx, window, "08-animation-first");
-    std::thread::sleep(Duration::from_millis(550));
-    cx.update_window(window, |_, window, cx| window.render_frame(cx))
+    cx.update_window(window, |_, window, _| window.activate_window())
         .unwrap();
-    let after_animation = snapshot(&mut cx, window, "09-animation-next");
-    if let (Some(before), Some(after)) = (before_animation, after_animation) {
+    cx.run_until_parked();
+    cx.update_window(window, |_, window, _| {
+        assert!(
+            window.is_window_active(),
+            "animation requires an active reader"
+        );
+    })
+    .unwrap();
+    let before_animation = snapshot(&mut cx, window, "08-animation-first");
+    if let Some(before) = before_animation {
         let sample = |image: &image::RgbaImage| {
             let scale = image.width() as f32 / 1280.;
             image
@@ -1456,14 +1462,34 @@ fn main() {
                 )
                 .0
         };
+        let colors = [[220u8, 40, 50, 255], [40u8, 80, 220, 255]];
+        let source_frame = |pixel: [u8; 4]| {
+            colors
+                .iter()
+                .position(|color| color.iter().zip(pixel).all(|(a, b)| a.abs_diff(b) <= 2))
+        };
         let first = sample(&before);
-        let next = sample(&after);
+        let first_frame = source_frame(first).expect("animated source color must reach the scene");
+        // A fixed sleep can sample the same phase when rendering or animation
+        // callbacks are delayed. Render and observe a different decoded source
+        // frame within a fixed bound instead of assuming one exact phase.
+        let deadline = std::time::Instant::now() + Duration::from_secs(5);
+        let mut advanced = false;
+        while std::time::Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(73));
+            cx.update_window(window, |_, window, cx| window.render_frame(cx))
+                .unwrap();
+            let after = snapshot(&mut cx, window, "09-animation-next").unwrap();
+            let next = sample(&after);
+            let next_frame =
+                source_frame(next).expect("animation must keep painting decoded source colors");
+            if next_frame != first_frame {
+                advanced = true;
+                break;
+            }
+        }
         assert!(
-            first[0].abs_diff(220) <= 2 || first[2].abs_diff(220) <= 2,
-            "animated source color must reach the scene: {first:?}"
-        );
-        assert_ne!(
-            first, next,
+            advanced,
             "animated page source pixels must advance in the real Metal renderer"
         );
     }
