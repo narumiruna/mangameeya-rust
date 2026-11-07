@@ -1,3 +1,9 @@
+## 0.4.1
+
+### Patch Changes
+
+- Restore reader icons and align desktop controls, panels, typography, and page navigation with the desktop design.
+
 ## 0.4.0
 
 ### Minor Changes
