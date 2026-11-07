@@ -270,7 +270,15 @@ impl Book {
         let page = self.pages.get(index).ok_or("Page index is out of range.")?;
         match &page.source {
             PageSource::File(path) => {
-                let file = File::open(path).map_err(|error| error.to_string())?;
+                let file = File::open(path).map_err(|error| {
+                    // Windows rejects opening a directory before metadata can
+                    // identify a page that has been replaced by one.
+                    if path.is_dir() {
+                        "The page is no longer a regular file.".to_owned()
+                    } else {
+                        error.to_string()
+                    }
+                })?;
                 let metadata = file.metadata().map_err(|error| error.to_string())?;
                 if !metadata.is_file() {
                     return Err("The page is no longer a regular file.".into());

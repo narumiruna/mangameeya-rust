@@ -200,8 +200,10 @@ impl AppSettings {
         std::io::copy(&mut original, &mut backup)
             .and_then(|_| backup.as_file().sync_all())
             .map_err(|error| format!("Cannot write settings backup: {error}"))?;
+        // Windows cannot replace the settings path while its read handle is open.
+        drop(original);
         // Keep even oversized corrupt files intact without loading them into RAM.
-        let (_file, backup_path) = backup
+        let (_, backup_path) = backup
             .keep()
             .map_err(|error| format!("Cannot preserve settings backup: {error}"))?;
         sync_directory(parent)?;
