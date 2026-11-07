@@ -1,5 +1,5 @@
 import "./styles.css";
-import { invoke } from "@tauri-apps/api/core";
+import { convertFileSrc, invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { getCurrentWindow } from "@tauri-apps/api/window";
@@ -32,8 +32,7 @@ interface BookInfo {
 interface PageData {
   index: number;
   name: string;
-  mime: string;
-  dataUrl: string;
+  sourceKey: string;
   byteSize: number;
 }
 
@@ -101,6 +100,8 @@ const state = {
   cache: new Map<number, PageData>(),
   pageErrors: new Set<number>(),
   pageRequests: new Map<number, Promise<PageData>>(),
+  imagePreloads: new Map<number, Promise<boolean>>(),
+  warmedImages: new Set<number>(),
   listing: null as DirectoryListing | null,
 };
 
@@ -125,6 +126,8 @@ const toast = document.querySelector<HTMLDivElement>("#toast")!;
 
 let toastTimer = 0;
 let continuousObserver: IntersectionObserver | null = null;
+let thumbnailObserver: IntersectionObserver | null = null;
+let highlightedThumbnail: HTMLElement | null = null;
 let continuousScrollFrame = 0;
 let continuousNavigationTarget: number | null = null;
 let viewerResizeTimer = 0;
@@ -197,6 +200,8 @@ async function openPath(path: string): Promise<void> {
     state.cache.clear();
     state.pageErrors.clear();
     state.pageRequests.clear();
+    state.imagePreloads.clear();
+    state.warmedImages.clear();
     const saved = positions()[book.path];
     state.current =
       preferences.rememberPosition && saved !== undefined
@@ -233,6 +238,11 @@ async function closeBook(): Promise<void> {
   state.cache.clear();
   state.pageErrors.clear();
   state.pageRequests.clear();
+  state.imagePreloads.clear();
+  state.warmedImages.clear();
+  thumbnailObserver?.disconnect();
+  thumbnailObserver = null;
+  highlightedThumbnail = null;
   pagesElement.replaceChildren();
   pagesElement.classList.add("hidden");
   emptyState.classList.remove("hidden");
@@ -256,11 +266,6 @@ async function pageData(index: number): Promise<PageData> {
   const data = await loadOnce(state.pageRequests, index, () => invoke<PageData>("get_page", { index }));
   if (generation !== state.bookGeneration) return data;
   state.cache.set(index, data);
-  if (state.cache.size > 24) {
-    const keep = new Set([...visibleIndices(), index]);
-    const old = [...state.cache.keys()].find((key) => !keep.has(key));
-    if (old !== undefined) state.cache.delete(old);
-  }
   return data;
 }
 
@@ -271,9 +276,10 @@ function pageTransform(centered = false, scale = preferences.fit === "custom" ? 
 
 function createPageImage(page: PageData): HTMLImageElement {
   const image = document.createElement("img");
-  image.src = page.dataUrl;
+  image.src = convertFileSrc(page.sourceKey, "manga-page");
   image.alt = `第 ${page.index + 1} 頁：${page.name}`;
   image.draggable = false;
+  image.decoding = "async";
   image.style.transform = pageTransform();
   image.style.filter = `brightness(${state.brightness}%) contrast(${state.contrast}%) grayscale(${state.grayscale}%)`;
   return image;
@@ -317,7 +323,6 @@ async function renderPages(anchor?: ContinuousScrollAnchor): Promise<void> {
   continuousObserver?.disconnect();
   continuousObserver = null;
   loading.classList.remove("hidden");
-  pagesElement.classList.add("hidden");
   try {
     let ready = true;
     if (preferences.continuous) ready = await renderContinuousPages(token, anchor);
@@ -338,11 +343,16 @@ async function renderPages(anchor?: ContinuousScrollAnchor): Promise<void> {
 async function renderPagedPages(token: number): Promise<void> {
   const data = await Promise.all(visibleIndices().map(pageData));
   if (token !== state.loadingToken) return;
+  const images = data.map(createPageImage);
+  const loaded = await Promise.all(images.map(waitForImageLoad));
+  if (token !== state.loadingToken) return;
+  if (loaded.some((ready) => !ready)) throw new Error("圖片解碼失敗");
+  for (const page of data) state.warmedImages.add(page.index);
   pagesElement.replaceChildren(
-    ...data.map((page) => {
+    ...images.map((image) => {
       const wrapper = document.createElement("figure");
       wrapper.className = "page-frame";
-      wrapper.append(createPageImage(page));
+      wrapper.append(image);
       return wrapper;
     }),
   );
@@ -409,7 +419,6 @@ async function loadContinuousPage(frame: HTMLElement | undefined, index: number,
     const page = await pageData(index);
     if (token !== state.loadingToken || !frame.isConnected) return false;
     const image = createPageImage(page);
-    frame.replaceChildren(image);
     const loaded = await waitForImageLoad(image);
     if (token !== state.loadingToken || !frame.isConnected) return false;
     if (!loaded) {
@@ -417,6 +426,7 @@ async function loadContinuousPage(frame: HTMLElement | undefined, index: number,
       return false;
     }
     layoutContinuousPage(frame, image);
+    state.warmedImages.add(index);
     unloadDistantContinuousPages(state.current);
     if (index === state.current) {
       statusName.textContent = page.name;
@@ -510,12 +520,29 @@ function unloadDistantContinuousPages(current: number): void {
   }
 }
 
+function preloadPageImage(index: number): Promise<boolean> {
+  if (state.warmedImages.has(index)) return Promise.resolve(true);
+  const pending = state.imagePreloads.get(index);
+  if (pending) return pending;
+  const generation = state.bookGeneration;
+  const preload = pageData(index)
+    .then((page) => waitForImageLoad(createPageImage(page)))
+    .then((ready) => {
+      if (ready && generation === state.bookGeneration) state.warmedImages.add(index);
+      return ready;
+    })
+    .catch(() => false);
+  state.imagePreloads.set(index, preload);
+  void preload.finally(() => {
+    if (state.imagePreloads.get(index) === preload) state.imagePreloads.delete(index);
+  });
+  return preload;
+}
+
 function preloadNearby(): void {
   if (!state.book) return;
   for (const index of [state.current - 1, state.current + 1, state.current + 2]) {
-    if (index >= 0 && index < state.book.pageNames.length && !state.cache.has(index)) {
-      void pageData(index).catch(() => undefined);
-    }
+    if (index >= 0 && index < state.book.pageNames.length) void preloadPageImage(index);
   }
 }
 
@@ -599,12 +626,21 @@ function updateControls(): void {
 
 function renderSidebar(): void {
   updateControls();
-  if (preferences.sidebarMode === "thumbs") renderThumbnails();
-  else if (preferences.sidebarMode === "recent") renderRecent();
+  if (preferences.sidebarMode === "thumbs") {
+    renderThumbnails();
+    return;
+  }
+  thumbnailObserver?.disconnect();
+  thumbnailObserver = null;
+  highlightedThumbnail = null;
+  if (preferences.sidebarMode === "recent") renderRecent();
   else void renderFiles(state.listing?.path);
 }
 
 function renderThumbnails(): void {
+  thumbnailObserver?.disconnect();
+  thumbnailObserver = null;
+  highlightedThumbnail = null;
   if (!state.book) {
     sidebarContent.innerHTML = `<div class="sidebar-empty">開啟漫畫後顯示縮圖</div>`;
     return;
@@ -615,36 +651,34 @@ function renderThumbnails(): void {
         `<button class="thumbnail ${index === state.current ? "current" : ""}" data-page="${index}" title="${escapeHtml(name)}"><span class="thumb-image" data-thumb="${index}"><i>${index + 1}</i></span><span>${index + 1}. ${escapeHtml(baseName(name))}</span></button>`,
     )
     .join("")}</div>`;
-  const observer = new IntersectionObserver(
+  thumbnailObserver = new IntersectionObserver(
     (entries) => {
       for (const entry of entries) {
         if (!entry.isIntersecting) continue;
         const target = entry.target as HTMLElement;
         const index = Number(target.dataset.thumb);
-        observer.unobserve(target);
+        thumbnailObserver?.unobserve(target);
         void pageData(index).then((page) => {
           if (!target.isConnected) return;
-          const image = document.createElement("img");
-          image.src = page.dataUrl;
+          const image = createPageImage(page);
           image.alt = "";
           target.replaceChildren(image);
         });
       }
     },
-    { root: sidebarContent, rootMargin: "240px" },
+    { root: sidebarContent, rootMargin: "120px" },
   );
   document.querySelectorAll<HTMLElement>("[data-thumb]").forEach((element) => {
-    observer.observe(element);
+    thumbnailObserver?.observe(element);
   });
   highlightThumbnail();
 }
 
 function highlightThumbnail(): void {
-  document.querySelectorAll<HTMLElement>("[data-page]").forEach((element) => {
-    const current = Number(element.dataset.page) === state.current;
-    element.classList.toggle("current", current);
-    if (current) element.scrollIntoView({ block: "nearest" });
-  });
+  highlightedThumbnail?.classList.remove("current");
+  highlightedThumbnail = sidebarContent.querySelector<HTMLElement>(`[data-page="${state.current}"]`);
+  highlightedThumbnail?.classList.add("current");
+  highlightedThumbnail?.scrollIntoView({ block: "nearest" });
 }
 
 function renderRecent(): void {
@@ -916,7 +950,10 @@ for (const id of ["brightness", "contrast", "grayscale"] as const) {
 }
 
 pageInput.addEventListener("change", () => navigate(Number(pageInput.value) - 1));
-pageSlider.addEventListener("input", () => navigate(Number(pageSlider.value) - 1));
+pageSlider.addEventListener("input", () => {
+  pageInput.value = pageSlider.value;
+});
+pageSlider.addEventListener("change", () => navigate(Number(pageSlider.value) - 1));
 viewer.addEventListener(
   "wheel",
   (event) => {
