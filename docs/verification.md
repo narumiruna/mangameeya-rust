@@ -322,3 +322,115 @@ The Windows smoke check is not a GPUI/SDK callback or installation test. macOS S
 runtime, signing, notarization, and actual updates remain unverified. Existing
 reader CI success cannot satisfy the updater acceptance criteria. Do not report
 this plan as complete or use test signing keys for a production package.
+
+## Independent Preferences window verification
+
+Validated on 2026-11-08 on macOS arm64 with Rust 1.99.1 and
+`DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer`.
+The implementation starts from `origin/main` at `11de5d9` on
+`narumi/feat/preferences-window`. The unchanged baseline passed formatting,
+174 parallel Rust tests, all-target/all-feature Clippy, and native Metal rendering.
+
+Preferences now uses one independent, nonmodal `WindowKind::Normal` window.
+Its initial content size is 560 × 520 logical px, its minimum is 440 × 360,
+and its content scrolls vertically. The OS owns the title bar and window movement.
+Reading contains position memory, explicit direction choices, and labeled background
+swatches. General contains the three language choices and conditional settings-error
+recovery. The footer explains immediate application and automatic saving; it does not
+claim that a pending or failed write succeeded. The reader retains Image and Playback
+tool tabs. The change does not add a theme switch or an always-on-top guarantee.
+
+`ReaderView` remains the only settings owner and writer. Preferences keeps a weak
+reader reference and an explicit reader-window handle. GPUI draws a new window before
+`open_window` returns, so creation is deferred until the reader's mutable update ends.
+Changes and explicit native menu actions run in the reader's window context.
+Window-close shortcuts have a separate Preferences context. A shutdown guard prevents
+a queued open request from creating a new window after Quit. macOS reopen activation
+uses the explicit reader handle, not the first application window.
+
+### Local checks
+
+| Check | Result |
+| --- | --- |
+| `cargo fmt --all -- --check` | Passed |
+| `cargo test --locked --all-features` | 188 passed; no failures or ignored tests; normal parallel execution |
+| `cargo test --locked --all-features --lib ui::tests::preferences` | 14 passed; no failures or ignored tests |
+| `cargo clippy --locked --all-targets --all-features -- -D warnings` | Passed |
+| `cargo test --locked --test rendering` | Passed with real Metal pixels, retained reader scenarios, and 27 new Preferences captures |
+| `cargo check --locked --all-targets --target x86_64-apple-darwin` | Passed; compilation evidence only |
+| Pinned `changenote 0.10.0 status` | Passed; the pending feature note selects a minor release; version files remain unchanged |
+| `CHANGENOTE_BIN="$PWD/target/changenote-cli/bin/changenote" uv run --no-project python -m unittest discover -s tests/release -v` | 21 passed; native packaging tools and GitHub writes are mocked |
+| `git diff --check` | Passed |
+
+The new regressions cover close/reopen and repeated activation, unchanged reader and
+panel geometry, direction synchronization and no-op selection without extra writes,
+reader-shortcut isolation, explicit Close comic versus local window close, Quit
+cleanup, queued open requests during shutdown, launch delivery while Preferences is
+open, failed window creation, input drafts created before opening, and language
+changes with mounted input controls. Save checks cover queued edits followed by
+window/document close, lossless native paths, delayed snapshots after language changes
+and corruption recovery, visible save failures, exact corruption backups, and refusal
+to reset valid settings. Existing reader, zoom, panel, filter, history, bookmark,
+interval-commit, settings-compatibility, and save-ordering assertions remain in place.
+
+Native rendering checks all three languages at both Preferences sizes. Controls must
+be fully visible or reachable by scrolling. Assertions check content hierarchy,
+selected states, non-overlapping control bounds, the fixed footer, localized errors,
+and backup/reset. The existing reader sizes remain 1280 × 800, 960 × 640, and 800 × 540.
+
+Captures are generated evidence, not committed assets:
+
+- `target/preferences-baseline/captures/`: retained before-change reader captures.
+- `target/ui-smoke/preferences-{en,ja,zh-Hant}-{560x520,440x360}-{healthy,error}.png`:
+  initial scroll position in each state and size.
+- The same names with `-scrolled.png`: the lower controls and error/recovery content.
+- `target/ui-smoke/preferences-{en,ja,zh-Hant}-reset.png`: the successful recovery state.
+
+Representative native captures were inspected for readable content, selected indicators,
+separation of groups, and reachable recovery controls; geometry assertions cover the full matrix. They show application content,
+not the physical OS title bar or desktop-window behavior. The ignored HTML concept
+and generated manga image remain local design references; neither is a runtime asset.
+
+Logs are under `target/`: `preferences-baseline/checks.log`,
+`preferences-baseline/rendering.log`, `preferences-final-checks.log`,
+`preferences-regressions.log`, `preferences-final-rendering.log`, and
+`preferences-release-tests.log`.
+The initial combined baseline command reached its 300-second tool limit during
+rendering; a separate baseline rendering run passed. During test migration, a
+controlled zoom popover had to be mounted before assigning its draft, visible option
+text needed the existing text-trace instrumentation, sequential deferred checkbox
+clicks needed an event turn between them, and a temporary-path assertion needed its
+canonical path. Those failures were corrected without removing behavior assertions.
+No final local check is failing or waived.
+
+The full diff was reviewed for correctness, security, lifecycle safety, compatibility,
+regressions, and scope, including an independent read-only review. Follow-up regression
+recommendations for pre-open drafts and delayed save completion were added and passed.
+No material findings remain. There are no dependency, settings-schema, reader-engine,
+installer, updater, or workflow changes. Existing settings need no conversion. Rollback
+is a revert of this UI change and its unreleased note; do not reset user reading data.
+No package was published, version tag created, or release workflow dispatched.
+
+The execution plan is `docs/plans/2026-11-08_preferences-window-plan.md`.
+Its unresolved external checks are retained below before plan removal.
+
+### Retained Preferences handoff
+
+- **Platform maintainer — Windows and macOS, including Intel:** Prerequisite: the
+  documented native toolchain and a supported desktop or CI runner. Run the normal
+  platform CI gates. Physical checks also require a desktop session: inspect OS close
+  controls and process exit, native menu activation, focus restoration, window movement,
+  fullscreen, multiple displays, display scaling, and IME input. Expected result: one
+  independent Preferences window with correct command targets and usable controls.
+  Local arm64 Metal tests and Intel cross-compilation do not establish those physical
+  paths or Windows runtime behavior. GPUI's test platform makes Quit a no-op, and its
+  public `simulate_close` helper restores a callback after the window was removed;
+  that helper panics for this close path. Automated tests therefore prove production
+  cleanup and action routing, not physical OS closure or process exit. Preserve all
+  existing CI/release gates and do not claim untested runtime paths as verified.
+- **Product maintainer — optional visual review:** Prerequisite: the native before/after
+  captures, the documented groups and controls, and a native build when available.
+  Compare wording, grouping, readability, and reading comfort with the local HTML
+  reference when available, not OS decoration or generated artwork pixels. Expected
+  result: a visual and usability assessment. Automated geometry and pixel tests do not
+  establish subjective product acceptance. This review adds no coding or release gate.
