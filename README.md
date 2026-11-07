@@ -1,47 +1,49 @@
 # MangaMeeya Rust
 
-以 Rust 與 [GPUI Kit](https://github.com/longbridge/gpui-kit) 完整改寫的離線漫畫閱讀器，同時支援 **Windows 與 macOS**。
-介面直接由 GPU 繪製，不使用 Tauri、WebView、TypeScript 或 Node.js。
+[English](README.md) | [正體中文](README.tw.md) | [日本語](README.ja.md)
 
-## 功能
+An offline comic reader for **Windows and macOS**, rewritten in Rust with [GPUI Kit](https://github.com/longbridge/gpui-kit).
+The GPU draws the interface directly. The application does not use Tauri, WebView, TypeScript, or Node.js.
 
-- 開啟圖片、圖片資料夾、ZIP/CBZ 與 RAR/CBR；支援子資料夾與自然排序。
-- English、日本語、正體中文介面，可在偏好設定即時切換並自動儲存。
-- 單頁、雙頁跨頁、垂直連續頁面，以及右向左／左向右閱讀。
-- 適合視窗、寬度、高度、原始尺寸，以及 10%–800% 縮放。
-- EXIF 方向、90 度旋轉、亮度、對比、灰階與動畫圖片。
-- 長圖片分割成 GPU textures，保留原始尺寸與解析度。
-- 虛擬化縮圖列、檔案瀏覽器、最近開啟、每本書閱讀位置與書籤。
-- 原生檔案選擇與儲存視窗、鍵盤、滾輪、畫面兩側點擊及全視窗拖放。
-- 全螢幕、定時投影片及另存原始圖片。
-- 單一視窗：再次啟動會將新路徑交給現有視窗；macOS 支援 Finder 的文件開啟事件。
-- Windows 安裝程式與 macOS app bundle 均宣告圖片及漫畫檔案關聯。
+## Features
 
-來源圖片不會被修改；另存操作會拒絕覆寫本書的來源檔案，包括 symlink 與 hard link。
-加密 RAR 會顯示錯誤，不會要求或保存密碼。
-每頁原始資料限 128 MiB；解碼限 32 megapixels。動畫另限 256 frames 與合計 128 MiB 的解碼資料。
-圖片資料由 Rust 直接載入，不經過 Base64 或 WebView IPC 傳輸。
-載圖在背景執行。離開可見區的圖片會從 CPU cache 與 GPU atlas 釋放；連續頁面的尺寸資料會保留，以維持捲動位置。
+- Open images, image folders, ZIP/CBZ, and RAR/CBR, with subfolder support and natural sorting.
+- English, Japanese, and Traditional Chinese interfaces. Change the language in Preferences; changes apply immediately and save automatically.
+- Single-page, two-page spread, and vertical continuous layouts, with right-to-left or left-to-right reading.
+- Fit to window, width, or height, original size, and 10%–800% zoom.
+- EXIF orientation, 90-degree rotation, brightness, contrast, grayscale, and animated images.
+- Split tall images into GPU textures without changing their original dimensions or resolution.
+- A virtualized thumbnail strip, file browser, recent files, per-book reading positions, and bookmarks.
+- Native open and save dialogs, keyboard controls, mouse wheel, page turns at either edge, and drag and drop across the window.
+- Fullscreen, timed slideshows, and saving original images.
+- A single window: subsequent launches send new paths to the existing window. macOS also supports document-open events from Finder.
+- Image and comic file associations in the Windows installer and macOS app bundle.
 
-## 執行
+Source images are not changed. The save operation refuses to overwrite source files in the current book. This protection also covers symbolic links and hard links.
+Encrypted RAR files show an error; the application does not request or store passwords.
+Each page is limited to 128 MiB of source data and 32 megapixels when decoded. Animations also have limits of 256 frames and 128 MiB of total decoded data.
+Rust loads image data directly, without Base64 or WebView IPC transfers.
+Images load in the background. Images outside the visible area are released from the CPU cache and GPU atlas. Continuous layouts retain image dimensions to keep the scroll position stable.
 
-安裝 [Rust](https://rustup.rs/)。`rust-toolchain.toml` 固定 Rust 1.99.1；GPUI Kit 版本與其 GPUI snapshot 由 `Cargo.lock` 固定。
+## Run
+
+Install [Rust](https://rustup.rs/). `rust-toolchain.toml` pins Rust 1.99.1. `Cargo.lock` pins GPUI Kit and its GPUI snapshot.
 
 ### Windows
 
-需要 Windows 10／11、支援 DirectX 11 的 GPU，以及 Visual Studio Build Tools 的 **Desktop development with C++** 工作負載與 Windows SDK。
+Requires Windows 10 or 11, a DirectX 11-compatible GPU, and Visual Studio Build Tools with the **Desktop development with C++** workload and Windows SDK.
 
 ```powershell
 cargo run --locked
 cargo run --locked -- "C:\Comics\book.cbz"
 ```
 
-不需要 WebView2 Runtime 或 Node.js。
+WebView2 Runtime and Node.js are not required.
 
 ### macOS
 
-支援 macOS 12 以上的 Apple Silicon 與 Intel Mac。從原始碼建置需要完整 Xcode 與 Metal compiler，不只 Command Line Tools。
-若 Xcode 尚未完成首次啟動或 Metal component 安裝，先在 Xcode 完成設定；以下命令不會代替使用者接受授權或開啟安裝提示。
+Supports Apple Silicon and Intel Macs with macOS 12 or later. Building from source requires full Xcode with the Metal compiler, not only Command Line Tools.
+If Xcode has not completed its first launch or Metal component installation, complete setup in Xcode first. The commands below do not accept licenses or open installation prompts on your behalf.
 
 ```sh
 export DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer
@@ -50,34 +52,34 @@ cargo run --locked
 cargo run --locked -- /path/to/book.cbz
 ```
 
-## 操作
+## Controls
 
-| 操作 | 按鍵 |
+| Action | Keys |
 | --- | --- |
-| 開啟漫畫／資料夾 | `Ctrl+O`／`Ctrl+Shift+O` |
-| 另存原始圖片／關閉漫畫 | `Ctrl+S`／`Ctrl+W` |
-| 下一頁／上一頁 | `Space`、`PageDown`／`PageUp` |
-| 依閱讀方向翻頁 | `←`、`→` |
-| 捲動閱讀區 | `↑`、`↓`、滑鼠滾輪 |
-| 第一頁／最後一頁 | `Home`／`End` |
-| 單頁／雙頁、連續頁面、閱讀方向 | `S`、`C`、`D` |
-| 適合視窗／寬度／高度／原尺寸 | `F`／`W`／`H`／`1` |
-| 放大／縮小／100% | `+`／`-`／`0` |
-| 旋轉 | `[`／`]` |
-| 新增書籤／跳至書籤 | `B`／`Shift+B` |
-| 投影片／縮圖／側欄 | `P`／`T`／`Tab` |
-| 全螢幕／離開全螢幕 | `F11`／`Escape` |
+| Open comic / folder | `Ctrl+O` / `Ctrl+Shift+O` |
+| Save original image / close comic | `Ctrl+S` / `Ctrl+W` |
+| Next page / previous page | `Space`, `PageDown` / `PageUp` |
+| Turn pages in the reading direction | `←`, `→` |
+| Scroll the reading area | `↑`, `↓`, mouse wheel |
+| First page / last page | `Home` / `End` |
+| Single page / spread, continuous pages, reading direction | `S`, `C`, `D` |
+| Fit window / width / height / original size | `F` / `W` / `H` / `1` |
+| Zoom in / zoom out / 100% | `+` / `-` / `0` |
+| Rotate | `[` / `]` |
+| Set bookmark / go to bookmark | `B` / `Shift+B` |
+| Slideshow / thumbnails / sidebar | `P` / `T` / `Tab` |
+| Fullscreen / exit fullscreen | `F11` / `Escape` |
 
-macOS 同時支援 `Command+O`、`Command+Shift+O`、`Command+S`、`Command+W`、`Command+Q`、`Command+,` 與 `Control+Command+F`。
-一般滾輪只捲動，不直接翻頁；按住 `Ctrl` 使用滾輪可縮放。單頁與雙頁可點擊閱讀區的左右邊緣翻頁。
+macOS also supports `Command+O`, `Command+Shift+O`, `Command+S`, `Command+W`, `Command+Q`, `Command+,`, and `Control+Command+F`.
+The mouse wheel scrolls without directly turning pages. Hold `Ctrl` while using the wheel to zoom. In single-page and two-page layouts, click the left or right edge of the reading area to turn pages.
 
-工具列的「縮放」控制項同時顯示目前模式與實際縮放比例。按下控制項可開啟 Popover，切換適合視窗、寬度、高度或原始尺寸，也可輸入百分比或使用 `−`／`+` 調整。
+The toolbar's **Zoom** control shows both the current mode and the actual zoom percentage. Click it to open a popover. You can fit to the window, width, or height, select original size, enter a percentage, or adjust with `−` / `+`.
 
-- 百分比以目前頁面為準；雙頁尺寸不同時，兩頁的比例可能不同。載圖尺寸尚未取得時顯示 `—`。
-- 手動輸入、放大／縮小或 `Ctrl`＋滾輪會切換為「自訂縮放」。放大／縮小與滾輪以目前實際比例計算，手動輸入則套用指定比例。手動縮放限 10%–800%；自動適應的比例不受此範圍限制。
-- 輸入百分比後按 `Enter` 套用並關閉 Popover。選擇適應方式也會關閉；`−`／`+` 可連續調整。按 `Escape` 或點擊外部可關閉而不套用未送出的輸入。
+- The percentage refers to the current page. Pages of different sizes in a spread can have different percentages. The control shows `—` until image dimensions are available.
+- Manual input, zoom in/out, and `Ctrl`+wheel switch to **Custom zoom**. Zoom in/out and the wheel use the current actual percentage; manual input applies the specified percentage. Manual zoom is limited to 10%–800%; automatic fit modes are not limited to this range.
+- After you enter a percentage, press `Enter` to apply it and close the popover. Selecting a fit mode also closes it; `−` / `+` allow repeated adjustments. Press `Escape` or click outside to close it without applying unsubmitted input.
 
-頁碼在按下 `Enter` 後套用；投影片間隔在按下 `Enter` 或離開欄位後套用。
+Page numbers apply when you press `Enter`. The slideshow interval applies when you press `Enter` or leave the field.
 
 ## Language
 
@@ -91,20 +93,20 @@ GPUI component text uses the matching locale; component strings not supplied by 
 Before using an older build, back up `settings.json` and remove only `preferences.language`
 from the working copy. Older builds reject unknown preference fields; do not reset reading data to downgrade.
 
-## 本機資料
+## Local data
 
-偏好、閱讀位置、最近開啟與書籤存於使用者的 `settings.json`，以暫存檔及 atomic replacement 儲存。
+Preferences, reading positions, recent files, and bookmarks are stored in the user's `settings.json`. Saves use a temporary file and atomic replacement.
 
-- Windows：`%APPDATA%\MangaMeeya\MangaMeeya Rust\config\settings.json`
-- macOS：`~/Library/Application Support/org.MangaMeeya.MangaMeeya-Rust/settings.json`
+- Windows: `%APPDATA%\MangaMeeya\MangaMeeya Rust\config\settings.json`
+- macOS: `~/Library/Application Support/org.MangaMeeya.MangaMeeya-Rust/settings.json`
 
-實際路徑由 `directories::ProjectDirs` 決定。設定檔損壞時會保留原檔並顯示錯誤；可在偏好設定按「備份並重設設定」，先保留 `settings.json.corrupt-*` 再重設。
-舊版 WebView local storage 不會被讀取、刪除或自動遷移。
-單一視窗的 lock 與經驗證的 loopback endpoint 也位於此目錄，關閉程式會移除 endpoint。
+`directories::ProjectDirs` determines the actual path. If the settings file is corrupt, the application keeps the original and shows an error. In Preferences, select **Back up and reset settings** to save a `settings.json.corrupt-*` backup before resetting.
+Local storage from the older WebView version is not read, deleted, or migrated automatically.
+The single-window lock and authenticated loopback endpoint are also in this directory. The endpoint is removed when the application closes.
 
-## 檢查
+## Checks
 
-在 macOS 執行前先設定上述 `DEVELOPER_DIR`。
+On macOS, set `DEVELOPER_DIR` as shown above before running these commands.
 
 ```sh
 cargo fmt --all -- --check
@@ -113,60 +115,60 @@ cargo clippy --locked --all-targets --all-features -- -D warnings
 cargo test --locked --test rendering
 ```
 
-一般測試涵蓋封存檔、排序、安全限制、匯出、設定、EXIF、動畫、閱讀狀態、launch IPC 及 GPUI 控制項互動。
-`rendering` 使用正式 `ReaderView`，操作原生鍵盤與滑鼠事件。在 macOS 會以真實 Metal renderer 檢查像素，將圖片寫入 `target/ui-smoke/`，不需要螢幕錄製權限。
-Windows 的同一測試使用原生 text system 檢查互動；不宣稱有 Metal 或離屏 GPU 渲染。
+The regular tests cover archives, sorting, safety limits, export, settings, EXIF, animation, reader state, launch IPC, and GPUI control interactions.
+The `rendering` test uses the production `ReaderView` with native keyboard and mouse events. On macOS, it checks pixels with the real Metal renderer and writes images to `target/ui-smoke/`. Screen recording permission is not required.
+On Windows, the same test checks interactions with the native text system. It does not claim Metal or offscreen GPU rendering coverage.
 
-## 打包
+## Packaging
 
 ### Windows NSIS
 
-另外安裝 NSIS，再執行：
+Install NSIS in addition to the build tools, then run:
 
 ```powershell
 pwsh -NoProfile -NonInteractive -File packaging/windows/build.ps1
 ```
 
-輸出：`target/release/bundle/nsis/*-setup.exe`。
-安裝只寫入目前使用者的目錄與 HKCU。檔案關聯加入 **Open With**，不變更既有預設程式；解除安裝保留閱讀資料。
+Output: `target/release/bundle/nsis/*-setup.exe`.
+Installation writes only to the current user's directory and HKCU. File associations are added to **Open With** without changing existing defaults. Uninstall keeps reading data.
 
-### macOS app、ZIP 與 DMG
+### macOS app, ZIP, and DMG
 
 ```sh
 DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer \
   bash packaging/macos/build.sh
-# 指定 Intel build 前先安裝 target：
+# Install the target before requesting an Intel build:
 rustup target add x86_64-apple-darwin
 DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer \
   bash packaging/macos/build.sh x86_64-apple-darwin
 ```
 
-輸出：`target/release/bundle/macos/<target>/`。
-套件包含 `.app`、ZIP 與 DMG，並使用 ad-hoc signing 驗證本機完整性。這不是 Developer ID signing，也未 notarize；公開發行前仍需由帳號持有人簽署及 notarize。
+Output: `target/release/bundle/macos/<target>/`.
+Packages include an `.app`, ZIP, and DMG, with ad-hoc signing to verify local integrity. They do not have Developer ID signing or notarization. The account holder must sign and notarize them before public distribution.
 
-## CI 與驗證範圍
+## CI and verification scope
 
-`.github/workflows/windows.yml` 在 Windows x64、macOS arm64 與 macOS x86_64 執行測試、Clippy、打包與 artifact 上傳。
-Windows job 另以 silent install／uninstall 測試全部 11 個檔案關聯及預設關聯保留行為。
-請以實際 workflow 結果判定各平台的安裝測試狀態；本機 cross-check 不等於 Windows 執行或安裝驗證。
-完整驗證記錄與尚未執行的平台檢查見 [驗證記錄](docs/verification.md)。
+`.github/workflows/windows.yml` runs tests, Clippy, packaging, and artifact uploads on Windows x64, macOS arm64, and macOS x86_64.
+The Windows job also tests silent install/uninstall, all 11 file associations, and preservation of default associations.
+Use actual workflow results to determine installation test status for each platform. A local cross-check is not Windows execution or installation verification.
+See the [verification record](docs/verification.md) for full results and platform checks that have not yet run.
 
-版本發布使用 [changenote](https://github.com/narumiruna/changenote) 與 `.github/workflows/release.yml`。
-合併變更前加入 [release note](.changenote/README.md)；合併產生的 Release PR 後，工作流程會驗證指定 commit、建立 GitHub Release，並附上三平台安裝套件。
-啟用前需允許 Actions 建立 PR；操作、重試及簽署限制見 [發布流程](packaging/README.md#release-workflow)。
+Releases use [changenote](https://github.com/narumiruna/changenote) and `.github/workflows/release.yml`.
+Add a [release note](.changenote/README.md) before merging changes. After the generated Release PR is merged, the workflow verifies the specified commit, creates a GitHub Release, and attaches native packages for all three platforms.
+Before enabling this workflow, allow Actions to create PRs. See the [release workflow](packaging/README.md#release-workflow) for operation, retries, and signing limits.
 
-## 結構
+## Structure
 
-- `src/book.rs`：圖片、資料夾、ZIP／RAR、目錄瀏覽與安全匯出。
-- `src/reader.rs`：閱讀狀態、導航與版面計算。
-- `src/imaging.rs`：受限解碼、EXIF、動畫與像素處理。
-- `src/settings.rs`：使用者設定、atomic save 與損壞資料保護。
-- `src/i18n.rs`：English、日本語與正體中文的完整介面翻譯及安全參數替換。
-- `src/instance.rs`：單一程序與經驗證的 launch forwarding。
-- `src/ui.rs`、`src/ui/tests.rs`：GPUI Kit 視窗、背景載入、texture tiles 與互動測試。
-- `packaging/`：雙平台原生套件；`tests/`：封存 fixture 與原生渲染測試。
+- `src/book.rs`: images, folders, ZIP/RAR, directory browsing, and safe export.
+- `src/reader.rs`: reader state, navigation, and layout calculations.
+- `src/imaging.rs`: bounded decoding, EXIF, animation, and pixel processing.
+- `src/settings.rs`: user settings, atomic saves, and protection for corrupt data.
+- `src/i18n.rs`: complete English, Japanese, and Traditional Chinese interface translations with safe parameter substitution.
+- `src/instance.rs`: single-instance control and authenticated launch forwarding.
+- `src/ui.rs`, `src/ui/tests.rs`: GPUI Kit windows, background loading, texture tiles, and interaction tests.
+- `packaging/`: native packages for both operating systems; `tests/`: archive fixtures and native rendering tests.
 
-## 授權
+## License
 
-本專案依 [GNU Affero General Public License v3.0](LICENSE) 授權。
-GPUI Kit、GPUI 與 Lucide icons 保留各自的授權。MangaMeeya 名稱及原始應用程式相關權利屬各自權利人所有。
+This project is licensed under the [GNU Affero General Public License v3.0](LICENSE).
+GPUI Kit, GPUI, and Lucide icons keep their respective licenses. Rights to the MangaMeeya name and original application belong to their respective owners.
