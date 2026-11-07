@@ -216,6 +216,15 @@ class SourcePreparationTests(unittest.TestCase):
         self.assertFalse(output.exists())
         self.assertEqual(list(output.parent.glob(".sdk-prepare-*")), [])
 
+    def test_added_sdk_source_whitespace_is_still_rejected(self):
+        archive, pin_file, _ = self.fixture(source_patch=PATCH.replace(b"+after\n", b"+after  \n"))
+        output = self.root / "target/sdk"
+        with patch.object(PREPARE, "ROOT", self.root), patch.object(PREPARE, "PIN_FILE", pin_file):
+            with self.assertRaises(PREPARE.subprocess.CalledProcessError):
+                PREPARE.prepare("winsparkle", output, archive)
+        self.assertFalse(output.exists())
+        self.assertEqual(list(output.parent.glob(".sdk-prepare-*")), [])
+
     def test_git_environment_does_not_redirect_patch_writes(self):
         archive, pin_file, _ = self.fixture()
         output = self.root / "target/sdk"
