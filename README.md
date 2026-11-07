@@ -6,6 +6,7 @@
 ## 功能
 
 - 開啟圖片、圖片資料夾、ZIP/CBZ 與 RAR/CBR；支援子資料夾與自然排序。
+- English、日本語、正體中文介面，可在偏好設定即時切換並自動儲存。
 - 單頁、雙頁跨頁、垂直連續頁面，以及右向左／左向右閱讀。
 - 適合視窗、寬度、高度、原始尺寸，以及 10%–800% 縮放。
 - EXIF 方向、90 度旋轉、亮度、對比、灰階與動畫圖片。
@@ -78,6 +79,18 @@ macOS 同時支援 `Command+O`、`Command+Shift+O`、`Command+S`、`Command+W`�
 
 頁碼在按下 `Enter` 後套用；投影片間隔在按下 `Enter` 或離開欄位後套用。
 
+## Language
+
+Open **Preferences → Language** and select **English**, **日本語**, or **正體中文**.
+The choice applies immediately and is saved in `settings.json` as `preferences.language`
+(`en`, `ja`, or `zh-Hant`). English is the default, including for older settings without this field.
+Menus, controls, tooltips, accessibility labels, and reader messages use the selected language.
+File names and technical error details are unchanged. Native file dialog controls use the OS language.
+GPUI component text uses the matching locale; component strings not supplied by GPUI, including Japanese text-editing menus, fall back to English.
+
+Before using an older build, back up `settings.json` and remove only `preferences.language`
+from the working copy. Older builds reject unknown preference fields; do not reset reading data to downgrade.
+
 ## 本機資料
 
 偏好、閱讀位置、最近開啟與書籤存於使用者的 `settings.json`，以暫存檔及 atomic replacement 儲存。
@@ -148,6 +161,7 @@ Windows job 另以 silent install／uninstall 測試全部 11 個檔案關聯及
 - `src/reader.rs`：閱讀狀態、導航與版面計算。
 - `src/imaging.rs`：受限解碼、EXIF、動畫與像素處理。
 - `src/settings.rs`：使用者設定、atomic save 與損壞資料保護。
+- `src/i18n.rs`：English、日本語與正體中文的完整介面翻譯及安全參數替換。
 - `src/instance.rs`：單一程序與經驗證的 launch forwarding。
 - `src/ui.rs`、`src/ui/tests.rs`：GPUI Kit 視窗、背景載入、texture tiles 與互動測試。
 - `packaging/`：雙平台原生套件；`tests/`：封存 fixture 與原生渲染測試。

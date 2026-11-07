@@ -1,7 +1,9 @@
 use super::*;
+use crate::i18n::Language;
 use gpui_kit::{AnyWindowHandle, TestAppContext, test::TestWindowExt};
 use tempfile::TempDir;
 
+mod i18n;
 mod zoom;
 
 struct Fixture {
@@ -12,6 +14,12 @@ struct Fixture {
 }
 
 fn fixture(cx: &mut TestAppContext) -> Fixture {
+    let mut settings = AppSettings::default();
+    settings.preferences.language = Language::TraditionalChinese;
+    fixture_with_settings(cx, settings)
+}
+
+fn fixture_with_settings(cx: &mut TestAppContext, settings: AppSettings) -> Fixture {
     cx.update(init);
     let directory = tempfile::tempdir().unwrap();
     let path = directory.path().join("settings.json");
@@ -27,17 +35,7 @@ fn fixture(cx: &mut TestAppContext) -> Fixture {
             },
             cx,
             |window, cx| {
-                cx.new(|cx| {
-                    ReaderView::new(
-                        AppSettings::default(),
-                        path,
-                        None,
-                        None,
-                        launches,
-                        window,
-                        cx,
-                    )
-                })
+                cx.new(|cx| ReaderView::new(settings, path, None, None, launches, window, cx))
             },
         )
         .unwrap()

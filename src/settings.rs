@@ -1,5 +1,6 @@
 //! Reader preferences and atomic, per-user settings storage.
 
+use crate::i18n::Language;
 use directories::ProjectDirs;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
@@ -53,6 +54,7 @@ pub enum Background {
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct Preferences {
+    pub language: Language,
     pub mode: ReadingMode,
     pub rtl: bool,
     pub fit: FitMode,
@@ -68,6 +70,7 @@ pub struct Preferences {
 impl Default for Preferences {
     fn default() -> Self {
         Self {
+            language: Language::English,
             mode: ReadingMode::Single,
             rtl: true,
             fit: FitMode::Window,
@@ -486,6 +489,7 @@ mod tests {
     #[test]
     fn defaults_match_reader_behavior() {
         let preferences = Preferences::default();
+        assert_eq!(preferences.language, Language::English);
         assert_eq!(preferences.mode, ReadingMode::Single);
         assert!(preferences.rtl);
         assert_eq!(preferences.fit, FitMode::Window);
@@ -495,6 +499,35 @@ mod tests {
         assert!(preferences.recursive_folder);
         assert!(preferences.remember_position);
         assert_eq!(preferences.interval, 5);
+    }
+
+    #[test]
+    fn language_defaults_for_legacy_settings_and_round_trips() {
+        let legacy: AppSettings = serde_json::from_str(
+            r#"{"preferences":{"interval":17},"recent":["books/日本語.cbz"]}"#,
+        )
+        .unwrap();
+        assert_eq!(legacy.preferences.language, Language::English);
+        assert_eq!(legacy.preferences.interval, 17);
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("settings.json");
+        for language in Language::ALL {
+            let mut settings = legacy.clone();
+            settings.preferences.language = language;
+            settings.save_to(&path).unwrap();
+            assert_eq!(AppSettings::load_from(&path).unwrap(), settings);
+        }
+    }
+
+    #[test]
+    fn unsupported_language_is_not_overwritten() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("settings.json");
+        let bytes = br#"{"preferences":{"language":"unknown"}}"#;
+        fs::write(&path, bytes).unwrap();
+        assert!(AppSettings::load_from(&path).is_err());
+        assert!(AppSettings::default().save_to(&path).is_err());
+        assert_eq!(fs::read(&path).unwrap(), bytes);
     }
 
     #[test]
@@ -558,7 +591,9 @@ mod tests {
         assert_eq!(settings.bookmarks[Path::new("windows:[55296]")], 8);
         settings.save_to(&path).unwrap();
         let saved: serde_json::Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
-        assert_eq!(saved, legacy);
+        let mut expected = legacy;
+        expected["preferences"]["language"] = serde_json::json!("en");
+        assert_eq!(saved, expected);
         assert_eq!(AppSettings::load_from(&path).unwrap(), settings);
     }
 
@@ -732,6 +767,7 @@ mod tests {
         let utf8 = PathBuf::from("books/日本語.cbz");
         let mut settings = AppSettings {
             preferences: Preferences {
+                language: Language::Japanese,
                 mode: ReadingMode::Continuous,
                 rtl: false,
                 fit: FitMode::Width,
