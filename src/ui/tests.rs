@@ -165,6 +165,164 @@ fn image_replacement_and_close_release_native_atlas_entries(cx: &mut TestAppCont
 }
 
 #[gpui_kit::test]
+fn paged_fitted_pages_do_not_scroll_into_blank_space(cx: &mut TestAppContext) {
+    let fixture = fixture(cx);
+    let folder = book(&fixture, "comic", 2);
+    fixture.sender.send(vec![folder]).unwrap();
+    pump(&fixture, cx);
+
+    for mode in [ReadingMode::Single, ReadingMode::Spread] {
+        for fit in [FitMode::Window, FitMode::Height, FitMode::Original] {
+            cx.update_window(fixture.window, |_, window, cx| {
+                fixture.view.update(cx, |view, cx| {
+                    view.reader.set_mode(mode);
+                    view.reader.set_fit(fit);
+                    view.relayout(cx);
+                    view.navigate(0, window, cx);
+                });
+            })
+            .unwrap();
+            pump(&fixture, cx);
+            fixture.view.read_with(cx, |view, _| {
+                assert_eq!(
+                    view.paged_scroll.max_offset(),
+                    point(px(0.), px(0.)),
+                    "{mode:?} with {fit:?} must not add a blank scroll range"
+                );
+            });
+            cx.update_window(fixture.window, |_, window, cx| {
+                window.scroll(
+                    "viewer",
+                    gpui_kit::ScrollDelta::Pixels(point(px(-10_000.), px(-10_000.))),
+                    cx,
+                );
+                window.press("down", cx);
+            })
+            .unwrap();
+            pump(&fixture, cx);
+            fixture.view.read_with(cx, |view, _| {
+                assert_eq!(view.paged_scroll.offset(), point(px(0.), px(0.)));
+                assert_eq!(view.reader.current, 0);
+            });
+        }
+    }
+}
+
+#[gpui_kit::test]
+fn paged_zoom_scroll_stops_at_page_edges_and_clamps_after_fit(cx: &mut TestAppContext) {
+    let fixture = fixture(cx);
+    let folder = book(&fixture, "comic", 2);
+    for (index, width, height) in [(1, 320, 480), (2, 400, 600)] {
+        image::RgbaImage::from_pixel(width, height, image::Rgba([80, 160, 220, 255]))
+            .save(folder.join(format!("{index}.png")))
+            .unwrap();
+    }
+    fixture.sender.send(vec![folder.clone()]).unwrap();
+    pump(&fixture, cx);
+
+    for mode in [ReadingMode::Single, ReadingMode::Spread] {
+        cx.update_window(fixture.window, |_, window, cx| {
+            fixture.view.update(cx, |view, cx| {
+                view.reader.set_mode(mode);
+                view.reader.set_zoom(8.);
+                view.relayout(cx);
+                view.navigate(0, window, cx);
+            });
+        })
+        .unwrap();
+        pump(&fixture, cx);
+        let (maximum, indices) = fixture.view.read_with(cx, |view, _| {
+            let maximum = view.paged_scroll.max_offset();
+            assert!(maximum.x > px(0.));
+            assert!(maximum.y > px(0.));
+            (maximum, view.reader.display_indices())
+        });
+        cx.update_window(fixture.window, |_, window, cx| {
+            window.scroll(
+                "viewer",
+                gpui_kit::ScrollDelta::Pixels(point(px(-100_000.), px(0.))),
+                cx,
+            );
+            window.scroll(
+                "viewer",
+                gpui_kit::ScrollDelta::Pixels(point(px(0.), px(-100_000.))),
+                cx,
+            );
+        })
+        .unwrap();
+        pump(&fixture, cx);
+        fixture.view.read_with(cx, |view, _| {
+            assert_eq!(view.paged_scroll.offset(), point(-maximum.x, -maximum.y));
+            assert_eq!(view.reader.current, 0);
+        });
+        cx.update_window(fixture.window, |_, window, cx| {
+            window.render_frame(cx);
+            let viewer = window.find("viewer").bounds();
+            let pages: Vec<_> = indices
+                .iter()
+                .map(|index| {
+                    window
+                        .find(SharedString::from(format!(
+                            "page:{}:{}.png",
+                            folder.canonicalize().unwrap().display(),
+                            index + 1
+                        )))
+                        .bounds()
+                })
+                .collect();
+            let right = pages.iter().map(|page| page.right()).max().unwrap();
+            let bottom = pages.iter().map(|page| page.bottom()).max().unwrap();
+            assert!(f32::from(right - viewer.right()).abs() < 1.);
+            assert!(f32::from(bottom - viewer.bottom()).abs() < 1.);
+
+            window.press("up", cx);
+            assert_eq!(
+                fixture.view.read(cx).paged_scroll.offset().y,
+                -maximum.y + px(80.)
+            );
+            window.press("down", cx);
+            window.press("down", cx);
+            assert_eq!(fixture.view.read(cx).paged_scroll.offset().y, -maximum.y);
+
+            window.drag(
+                point(viewer.right() - px(6.), viewer.bottom() - px(20.)),
+                point(viewer.right() - px(6.), viewer.top() + px(20.)),
+                cx,
+            );
+            assert_eq!(fixture.view.read(cx).paged_scroll.offset().y, px(0.));
+            window.drag(
+                point(viewer.right() - px(20.), viewer.bottom() - px(6.)),
+                point(viewer.left() + px(20.), viewer.bottom() - px(6.)),
+                cx,
+            );
+            assert_eq!(
+                fixture.view.read(cx).paged_scroll.offset(),
+                point(px(0.), px(0.))
+            );
+            for position in [
+                point(viewer.size.width - px(6.), viewer.size.height / 2.),
+                point(viewer.size.width / 2., viewer.size.height - px(6.)),
+            ] {
+                window.click_at("viewer", position, cx);
+            }
+            let view = fixture.view.read(cx);
+            let offset = view.paged_scroll.offset();
+            assert!(offset.x < px(0.) && offset.x >= -maximum.x);
+            assert!(offset.y < px(0.) && offset.y >= -maximum.y);
+            assert_eq!(view.reader.current, 0);
+            window.press("f", cx);
+        })
+        .unwrap();
+        pump(&fixture, cx);
+        fixture.view.read_with(cx, |view, _| {
+            assert_eq!(view.reader.settings.preferences.fit, FitMode::Window);
+            assert_eq!(view.paged_scroll.max_offset(), point(px(0.), px(0.)));
+            assert_eq!(view.paged_scroll.offset(), point(px(0.), px(0.)));
+        });
+    }
+}
+
+#[gpui_kit::test]
 fn continuous_remeasurement_preserves_progress_and_explicit_page_target(cx: &mut TestAppContext) {
     let fixture = fixture(cx);
     let path = book(&fixture, "comic", 5);

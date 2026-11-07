@@ -1984,13 +1984,24 @@ impl ReaderView {
                 pages = pages.child(self.page_element(index, count, cx));
             }
             div()
-                .id("paged-scroll")
+                .relative()
                 .size_full()
-                .overflow_scroll()
-                .track_scroll(&self.paged_scroll)
-                .child(pages)
-                .child(Scrollbar::vertical(&self.paged_scroll))
-                .child(Scrollbar::horizontal(&self.paged_scroll))
+                .child(
+                    div()
+                        .id("paged-scroll")
+                        .size_full()
+                        .overflow_scroll()
+                        .track_scroll(&self.paged_scroll)
+                        .child(pages),
+                )
+                // Scrollbar overlays must not increase the measured content size.
+                .child(
+                    div()
+                        .absolute()
+                        .inset_0()
+                        .child(Scrollbar::vertical(&self.paged_scroll))
+                        .child(Scrollbar::horizontal(&self.paged_scroll)),
+                )
                 .into_any_element()
         };
         let view = cx.entity().downgrade();
