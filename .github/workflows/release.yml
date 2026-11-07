@@ -117,7 +117,7 @@ jobs:
           path: release-assets
       - name: Upload missing native release packages
         env:
-          GH_TOKEN: ${{ secrets.PAT_TOKEN || github.token }}
+          GH_TOKEN: ${{ secrets.PAT_TOKEN }}
           GH_REPO: ${{ github.repository }}
           RELEASE_COMMIT: ${{ needs.publish.outputs.release-commit }}
           RELEASES: ${{ needs.publish.outputs.releases }}

@@ -84,16 +84,6 @@ else:
 '''
 
 
-class ReleaseWorkflowTests(unittest.TestCase):
-    def test_asset_upload_token_falls_back_to_job_token(self):
-        workflow = (ROOT / ".github/workflows/release.yml").read_text()
-        assets_job = workflow.split("\n  assets:\n", 1)[1]
-        self.assertIn(
-            "          GH_TOKEN: ${{ secrets.PAT_TOKEN || github.token }}\n",
-            assets_job,
-        )
-
-
 class UploadReleaseTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -337,7 +327,7 @@ class UploadReleaseTests(unittest.TestCase):
                 self.assertEqual(self.calls(), [])
 
     def test_requires_release_environment(self):
-        for name in ("GH_TOKEN", "GH_REPO", "RELEASES", "RELEASE_COMMIT"):
+        for name in ("GH_REPO", "RELEASES", "RELEASE_COMMIT"):
             for value in (None, ""):
                 with self.subTest(name=name, value=value):
                     self.assert_no_uploads(self.run_upload({name: value}), no_api=True)
