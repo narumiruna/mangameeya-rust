@@ -3,7 +3,8 @@
 
 use gpui_kit::{
     AnyWindowHandle, AppContext, Bounds, Entity, HeadlessAppContext, Modifiers, PlatformInput,
-    ScrollDelta, ScrollEvent, WindowBounds, WindowOptions, point, px, size, test::TestWindowExt,
+    ScrollDelta, ScrollEvent, Window, WindowBounds, WindowOptions, point, px, size,
+    test::TestWindowExt,
 };
 use mangameeya_rust::{
     settings::AppSettings,
@@ -55,6 +56,118 @@ fn snapshot(
         let _ = (cx, window, name);
         None
     }
+}
+
+fn assert_zoom_closed(window: &Window, label: &str) {
+    assert_eq!(window.find_all("zoom-trigger").len(), 1);
+    assert_eq!(window.find("zoom-trigger").label(), Some(label));
+    assert!(window.try_find("zoom-panel").is_none());
+    assert!(window.try_find("zoom-input").is_none());
+}
+
+fn assert_zoom_panel_in_viewport(window: &Window) {
+    assert_eq!(window.find_all("zoom-panel").len(), 1);
+    let panel = window.find("zoom-panel");
+    assert!(panel.visible());
+    let bounds = panel.bounds();
+    let viewport = window.viewport_size();
+    assert!(bounds.size.width > px(0.) && bounds.size.height > px(0.));
+    assert!(
+        bounds.left() >= px(0.)
+            && bounds.top() >= px(0.)
+            && bounds.right() <= viewport.width
+            && bounds.bottom() <= viewport.height,
+        "zoom popup must stay inside the window: {bounds:?}, viewport: {viewport:?}"
+    );
+    for id in [
+        "zoom-input",
+        "zoom-in",
+        "zoom-out",
+        "zoom-fit-window",
+        "zoom-fit-width",
+        "zoom-fit-height",
+        "zoom-original",
+    ] {
+        assert!(
+            window.find(id).visible(),
+            "popup control must be visible: {id}"
+        );
+    }
+}
+
+fn capture_zoom_states(cx: &mut HeadlessAppContext, window: AnyWindowHandle) {
+    for (width, height, suffix) in [(1280., 800., "1280x800"), (960., 640., "960x640")] {
+        cx.update_window(window, |_, window, cx| {
+            window.resize(size(px(width), px(height)));
+            // TestPlatform changes its bounds without a native resize callback.
+            window.bounds_changed(cx);
+        })
+        .unwrap();
+        settle(cx, window);
+        cx.update_window(window, |_, window, _| {
+            assert_eq!(window.viewport_size(), size(px(width), px(height)));
+            assert_zoom_closed(window, "縮放設定，適合視窗，100%");
+        })
+        .unwrap();
+        snapshot(cx, window, &format!("zoom-closed-{suffix}"));
+
+        cx.update_window(window, |_, window, cx| window.click("zoom-trigger", cx))
+            .unwrap();
+        settle(cx, window);
+        cx.update_window(window, |_, window, _| {
+            assert_zoom_panel_in_viewport(window);
+            assert_eq!(window.find("zoom-input").value(), Some("100"));
+        })
+        .unwrap();
+        snapshot(cx, window, &format!("zoom-open-{suffix}"));
+
+        cx.update_window(window, |_, window, cx| {
+            window.click("zoom-in", cx);
+            assert_zoom_panel_in_viewport(window);
+            window.click("zoom-out", cx);
+            assert_zoom_panel_in_viewport(window);
+            window.click("zoom-input", cx);
+            window.press(
+                if cfg!(target_os = "macos") {
+                    "cmd-a"
+                } else {
+                    "ctrl-a"
+                },
+                cx,
+            );
+            window.input("200%", cx);
+            window.press("enter", cx);
+        })
+        .unwrap();
+        settle(cx, window);
+        cx.update_window(window, |_, window, _| {
+            assert_zoom_closed(window, "縮放設定，自訂縮放，200%");
+        })
+        .unwrap();
+        snapshot(cx, window, &format!("zoom-custom-{suffix}"));
+
+        cx.update_window(window, |_, window, cx| {
+            window.click("zoom-trigger", cx);
+            window.click("zoom-fit-window", cx);
+            assert_zoom_closed(window, "縮放設定，適合視窗，100%");
+        })
+        .unwrap();
+        settle(cx, window);
+    }
+    // Keep the existing rendering workflows at their original size and state.
+    cx.update_window(window, |_, window, cx| {
+        window.resize(size(px(1280.), px(800.)));
+        window.bounds_changed(cx);
+        window.press("home", cx);
+    })
+    .unwrap();
+    settle(cx, window);
+    cx.update_window(window, |_, window, _| {
+        assert_eq!(window.viewport_size(), size(px(1280.), px(800.)));
+        assert_eq!(window.find("page-input").value(), Some("1"));
+        assert_zoom_closed(window, "縮放設定，適合視窗，100%");
+    })
+    .unwrap();
 }
 
 fn open_reader(
@@ -138,6 +251,11 @@ fn main() {
     settle(&mut cx, window);
     cx.update_window(window, |_, window, cx| {
         assert_eq!(window.find("next").disabled(), Some(true));
+        assert_eq!(window.find("zoom-trigger").disabled(), Some(true));
+        assert!(window.try_find("zoom-panel").is_none());
+        assert!(window.try_find("zoom-input").is_none());
+        window.click("zoom-trigger", cx);
+        assert!(window.try_find("zoom-panel").is_none());
         window.click("next", cx);
         assert_eq!(window.find("page-input").value(), Some("1"));
     })
@@ -159,6 +277,8 @@ fn main() {
             "The decoded source page must reach the Metal scene, not a placeholder: {red}"
         );
     }
+    capture_zoom_states(&mut cx, window);
+
     // Cover archive indexing, natural order, extraction, decoding, and Metal in
     // one workflow, with central-directory order different from reading order.
     let archive_path = temporary.path().join("reader.cbz");
@@ -226,6 +346,8 @@ fn main() {
     settle(&mut cx, window);
     cx.update_window(window, |_, window, cx| {
         assert_eq!(window.find("page-input").value(), Some("5"));
+        window.click("zoom-trigger", cx);
+        assert_zoom_panel_in_viewport(window);
         window.click("zoom-input", cx);
         window.press(
             if cfg!(target_os = "macos") {
@@ -241,7 +363,7 @@ fn main() {
     .unwrap();
     settle(&mut cx, window);
     cx.update_window(window, |_, window, cx| {
-        assert_eq!(window.find("zoom-input").value(), Some("200"));
+        assert_zoom_closed(window, "縮放設定，自訂縮放，200%");
         let before = window.find("page-input").value().unwrap().to_string();
         window.scroll("viewer", ScrollDelta::Lines(point(0., -8.)), cx);
         assert_eq!(
@@ -263,7 +385,7 @@ fn main() {
             cx,
         );
         window.render_frame(cx);
-        assert_eq!(window.find("zoom-input").value(), Some("220"));
+        assert_zoom_closed(window, "縮放設定，自訂縮放，220%");
         window.dispatch_event(
             PlatformInput::ModifiersChanged(gpui_kit::ModifiersChangedEvent::default()),
             cx,
@@ -469,6 +591,9 @@ fn main() {
             cx,
         );
         assert_eq!(window.find("next").disabled(), Some(true));
+        assert_eq!(window.find("zoom-trigger").disabled(), Some(true));
+        assert!(window.try_find("zoom-panel").is_none());
+        assert!(window.try_find("zoom-input").is_none());
     })
     .unwrap();
     settle(&mut cx, window);

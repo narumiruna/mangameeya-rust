@@ -38,7 +38,7 @@ Native objects are platform-specific. Unknown tags, invalid units, extra fields,
 
 The verification host is macOS arm64 with Rust 1.99.1 and full Xcode selected through `DEVELOPER_DIR`.
 
-Verified on 2026-11-07:
+Native rewrite baseline, verified on 2026-11-07 before the unified zoom change:
 
 | Check | Result |
 | --- | --- |
@@ -59,6 +59,49 @@ The rendering workflow verifies actual CBZ extraction and natural order, decoded
 Native launch checks used the project's icon files, not user comics. The app was stopped after the check. The tests do not modify comic sources.
 
 macOS output is under `target/release/bundle/macos/aarch64-apple-darwin/`. Windows installer compilation and macOS packaging mechanics were also checked with temporary test payloads, but those checks are not substitutes for the real macOS release build above or for Windows execution.
+
+## Unified zoom control verification
+
+Validated on 2026-11-07 on macOS arm64 with Rust 1.99.1 and `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer`.
+The implementation is based on `7425e2a`. The unchanged baseline passed 115 tests and the native rendering workflow before implementation.
+
+| Check | Result |
+| --- | --- |
+| `cargo fmt --all -- --check` | Passed |
+| `cargo test --locked --all-features` | 132 passed; no failures or ignored tests |
+| `cargo clippy --locked --all-targets --all-features -- -D warnings` | Passed |
+| `cargo test --locked --test rendering` | Passed with real Metal pixels, the original 10 captures, and 6 zoom captures |
+| Pinned `changenote 0.10.0` `status` | Passed; pending notes produce one patch release plan |
+| `CHANGENOTE_BIN="$PWD/target/changenote-cli/bin/changenote" uv run --no-project python -m unittest discover -s tests/release -v` | 15 passed; GitHub upload commands are mocked |
+| `git diff --check` | Passed |
+
+The added tests cover the controlled Popover lifecycle and 16 zoom regressions. They check the rendered page bounds against source dimensions, rather than only comparing two scale helpers. Coverage includes:
+
+- Effective scale for single pages, unequal-size RTL/LTR spreads, the last unpaired page, continuous active pages, retained geometry, rotation, missing geometry, and errors.
+- Fitted percentages below 1% and outside the manual 10–800% range. The first manual step uses the unrounded fitted scale.
+- Fit choices, their accessible pressed state, custom versus original-size 100%, repeated stepper clicks, and existing reader/menu command paths.
+- Keyboard activation, Tab navigation, reader-shortcut isolation, fit/zoom shortcuts outside text editing, global close, and Escape before fullscreen exit.
+- Draft retention during resize, sidebar/inspector changes, page changes, rotation, and asynchronous geometry updates, including temporarily missing geometry.
+- Invalid/non-finite input, repeated `%` suffixes, finite-value clamping, disabled pending controls, and delayed submissions from a closed panel.
+- No Control-wheel zoom through an open panel, no zoom from horizontal-only or zero wheel input, and panel dismissal on book close or asynchronous replacement.
+- Display-only input synchronization without settings-dirty changes or settings-file writes. Existing paged scroll-bound regressions also pass.
+
+The production rendering workflow checks popup bounds and visible controls at both 1280×800 and 960×640. Captures remain local or in CI artifacts, not tracked source assets:
+
+- `target/ui-smoke/zoom-before.png`: retained baseline toolbar.
+- `target/ui-smoke/zoom-closed-{1280x800,960x640}.png`: current fit mode and percentage.
+- `target/ui-smoke/zoom-open-{1280x800,960x640}.png`: the fit choices and manual zoom controls.
+- `target/ui-smoke/zoom-custom-{1280x800,960x640}.png`: custom 200% after input submission.
+
+The change adds no dependencies, settings migration, persisted zoom value, or image assets. Source comics are not modified. Recovery is a revert of the UI change and its unreleased note; existing settings files need no conversion.
+No package was published, version tag created, or release workflow dispatched for this work.
+The complete change was reviewed for correctness, security, lifecycle safety, compatibility, regressions, and scope. No material defects remain.
+The completed execution plan was `docs/plans/2026-11-07_unified-zoom-control-plan.md`; its external handoff is retained below.
+
+### Retained zoom handoff
+
+- **Product maintainer:** With the before/after captures and the selected proposal, review visual clarity and reading comfort. The expected result is an assessment of discoverability and usability. These subjective properties are not verified by pixel or geometry tests. This review is optional and is not an agent coding gate.
+- **Platform maintainer:** With an interactive Windows or Intel macOS desktop at the intended display scaling, inspect text, popup placement, focus restoration, and input behavior. Automated platform CI is separate evidence. These interactive desktop paths are not verified by local macOS arm64 checks. No new release gate is added; do not claim platform-specific visual or runtime verification without the corresponding evidence.
 
 ## External platform and release checks
 
