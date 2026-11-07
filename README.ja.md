@@ -148,7 +148,9 @@ DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer \
 
 ## CI と検証範囲
 
-`.github/workflows/windows.yml` は、Windows x64、macOS arm64、macOS x86_64 でテスト、Clippy、パッケージ作成、artifact のアップロードを実行します。
+`.github/workflows/ci.yml` は、Linux x64、Windows x64、macOS arm64、macOS x86_64 で Rust のフォーマット、テスト、production UI の操作、Clippy を検証します。
+Linux は headless layout とネイティブのテキストシステムを使用します。GPU rendering の検証やパッケージ作成は行いません。
+Windows と macOS では、ネイティブパッケージの作成とアップロードも実行します。macOS では Metal rendering も検証します。
 Windows job ではさらに、silent install／uninstall で全 11 種類のファイル関連付けと、既定の関連付けが保持されることをテストします。
 各プラットフォームのインストールテストの状態は、実際の workflow の結果で確認してください。ローカルの cross-check は、Windows での実行やインストールの検証とは異なります。
 完全な検証記録と、未実行のプラットフォーム別チェックは[検証記録](docs/verification.md)を参照してください。

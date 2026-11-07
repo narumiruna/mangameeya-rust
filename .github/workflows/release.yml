@@ -63,7 +63,7 @@ jobs:
     if: needs.select.outputs.release-commit != ''
     permissions:
       contents: read
-    uses: ./.github/workflows/windows.yml
+    uses: ./.github/workflows/ci.yml
     with:
       revision: ${{ needs.select.outputs.release-commit }}
 

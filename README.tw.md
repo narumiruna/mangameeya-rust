@@ -148,7 +148,9 @@ DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer \
 
 ## CI 與驗證範圍
 
-`.github/workflows/windows.yml` 在 Windows x64、macOS arm64 與 macOS x86_64 執行測試、Clippy、打包與 artifact 上傳。
+`.github/workflows/ci.yml` 在 Linux x64、Windows x64、macOS arm64 與 macOS x86_64 檢查 Rust 格式、測試、production UI 互動與 Clippy。
+Linux 使用 headless layout 與原生文字系統，不驗證 GPU rendering，也不產生安裝套件。
+Windows 與 macOS 另建置並上傳原生套件；macOS 也驗證 Metal rendering。
 Windows job 另以 silent install／uninstall 測試全部 11 個檔案關聯及預設關聯保留行為。
 請以實際 workflow 結果判定各平台的安裝測試狀態；本機 cross-check 不等於 Windows 執行或安裝驗證。
 完整驗證記錄與尚未執行的平台檢查見 [驗證記錄](docs/verification.md)。

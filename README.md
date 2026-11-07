@@ -148,7 +148,9 @@ Packages include an `.app`, ZIP, and DMG, with ad-hoc signing to verify local in
 
 ## CI and verification scope
 
-`.github/workflows/windows.yml` runs tests, Clippy, packaging, and artifact uploads on Windows x64, macOS arm64, and macOS x86_64.
+`.github/workflows/ci.yml` checks Rust formatting, tests, production UI interactions, and Clippy on Linux x64, Windows x64, macOS arm64, and macOS x86_64.
+Linux uses headless layout and the native text system; it does not test GPU rendering or produce a package.
+Windows and macOS also build and upload native packages. macOS verifies Metal rendering.
 The Windows job also tests silent install/uninstall, all 11 file associations, and preservation of default associations.
 Use actual workflow results to determine installation test status for each platform. A local cross-check is not Windows execution or installation verification.
 See the [verification record](docs/verification.md) for full results and platform checks that have not yet run.
