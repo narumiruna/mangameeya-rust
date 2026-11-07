@@ -1,0 +1,2625 @@
+diff --git a/3rdparty/config/wx/setup.h b/3rdparty/config/wx/setup.h
+index 649b88764e39..d93fbd85e268 100644
+--- a/3rdparty/config/wx/setup.h
++++ b/3rdparty/config/wx/setup.h
+@@ -792,21 +792,21 @@
+ // Default is 1
+ //
+ // Recommended setting: 1
+-#define wxUSE_WEBVIEW 1
++#define wxUSE_WEBVIEW 0
+ 
+ // Use the IE wxWebView backend
+ //
+ // Default is 1 on MSW
+ //
+ // Recommended setting: 1
+-#define wxUSE_WEBVIEW_IE 1
++#define wxUSE_WEBVIEW_IE 0
+ 
+ // Use the Edge (Chromium) wxWebView backend (Requires WebView2 SDK)
+ //
+ // Default is 0 because WebView2 is not always available, set it to 1 if you do have it.
+ //
+ // Recommended setting: 1 when building for Windows with W  ebView2 SDK
+-#define wxUSE_WEBVIEW_EDGE 1
++#define wxUSE_WEBVIEW_EDGE 0
+ 
+ // Use the Edge (Chromium) wxWebView backend without loader DLL
+ //
+diff --git a/3rdparty/dependencies.bkl b/3rdparty/dependencies.bkl
+index 3ed56e6a310d..1f191c781b46 100644
+--- a/3rdparty/dependencies.bkl
++++ b/3rdparty/dependencies.bkl
+@@ -9,7 +9,6 @@
+ }
+ 
+ submodule expat.bkl;
+-submodule libcrypto.bkl;
+ submodule wxWidgets.bkl;
+ submodule ed25519.bkl;
+ 
+diff --git a/3rdparty/wx.vcxproj b/3rdparty/wx.vcxproj
+index d9089b11e7ef..59cdc0e0b8f8 100644
+--- a/3rdparty/wx.vcxproj
++++ b/3rdparty/wx.vcxproj
+@@ -334,7 +334,6 @@
+     <ClCompile Include="wxWidgets\src\common\ustring.cpp" />
+     <ClCompile Include="wxWidgets\src\common\utilscmn.cpp" />
+     <ClCompile Include="wxWidgets\src\common\variant.cpp" />
+-    <ClCompile Include="wxWidgets\src\common\webview.cpp" />
+     <ClCompile Include="wxWidgets\src\common\wfstream.cpp" />
+     <ClCompile Include="wxWidgets\src\common\wincmn.cpp" />
+     <ClCompile Include="wxWidgets\src\common\windowid.cpp" />
+@@ -414,8 +413,6 @@
+     <ClCompile Include="wxWidgets\src\msw\utilsgui.cpp" />
+     <ClCompile Include="wxWidgets\src\msw\utilswin.cpp" />
+     <ClCompile Include="wxWidgets\src\msw\uxtheme.cpp" />
+-    <ClCompile Include="wxWidgets\src\msw\webview_edge.cpp" />
+-    <ClCompile Include="wxWidgets\src\msw\webview_ie.cpp" />
+     <ClCompile Include="wxWidgets\src\msw\window.cpp" />
+   </ItemGroup>
+   <ItemGroup>
+@@ -433,13 +430,5 @@
+     <Natvis Include="wxWidgets\misc\msvc\wxWidgets.natvis" />
+   </ItemGroup>
+   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
+-  <ImportGroup Label="ExtensionTargets">
+-    <Import Project="..\packages\Microsoft.Web.WebView2.1.0.3967.48\build\native\Microsoft.Web.WebView2.targets" Condition="Exists('..\packages\Microsoft.Web.WebView2.1.0.3967.48\build\native\Microsoft.Web.WebView2.targets')" />
+-  </ImportGroup>
+-  <Target Name="EnsureNuGetPackageBuildImports" BeforeTargets="PrepareForBuild">
+-    <PropertyGroup>
+-      <ErrorText>This project references NuGet package(s) that are missing on this computer. Use NuGet Package Restore to download them.  For more information, see http://go.microsoft.com/fwlink/?LinkID=322105. The missing file is {0}.</ErrorText>
+-    </PropertyGroup>
+-    <Error Condition="!Exists('..\packages\Microsoft.Web.WebView2.1.0.3967.48\build\native\Microsoft.Web.WebView2.targets')" Text="$([System.String]::Format('$(ErrorText)', '..\packages\Microsoft.Web.WebView2.1.0.3967.48\build\native\Microsoft.Web.WebView2.targets'))" />
+-  </Target>
++  <ImportGroup Label="ExtensionTargets" />
+ </Project>
+\ No newline at end of file
+diff --git a/WinSparkle.bkl b/WinSparkle.bkl
+index 2a819832ebd6..fe73875f3f36 100644
+--- a/WinSparkle.bkl
++++ b/WinSparkle.bkl
+@@ -42,16 +42,13 @@
+     includedirs += 3rdparty/expat/expat/lib;
+     deps += WinSparkle_expat;
+ 
+-    includedirs += 3rdparty/openssl-win32;
+-    deps += WinSparkle_libcrypto;
+-
+     includedirs += 3rdparty/config 3rdparty/wxWidgets/include;
+     deps += WinSparkle_wx;
+ 
+     includedirs += 3rdparty/ed25519/src;
+     deps += WinSparkle_ed25519;
+ 
+-    libs += comctl32 kernel32 user32 comctl32 rpcrt4 version wininet shlwapi;
++    libs += comctl32 kernel32 user32 comctl32 rpcrt4 version wininet shlwapi crypt32 bcrypt;
+ 
+     defines += BUILDING_WIN_SPARKLE;
+ 
+diff --git a/WinSparkle.sln b/WinSparkle.sln
+index 280b96d99a00..7e973a3f82f2 100644
+--- a/WinSparkle.sln
++++ b/WinSparkle.sln
+@@ -6,13 +6,10 @@
+ Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "WinSparkle", "WinSparkle.vcxproj", "{524CCCF2-61EA-5B64-A1D9-FF5497027B5F}"
+ 	ProjectSection(ProjectDependencies) = postProject
+ 		{47B228CB-24FE-5250-B1FC-DFC81D3E69DF} = {47B228CB-24FE-5250-B1FC-DFC81D3E69DF}
+-		{A0326E8B-57A0-548E-AB4A-2DB2B6704D70} = {A0326E8B-57A0-548E-AB4A-2DB2B6704D70}
+ 		{499A5238-5AAC-5FD3-8902-819D787108A5} = {499A5238-5AAC-5FD3-8902-819D787108A5}
+ 	EndProjectSection
+ EndProject
+ Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "WinSparkle_expat", "3rdparty\expat.vcxproj", "{47B228CB-24FE-5250-B1FC-DFC81D3E69DF}"
+-EndProject
+-Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "WinSparkle_libcrypto", "3rdparty\libcrypto.vcxproj", "{A0326E8B-57A0-548E-AB4A-2DB2B6704D70}"
+ EndProject
+ Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "WinSparkle_wx", "3rdparty\wx.vcxproj", "{499A5238-5AAC-5FD3-8902-819D787108A5}"
+ EndProject
+@@ -61,18 +58,6 @@
+ 		{47B228CB-24FE-5250-B1FC-DFC81D3E69DF}.Release|Win32.Build.0 = Release|Win32
+ 		{47B228CB-24FE-5250-B1FC-DFC81D3E69DF}.Release|x64.ActiveCfg = Release|x64
+ 		{47B228CB-24FE-5250-B1FC-DFC81D3E69DF}.Release|x64.Build.0 = Release|x64
+-		{A0326E8B-57A0-548E-AB4A-2DB2B6704D70}.Debug|ARM64.ActiveCfg = Debug|ARM64
+-		{A0326E8B-57A0-548E-AB4A-2DB2B6704D70}.Debug|ARM64.Build.0 = Debug|ARM64
+-		{A0326E8B-57A0-548E-AB4A-2DB2B6704D70}.Debug|Win32.ActiveCfg = Debug|Win32
+-		{A0326E8B-57A0-548E-AB4A-2DB2B6704D70}.Debug|Win32.Build.0 = Debug|Win32
+-		{A0326E8B-57A0-548E-AB4A-2DB2B6704D70}.Debug|x64.ActiveCfg = Debug|x64
+-		{A0326E8B-57A0-548E-AB4A-2DB2B6704D70}.Debug|x64.Build.0 = Debug|x64
+-		{A0326E8B-57A0-548E-AB4A-2DB2B6704D70}.Release|ARM64.ActiveCfg = Release|ARM64
+-		{A0326E8B-57A0-548E-AB4A-2DB2B6704D70}.Release|ARM64.Build.0 = Release|ARM64
+-		{A0326E8B-57A0-548E-AB4A-2DB2B6704D70}.Release|Win32.ActiveCfg = Release|Win32
+-		{A0326E8B-57A0-548E-AB4A-2DB2B6704D70}.Release|Win32.Build.0 = Release|Win32
+-		{A0326E8B-57A0-548E-AB4A-2DB2B6704D70}.Release|x64.ActiveCfg = Release|x64
+-		{A0326E8B-57A0-548E-AB4A-2DB2B6704D70}.Release|x64.Build.0 = Release|x64
+ 		{499A5238-5AAC-5FD3-8902-819D787108A5}.Debug|ARM64.ActiveCfg = Debug|ARM64
+ 		{499A5238-5AAC-5FD3-8902-819D787108A5}.Debug|ARM64.Build.0 = Debug|ARM64
+ 		{499A5238-5AAC-5FD3-8902-819D787108A5}.Debug|Win32.ActiveCfg = Debug|Win32
+@@ -127,7 +112,6 @@
+ 	EndGlobalSection
+ 	GlobalSection(NestedProjects) = preSolution
+ 		{47B228CB-24FE-5250-B1FC-DFC81D3E69DF} = {2C4E4846-FF11-55AD-AFD1-BC1F3AF74724}
+-		{A0326E8B-57A0-548E-AB4A-2DB2B6704D70} = {2C4E4846-FF11-55AD-AFD1-BC1F3AF74724}
+ 		{499A5238-5AAC-5FD3-8902-819D787108A5} = {2C4E4846-FF11-55AD-AFD1-BC1F3AF74724}
+ 		{6A5FB0FA-2A9C-5A84-AA43-7814DC08D5B2} = {2C4E4846-FF11-55AD-AFD1-BC1F3AF74724}
+ 	EndGlobalSection
+diff --git a/WinSparkle.vcxproj b/WinSparkle.vcxproj
+index 6af61660e4d7..3c5c4c5aa381 100644
+--- a/WinSparkle.vcxproj
++++ b/WinSparkle.vcxproj
+@@ -313,11 +313,6 @@
+       <UseLibraryDependencyInputs>false</UseLibraryDependencyInputs>
+       <LinkLibraryDependencies>true</LinkLibraryDependencies>
+     </ProjectReference>
+-    <ProjectReference Include="3rdparty\libcrypto.vcxproj">
+-      <Project>{a0326e8b-57a0-548e-ab4a-2db2b6704d70}</Project>
+-      <UseLibraryDependencyInputs>false</UseLibraryDependencyInputs>
+-      <LinkLibraryDependencies>true</LinkLibraryDependencies>
+-    </ProjectReference>
+     <ProjectReference Include="3rdparty\wx.vcxproj">
+       <Project>{499a5238-5aac-5fd3-8902-819d787108a5}</Project>
+       <UseLibraryDependencyInputs>false</UseLibraryDependencyInputs>
+@@ -332,13 +327,11 @@
+   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
+   <ImportGroup Label="ExtensionTargets">
+     <Import Project="WinSparkle.targets" />
+-    <Import Project="packages\Microsoft.Web.WebView2.1.0.3967.48\build\native\Microsoft.Web.WebView2.targets" Condition="Exists('packages\Microsoft.Web.WebView2.1.0.3967.48\build\native\Microsoft.Web.WebView2.targets')" />
+   </ImportGroup>
+   <Target Name="EnsureNuGetPackageBuildImports" BeforeTargets="PrepareForBuild">
+     <PropertyGroup>
+       <ErrorText>This project references NuGet package(s) that are missing on this computer. Use NuGet Package Restore to download them.  For more information, see http://go.microsoft.com/fwlink/?LinkID=322105. The missing file is {0}.</ErrorText>
+     </PropertyGroup>
+     <Error Condition="!Exists('packages\Gettext.Tools.0.26.0\build\Gettext.Tools.props')" Text="$([System.String]::Format('$(ErrorText)', 'packages\Gettext.Tools.0.26.0\build\Gettext.Tools.props'))" />
+-    <Error Condition="!Exists('packages\Microsoft.Web.WebView2.1.0.3967.48\build\native\Microsoft.Web.WebView2.targets')" Text="$([System.String]::Format('$(ErrorText)', 'packages\Microsoft.Web.WebView2.1.0.3967.48\build\native\Microsoft.Web.WebView2.targets'))" />
+   </Target>
+ </Project>
+\ No newline at end of file
+diff --git a/cmake/CMakeLists.txt b/cmake/CMakeLists.txt
+index 7626c9b48906..3b64265f67e9 100644
+--- a/cmake/CMakeLists.txt
++++ b/cmake/CMakeLists.txt
+@@ -38,7 +38,6 @@
+ set(CMAKE_DEBUG_POSTFIX "d")
+ 
+ set(EXPAT_INCLUDE_DIRS "${ROOT_DIR}/3rdparty/expat/expat/lib")
+-set(OPENSSL_INCLUDE_DIRS "${ROOT_DIR}/3rdparty/openssl-win32")
+ 
+ # bundled expat
+ add_subdirectory(expat)
+@@ -46,8 +45,12 @@
+ # bundled wxWidgets
+ add_subdirectory(wxWidgets)
+ 
+-# bundled crypto
+-add_subdirectory(crypto)
++# Existing bundled Ed25519 verifier. Do not build legacy OpenSSL/DSA.
++set(ED25519_DIR "${ROOT_DIR}/3rdparty/ed25519/src")
++add_library(ed25519 OBJECT
++  ${ED25519_DIR}/fe.c ${ED25519_DIR}/ge.c ${ED25519_DIR}/sc.c
++  ${ED25519_DIR}/sha512.c ${ED25519_DIR}/verify.c)
++include_directories(${ED25519_DIR})
+ 
+ # WinSparkle
+ set(SOURCE_DIR ${ROOT_DIR}/src)
+@@ -56,7 +59,6 @@
+ include_directories(${ROOT_DIR}/3rdparty/config)
+ include_directories(${EXPAT_INCLUDE_DIRS})
+ include_directories(${wxWidgets_INCLUDE_DIRS})
+-include_directories(${OPENSSL_INCLUDE_DIRS})
+ 
+ set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++11")
+ 
+@@ -104,9 +106,9 @@
+ 
+ list(APPEND SOURCES ${CMAKE_CURRENT_BINARY_DIR}/common_res.o)
+ 
+-add_library(${PROJECT_NAME} SHARED ${SOURCES} $<TARGET_OBJECTS:wxWidgets> $<TARGET_OBJECTS:expat> $<TARGET_OBJECTS:crypto>)
++add_library(${PROJECT_NAME} SHARED ${SOURCES} $<TARGET_OBJECTS:wxWidgets> $<TARGET_OBJECTS:expat> $<TARGET_OBJECTS:ed25519>)
+ 
+-target_link_libraries(${PROJECT_NAME} wininet version rpcrt4 comctl32 crypt32 wsock32 ws2_32 uxtheme shlwapi "${WEBVIEW2_LOADER_LIB}")
++target_link_libraries(${PROJECT_NAME} wininet version rpcrt4 comctl32 crypt32 bcrypt wsock32 ws2_32 uxtheme shlwapi)
+ 
+ set_target_properties(${PROJECT_NAME} PROPERTIES
+                       VERSION ${LIB_MAJOR_VERSION}.${LIB_MINOR_VERSION}.${LIB_PATCH_VERSION}
+@@ -136,9 +138,3 @@
+         DESTINATION "${CONFIG_INSTALL_DIR}")
+ 
+ install(EXPORT ${PROJECT_NAME}-export DESTINATION "${CONFIG_INSTALL_DIR}" FILE ${PROJECT_NAME}Targets.cmake)
+-
+-if(CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
+-    install(FILES ${WEBVIEW2_LOADER_LIB_DLL}
+-            DESTINATION "${LIB_INSTALL_DIR}")
+-endif(CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
+-
+diff --git a/cmake/wxWidgets/CMakeLists.txt b/cmake/wxWidgets/CMakeLists.txt
+index 38e19d28815b..17e00f25d711 100644
+--- a/cmake/wxWidgets/CMakeLists.txt
++++ b/cmake/wxWidgets/CMakeLists.txt
+@@ -141,9 +141,6 @@
+   ${SOURCE_DIR}/wxWidgets/src/common/ustring.cpp
+   ${SOURCE_DIR}/wxWidgets/src/common/utilscmn.cpp
+   ${SOURCE_DIR}/wxWidgets/src/common/variant.cpp
+-  ${SOURCE_DIR}/wxWidgets/src/common/webview.cpp
+-  ${SOURCE_DIR}/wxWidgets/src/common/webviewfshandler.cpp
+-  ${SOURCE_DIR}/wxWidgets/src/common/webviewarchivehandler.cpp
+   ${SOURCE_DIR}/wxWidgets/src/common/wfstream.cpp
+   ${SOURCE_DIR}/wxWidgets/src/common/wincmn.cpp
+   ${SOURCE_DIR}/wxWidgets/src/common/windowid.cpp
+@@ -222,8 +219,6 @@
+   ${SOURCE_DIR}/wxWidgets/src/msw/utilsgui.cpp
+   ${SOURCE_DIR}/wxWidgets/src/msw/utilswin.cpp
+   ${SOURCE_DIR}/wxWidgets/src/msw/uxtheme.cpp
+-  ${SOURCE_DIR}/wxWidgets/src/msw/webview_edge.cpp
+-  ${SOURCE_DIR}/wxWidgets/src/msw/webview_ie.cpp
+   ${SOURCE_DIR}/wxWidgets/src/msw/window.cpp
+   ${SOURCE_DIR}/wxWidgets/src/msw/ownerdrw.cpp
+   ${SOURCE_DIR}/wxWidgets/src/msw/ole/automtn.cpp
+@@ -231,51 +226,7 @@
+ 
+ add_library(${PROJECT_NAME} OBJECT ${SOURCES})
+ 
+-file(READ "${CMAKE_CURRENT_SOURCE_DIR}/../../packages.config" PACKAGES_CONFIG_FILE)
+-string(REGEX MATCH "package id=\"Microsoft.Web.WebView2\" version=\"([^\"]+)\"" WEBVIEW_MATCH "${PACKAGES_CONFIG_FILE}")
+-
+-message(STATUS "Using WebView2 version ${CMAKE_MATCH_1}")
+-
+-set(WEBVIEW2_VERSION ${CMAKE_MATCH_1})
+-set(WEBVIEW2_URL "https://www.nuget.org/api/v2/package/Microsoft.Web.WebView2/${WEBVIEW2_VERSION}")
+-
+-set(WEBVIEW2_DEFAULT_PACKAGE_DIR "${CMAKE_CURRENT_BINARY_DIR}/packages/Microsoft.Web.WebView2.${WEBVIEW2_VERSION}")
+-
+-if(NOT EXISTS ${WEBVIEW2_PACKAGE_DIR})
+-    unset(WEBVIEW2_PACKAGE_DIR CACHE)
+-endif()
+-find_path(WEBVIEW2_PACKAGE_DIR
+-    NAMES build/native/include/WebView2.h
+-    PATHS
+-        "${PROJECT_SOURCE_DIR}/3rdparty/webview2"
+-        ${WEBVIEW2_DEFAULT_PACKAGE_DIR}
+-)
+-
+-if (NOT WEBVIEW2_PACKAGE_DIR)
+-    message(STATUS "WebView2 SDK not found locally, downloading...")
+-    set(WEBVIEW2_PACKAGE_DIR ${WEBVIEW2_DEFAULT_PACKAGE_DIR} CACHE PATH "WebView2 SDK PATH" FORCE)
+-    file(DOWNLOAD
+-        ${WEBVIEW2_URL}
+-        ${CMAKE_CURRENT_BINARY_DIR}/webview2.nuget)
+-    file(MAKE_DIRECTORY ${WEBVIEW2_PACKAGE_DIR})
+-    execute_process(COMMAND
+-        "${CMAKE_COMMAND}" -E tar x "${CMAKE_CURRENT_BINARY_DIR}/webview2.nuget"
+-        WORKING_DIRECTORY "${WEBVIEW2_PACKAGE_DIR}"
+-    )
+-endif()
+-set(WEBVIEW2_PACKAGE_DIR ${WEBVIEW2_PACKAGE_DIR} CACHE INTERNAL "" FORCE)
+-
+-set(INCLUDE_DIRS ${SOURCE_DIR}/wxWidgets/include/wx/msw/wrl ${SOURCE_DIR}/wxWidgets/include)
+-if(CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
+-  # Note: WebView2Loader is built with buffercheck, which isn't available on LLVM MinGW. Thus, we have no choice
+-  # but to require WebView2Loader.dll along with WinSparkle when built with this version of MinGW.
+-  set(WEBVIEW2_LOADER_LIB "${WEBVIEW2_PACKAGE_DIR}/build/native/${WEBVIEW2_LOADER_ARCH}/WebView2Loader.dll.lib")
+-  set(WEBVIEW2_LOADER_LIB_DLL "${WEBVIEW2_PACKAGE_DIR}/build/native/${WEBVIEW2_LOADER_ARCH}/WebView2Loader.dll")
+-  set(WEBVIEW2_LOADER_LIB_DLL ${WEBVIEW2_LOADER_LIB_DLL} CACHE INTERNAL "" FORCE)
+-else(CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
+-  set(WEBVIEW2_LOADER_LIB "${WEBVIEW2_PACKAGE_DIR}/build/native/${WEBVIEW2_LOADER_ARCH}/WebView2LoaderStatic.lib")
+-endif(CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
+-set(WEBVIEW2_LOADER_LIB ${WEBVIEW2_LOADER_LIB} CACHE INTERNAL "" FORCE)
++set(INCLUDE_DIRS ${SOURCE_DIR}/wxWidgets/include)
+ 
+ set(wxWidgets_INCLUDE_DIRS ${INCLUDE_DIRS} PARENT_SCOPE)
+ include_directories(${INCLUDE_DIRS})
+@@ -288,4 +239,3 @@
+ 
+ ADD_PRECOMPILED_HEADER(${PROJECT_NAME} ${SOURCE_DIR}/wxWidgets/include/wx/wxprec.h)
+ 
+-target_include_directories(${PROJECT_NAME} PUBLIC "${WEBVIEW2_PACKAGE_DIR}/build/native/include")
+diff --git a/include/winsparkle.h b/include/winsparkle.h
+index ed7eae837e60..197ea7e237d5 100644
+--- a/include/winsparkle.h
++++ b/include/winsparkle.h
+@@ -93,8 +93,9 @@
+ /**
+     Cleans up after WinSparkle.
+ 
+-    Should be called by the app when it's shutting down. Cancels any
+-    pending Sparkle operations and shuts down its helper threads.
++    Shuts down the UI thread only. Worker shutdown is not implemented.
++    Keep this DLL and all callback storage alive until process exit. Do not
++    call cleanup from a callback or while a callback waits for the caller.
+  */
+ WIN_SPARKLE_API void __cdecl win_sparkle_cleanup();
+ 
+@@ -165,7 +166,7 @@
+ /**
+     Sets URL for the app's appcast.
+ 
+-    Only http and https schemes are supported.
++    This hardened build accepts HTTPS only, including redirects.
+ 
+     If this function isn't called by the app, the URL is obtained from
+     Windows resource named "FeedURL" of type "APPCAST".
+@@ -182,28 +183,8 @@
+ WIN_SPARKLE_API void __cdecl win_sparkle_set_appcast_url(const char *url);
+ 
+ /**
+-    Sets DSA public key.
+-
+-    Only PEM format is supported.
+-
+-    Public key will be used to verify DSA signature of the update file.
+-    PEM data will be set only if it contains a valid DSA public key.
+-
+-    If this function isn't called by the app, public key is obtained from
+-    Windows resource named "DSAPub" of type "DSAPEM".
+-
+-    @deprecated
+-    DSA signatures are deprecated and will be removed in a future version.
+-    Migrate over to EdDSA (ed25519), see
+-    https://github.com/vslavik/winsparkle/wiki/Upgrading-from-DSA-to-EdDSA-signatures
+-
+-    @param dsa_pub_pem  DSA public key in PEM format.
+-
+-    @return  1 if a valid DSA public key is provided, 0 otherwise.
+-
+-    @since 0.6.0
+-
+-    @see win_sparkle_set_eddsa_public_key()
++    Disabled compatibility symbol. Always returns 0. This hardened build has
++    no DSA verifier and does not load DSA resources. Use Ed25519.
+  */
+ WIN_SPARKLE_DEPRECATED("use EdDSA signatures and win_sparkle_set_eddsa_public_key() instead")
+ WIN_SPARKLE_API int __cdecl win_sparkle_set_dsa_pub_pem(const char *dsa_pub_pem);
+@@ -566,18 +547,42 @@
+ typedef int(__cdecl* win_sparkle_user_run_installer_callback_t)(const wchar_t *);
+ 
+ /**
+-    Sets a callback to be called when the update payload is
+-    downloaded and ready to be executed or handled in some
+-    other manner.
+-
+-    The callback returns:
+-    - 1 if the file was handled by the callback
+-    - 0 if it was not, in which case WinSparkle's default handling will take place
+-    - WINSPARKLE_RETURN_ERROR in case of an error
+-
+-    @since 0.8
++    Disabled path-only compatibility symbol. The callback is never called.
++    Register win_sparkle_set_verified_installer_callback() instead.
+ */
+ WIN_SPARKLE_API void __cdecl win_sparkle_set_user_run_installer_callback(win_sparkle_user_run_installer_callback_t callback);
++
++/**
++    Hardened SDK ABI version, not present in stock WinSparkle. Returns 1.
++    The host must require this export and version before initialization.
++ */
++WIN_SPARKLE_API unsigned int __cdecl win_sparkle_get_hardening_version(void);
++
++/**
++    Called only after explicit installation confirmation and shutdown consent.
++    sha256 contains 32 bytes, computed with Windows CNG over the SAME private
++    immutable buffer that passed Ed25519 verification. The digest is retained
++    from verification through the UI event and confirmation, not read from the
++    callback pathname. The path is not an immutable handle or a trust root.
++
++    The host must copy both arguments before returning, validate the payload
++    against this trusted digest and seal its private copy before execution.
++    Both arguments are borrowed and valid only during this callback.
++
++    Return 1 only after accepting responsibility for safe handoff; this permits
++    the shutdown-request callback. All other results, exceptions and a missing
++    callback fail closed. There is NO legacy callback or ShellExecute fallback.
++    Feed installer arguments are not passed to the host or executed by the SDK.
++
++    Register before init/checks. A canonical base64 Ed25519 public key and this
++    callback are mandatory. The host must keep the DLL and callback storage
++    alive until process exit. Callbacks run on an SDK thread, not the host UI
++    thread. Do not call cleanup from a callback or allow exceptions across ABI.
++ */
++typedef int (__cdecl *win_sparkle_verified_installer_callback_t)(
++    const wchar_t *path, const unsigned char sha256[32]);
++WIN_SPARKLE_API void __cdecl win_sparkle_set_verified_installer_callback(
++    win_sparkle_verified_installer_callback_t callback);
+ 
+ //@}
+ 
+@@ -614,17 +619,8 @@
+ WIN_SPARKLE_API void __cdecl win_sparkle_check_update_with_ui();
+ 
+ /**
+-    Checks if an update is available, showing a progress UI to the user and
+-    immediately installing the update if one is available.
+-
+-    This is useful for the case when users should almost always use the
+-    newest version of your software. When called, WinSparkle will check for
+-    updates while showing a progress UI to the user. If an update is found, the update
+-    prompt will be skipped and the update will be installed immediately.
+-
+-    If your application expects to do something after checking for updates, you
+-    may wish to use win_sparkle_set_did_not_find_update_callback() and
+-    win_sparkle_set_update_cancelled_callback().
++    Compatibility alias for win_sparkle_check_update_with_ui(). This hardened
++    build never downloads or installs without the two explicit confirmations.
+ 
+     @since 0.5
+ 
+diff --git a/packages.config b/packages.config
+index 2b16ead3eade..f997807fcfea 100644
+--- a/packages.config
++++ b/packages.config
+@@ -1,5 +1,4 @@
+ ﻿<?xml version="1.0" encoding="utf-8"?>
+ <packages>
+   <package id="Gettext.Tools" version="0.26.0" targetFramework="native" />
+-  <package id="Microsoft.Web.WebView2" version="1.0.3967.48" targetFramework="native" />
+ </packages>
+\ No newline at end of file
+diff --git a/src/appcast.cpp b/src/appcast.cpp
+index 864b2ea75819..d5a2d5691306 100644
+--- a/src/appcast.cpp
++++ b/src/appcast.cpp
+@@ -24,6 +24,7 @@
+  */
+ 
+ #include "appcast.h"
++#include "download.h"
+ #include "error.h"
+ 
+ #include <expat.h>
+@@ -441,6 +442,9 @@
+ 
+ std::vector<Appcast> Appcast::Load(const std::string& xml)
+ {
++    // Check before allocating parser state or narrowing size_t to Expat's int.
++    if (xml.size() > MaxAppcastBytes)
++        throw std::runtime_error("Appcast exceeds size limit.");
+     XML_Parser p = XML_ParserCreateNS(NULL, NS_SEP);
+     if ( !p )
+         throw std::runtime_error("Failed to create XML parser.");
+@@ -451,7 +455,7 @@
+     XML_SetElementHandler(p, OnStartElement, OnEndElement);
+     XML_SetCharacterDataHandler(p, OnText);
+ 
+-    XML_Status st = XML_Parse(p, xml.c_str(), (int)xml.size(), XML_TRUE);
++    XML_Status st = XML_Parse(p, xml.c_str(), static_cast<int>(xml.size()), XML_TRUE);
+ 
+     if ( st == XML_STATUS_ERROR )
+     {
+diff --git a/src/appcontroller.cpp b/src/appcontroller.cpp
+index bf0a68d753df..240775f2937b 100644
+--- a/src/appcontroller.cpp
++++ b/src/appcontroller.cpp
+@@ -24,6 +24,8 @@
+  */
+ 
+ #include "appcontroller.h"
++#include "settings.h"
++#include "signatureverifier.h"
+ 
+ 
+ namespace winsparkle
+@@ -40,128 +42,134 @@
+ win_sparkle_update_skipped_callback_t      ApplicationController::ms_cbUpdateSkipped = NULL;
+ win_sparkle_update_postponed_callback_t    ApplicationController::ms_cbUpdatePostponed = NULL;
+ win_sparkle_update_dismissed_callback_t    ApplicationController::ms_cbUpdateDismissed = NULL;
+-win_sparkle_user_run_installer_callback_t  ApplicationController::ms_cbUserRunInstaller = NULL;
++win_sparkle_verified_installer_callback_t ApplicationController::ms_cbVerifiedInstaller = NULL;
+ 
+ bool ApplicationController::IsReadyToShutdown()
+ {
++    win_sparkle_can_shutdown_callback_t callback;
+     {
+         CriticalSectionLocker lock(ms_csVars);
+-        if ( ms_cbIsReadyToShutdown )
+-            return (*ms_cbIsReadyToShutdown)() == 0 ? false : true;
++        callback = ms_cbIsReadyToShutdown;
+     }
+-
+-    // default implementations:
+-
+-    return true;
++    return callback ? callback() == 1 : true;
+ }
+ 
+ void ApplicationController::RequestShutdown()
+ {
++    win_sparkle_shutdown_request_callback_t callback;
+     {
+         CriticalSectionLocker lock(ms_csVars);
+-        if ( ms_cbRequestShutdown )
+-        {
+-            (*ms_cbRequestShutdown)();
+-            return;
+-        }
++        callback = ms_cbRequestShutdown;
+     }
+-
+-    // default implementations:
+-
+-    // nothing yet
++    if (callback)
++        callback();
+ }
+ 
+ void ApplicationController::NotifyUpdateError()
+ {
++    win_sparkle_error_callback_t callback;
+     {
+         CriticalSectionLocker lock(ms_csVars);
+-        if ( ms_cbError )
+-        {
+-            (*ms_cbError)();
+-            return;
+-        }
++        callback = ms_cbError;
+     }
++    if (callback)
++        callback();
+ }
+ 
+ void ApplicationController::NotifyUpdateFound()
+ {
++    win_sparkle_did_find_update_callback_t callback;
+     {
+         CriticalSectionLocker lock(ms_csVars);
+-        if (ms_cbDidFindUpdate)
+-        {
+-            (*ms_cbDidFindUpdate)();
+-            return;
+-        }
++        callback = ms_cbDidFindUpdate;
+     }
++    if (callback)
++        callback();
+ }
+ 
+ void ApplicationController::NotifyUpdateNotFound()
+ {
++    win_sparkle_did_not_find_update_callback_t callback;
+     {
+         CriticalSectionLocker lock(ms_csVars);
+-        if ( ms_cbDidNotFindUpdate )
+-        {
+-            (*ms_cbDidNotFindUpdate)();
+-            return;
+-        }
++        callback = ms_cbDidNotFindUpdate;
+     }
++    if (callback)
++        callback();
+ }
+ 
+ void ApplicationController::NotifyUpdateCancelled()
+ {
++    win_sparkle_update_cancelled_callback_t callback;
+     {
+         CriticalSectionLocker lock(ms_csVars);
+-        if ( ms_cbUpdateCancelled )
+-        {
+-            (*ms_cbUpdateCancelled)();
+-            return;
+-        }
++        callback = ms_cbUpdateCancelled;
+     }
++    if (callback)
++        callback();
+ }
+ 
+ void ApplicationController::NotifyUpdateSkipped()
+ {
++    win_sparkle_update_skipped_callback_t callback;
+     {
+         CriticalSectionLocker lock(ms_csVars);
+-        if (ms_cbUpdateSkipped)
+-        {
+-            (*ms_cbUpdateSkipped)();
+-            return;
+-        }
++        callback = ms_cbUpdateSkipped;
+     }
++    if (callback)
++        callback();
+ }
+ 
+ void ApplicationController::NotifyUpdatePostponed()
+ {
++    win_sparkle_update_postponed_callback_t callback;
+     {
+         CriticalSectionLocker lock(ms_csVars);
+-        if (ms_cbUpdatePostponed)
+-        {
+-            (*ms_cbUpdatePostponed)();
+-            return;
+-        }
++        callback = ms_cbUpdatePostponed;
+     }
++    if (callback)
++        callback();
+ }
+ 
+ void ApplicationController::NotifyUpdateDismissed()
+ {
++    win_sparkle_update_dismissed_callback_t callback;
+     {
+         CriticalSectionLocker lock(ms_csVars);
+-        if (ms_cbUpdateDismissed)
+-        {
+-            (*ms_cbUpdateDismissed)();
+-            return;
+-        }
++        callback = ms_cbUpdateDismissed;
++    }
++    if (callback)
++        callback();
++}
++
++
++void ApplicationController::RequireHardenedConfiguration()
++{
++    SignatureVerifier::VerifyEdDSAPubKey(Settings::GetEdDSAPubKey());
++    CriticalSectionLocker lock(ms_csVars);
++    if (!ms_cbVerifiedInstaller)
++        throw std::runtime_error("Verified installer callback is required.");
++}
++
++bool ApplicationController::VerifiedInstallerCallback(const wchar_t* filePath, const unsigned char* digest)
++{
++    win_sparkle_verified_installer_callback_t callback;
++    {
++        CriticalSectionLocker lock(ms_csVars);
++        callback = ms_cbVerifiedInstaller;
++    }
++    // Never hold the SDK configuration lock while the host waits for its UI.
++    // The DLL and callback storage must remain alive until process exit.
++    if (!callback || !filePath || !digest)
++        return false;
++    try
++    {
++        return callback(filePath, digest) == 1;
++    }
++    catch (...)
++    {
++        return false;
+     }
+ }
+ 
+-
+-int ApplicationController::UserRunInstallerCallback(const wchar_t* filePath)
+-{
+-    if (!ms_cbUserRunInstaller)
+-        return false;
+-
+-    return ms_cbUserRunInstaller(filePath);
+-}
+-
+ } // namespace winsparkle
+diff --git a/src/appcontroller.h b/src/appcontroller.h
+index d54bf5696b5b..080df0a5c48d 100644
+--- a/src/appcontroller.h
++++ b/src/appcontroller.h
+@@ -78,8 +78,11 @@
+     /// Notify that update dialog was dismissed (closed)
+     static void NotifyUpdateDismissed();
+ 
+-    /// Run the user installer callback if one is set.
+-    static int UserRunInstallerCallback(const wchar_t*);
++    /// Require a key and the verified installer callback before any update.
++    static void RequireHardenedConfiguration();
++
++    /// Only a result of 1 accepts handoff. No default execution is available.
++    static bool VerifiedInstallerCallback(const wchar_t*, const unsigned char*);
+ 
+     //@}
+ 
+@@ -151,10 +154,10 @@
+         ms_cbUpdateDismissed = callback;
+     }
+ 
+-    static void SetUserRunInstallerCallback(win_sparkle_user_run_installer_callback_t callback)
++    static void SetVerifiedInstallerCallback(win_sparkle_verified_installer_callback_t callback)
+     {
+         CriticalSectionLocker lock(ms_csVars);
+-        ms_cbUserRunInstaller = callback;
++        ms_cbVerifiedInstaller = callback;
+     }
+ 
+     //@}
+@@ -174,7 +177,7 @@
+     static win_sparkle_update_skipped_callback_t      ms_cbUpdateSkipped;
+     static win_sparkle_update_postponed_callback_t    ms_cbUpdatePostponed;
+     static win_sparkle_update_dismissed_callback_t    ms_cbUpdateDismissed;
+-    static win_sparkle_user_run_installer_callback_t  ms_cbUserRunInstaller;
++    static win_sparkle_verified_installer_callback_t ms_cbVerifiedInstaller;
+     
+ };
+ 
+diff --git a/src/dll_api.cpp b/src/dll_api.cpp
+index a8fead52c768..133cbbb3bde1 100644
+--- a/src/dll_api.cpp
++++ b/src/dll_api.cpp
+@@ -48,6 +48,8 @@
+ {
+     try
+     {
++        ApplicationController::RequireHardenedConfiguration();
++
+         // finish initialization
+         if (!Settings::GetLanguage().IsOk())
+         {
+@@ -152,12 +154,8 @@
+ 
+ WIN_SPARKLE_API int __cdecl win_sparkle_set_dsa_pub_pem(const char *dsa_pub_pem)
+ {
+-    try
+-    {
+-        Settings::SetDSAPubKeyPem(dsa_pub_pem);
+-        return 1;
+-    }
+-    CATCH_ALL_EXCEPTIONS
++    // Kept as a failing ABI stub. DSA and OpenSSL are not part of this build.
++    (void)dsa_pub_pem;
+     return 0;
+ }
+ 
+@@ -165,6 +163,8 @@
+ {
+     try
+     {
++        if (!pubkey)
++            return 0;
+         Settings::SetEdDSAPubKey(pubkey);
+         return 1;
+     }
+@@ -388,6 +388,7 @@
+ {
+     try
+     {
++        ApplicationController::RequireHardenedConfiguration();
+         // Initialize UI thread and show progress indicator.
+         UI::ShowCheckingUpdates();
+ 
+@@ -400,22 +401,15 @@
+ 
+ WIN_SPARKLE_API void __cdecl win_sparkle_check_update_with_ui_and_install()
+ {
+-    try
+-    {
+-        // Initialize UI thread and show progress indicator.
+-        UI::ShowCheckingUpdates();
+-
+-        // Then run the actual check in the background.
+-        UpdateChecker *check = new ManualAutoInstallUpdateChecker();
+-        check->Start();
+-    }
+-    CATCH_ALL_EXCEPTIONS
++    // Compatibility entry point: both confirmations remain mandatory.
++    win_sparkle_check_update_with_ui();
+ }
+ 
+ WIN_SPARKLE_API void __cdecl win_sparkle_check_update_without_ui()
+ {
+     try
+     {
++        ApplicationController::RequireHardenedConfiguration();
+         // Run the check in background. Only show UI if updates
+         // are available.
+         UpdateChecker *check = new OneShotUpdateChecker();
+@@ -426,8 +420,23 @@
+ 
+ WIN_SPARKLE_API void __cdecl win_sparkle_set_user_run_installer_callback(win_sparkle_user_run_installer_callback_t callback)
+ {
+-    ApplicationController::SetUserRunInstallerCallback(callback);
+-}
+-
++    // The path-only API cannot convey verified-byte identity. Never use it.
++    (void)callback;
++}
++
++WIN_SPARKLE_API unsigned int __cdecl win_sparkle_get_hardening_version(void)
++{
++    return 1;
++}
++
++WIN_SPARKLE_API void __cdecl win_sparkle_set_verified_installer_callback(
++    win_sparkle_verified_installer_callback_t callback)
++{
++    try
++    {
++        ApplicationController::SetVerifiedInstallerCallback(callback);
++    }
++    CATCH_ALL_EXCEPTIONS
++}
+ 
+ } // extern "C"
+diff --git a/src/download.cpp b/src/download.cpp
+index 82044ada72b8..c4970eb8d173 100644
+--- a/src/download.cpp
++++ b/src/download.cpp
+@@ -57,32 +57,19 @@
+ 
+ struct InetHandle
+ {
+-    InetHandle(HINTERNET handle = 0) : m_handle(handle), m_callback(NULL) {}
++    explicit InetHandle(HINTERNET handle) : m_handle(handle) {}
++    InetHandle(const InetHandle&) = delete;
++    InetHandle& operator=(const InetHandle&) = delete;
+ 
+     ~InetHandle()
+     {
+         Close();
+-    }
+-
+-    InetHandle& operator=(HINTERNET handle)
+-    {
+-        Close();
+-        m_handle = handle;
+-        return *this;
+-    }
+-
+-    void SetStatusCallback(INTERNET_STATUS_CALLBACK callback)
+-    {
+-        m_callback = callback;
+-        InternetSetStatusCallback(m_handle, m_callback);
+     }
+ 
+     void Close()
+     {
+         if (m_handle)
+         {
+-            if (m_callback)
+-                InternetSetStatusCallback(m_handle, NULL);
+             InternetCloseHandle(m_handle);
+             m_handle = NULL;
+         }
+@@ -91,7 +78,6 @@
+     operator HINTERNET() const { return m_handle; }
+ 
+     HINTERNET m_handle;
+-    INTERNET_STATUS_CALLBACK m_callback;
+ };
+ 
+ std::wstring MakeUserAgent()
+@@ -134,54 +120,30 @@
+ }
+ 
+ 
+-std::wstring GetURLFileName(const char *url)
+-{
+-    const char *lastSlash = strrchr(url, '/');
+-    std::string fn(lastSlash ? lastSlash + 1 : url);
+-    if (fn.find_first_of('?') != std::string::npos)
+-        fn = fn.substr(0, fn.find_first_of('?'));
+-    return AnsiToWide(fn);
+-}
+-
+-struct DownloadCallbackContext
+-{
+-    DownloadCallbackContext(InetHandle *conn_) : conn(conn_), lastError(ERROR_SUCCESS) {}
+-    InetHandle *conn;
+-    DWORD lastError;
+-    Event eventRequestComplete;
+-};
+-
+-void CALLBACK DownloadInternetStatusCallback(_In_ HINTERNET hInternet,
+-                                             _In_ DWORD_PTR dwContext,
+-                                             _In_ DWORD     dwInternetStatus,
+-                                             _In_ LPVOID    lpvStatusInformation,
+-                                             _In_ DWORD     dwStatusInformationLength)
+-{
+-    DownloadCallbackContext *context = (DownloadCallbackContext*)dwContext;
+-    INTERNET_ASYNC_RESULT *res = (INTERNET_ASYNC_RESULT*)lpvStatusInformation;
+-
+-    switch (dwInternetStatus)
+-    {
+-        case INTERNET_STATUS_HANDLE_CREATED:
+-            context->conn->m_handle = (HINTERNET)(res->dwResult);
+-            break;
+-
+-        case INTERNET_STATUS_REQUEST_COMPLETE:
+-            context->lastError = res->dwError;
+-            context->eventRequestComplete.Signal();
+-            break;
+-    }
+-}
+-
+-void WaitUntilSignaledWithTerminationCheck(Event& event, Thread *thread)
+-{
+-    for (;;)
+-    {
+-        if (thread)
+-            thread->CheckShouldTerminate();
+-        if (event.WaitUntilSignaled(100))
+-            return;
+-    }
++void CheckDownloadCancelled(Thread *thread)
++{
++    if (thread)
++        thread->CheckShouldTerminate();
++}
++
++void SetRequestTimeouts(HINTERNET inet)
++{
++    // These are WinINet phase limits, not a total wall-clock deadline.
++    // Cancel/join can wait for the current synchronous call to return, including
++    // WinINet timeout granularity, DNS, proxy and TLS work. Measure UI cancel
++    // latency in the full native application gate before enabling updates.
++    DWORD timeout = 10000;
++    const DWORD options[] = {INTERNET_OPTION_CONNECT_TIMEOUT,
++                             INTERNET_OPTION_SEND_TIMEOUT,
++                             INTERNET_OPTION_RECEIVE_TIMEOUT};
++    for (DWORD option : options)
++    {
++        if (!InternetSetOptionW(inet, option, &timeout, sizeof(timeout)))
++            throw Win32Exception("Cannot set HTTPS request timeout");
++    }
++    DWORD attempts = 1;
++    if (!InternetSetOptionW(inet, INTERNET_OPTION_CONNECT_RETRIES, &attempts, sizeof(attempts)))
++        throw Win32Exception("Cannot limit HTTPS connection attempts");
+ }
+ 
+ } // anonymous namespace
+@@ -191,8 +153,13 @@
+                                 public functions
+  *--------------------------------------------------------------------------*/
+ 
+-void DownloadFile(const std::string& url, IDownloadSink* sink, Thread* onThread, const std::string& headers_, int flags)
+-{
++static void DownloadFileHTTPS(const std::string& url, IDownloadSink* sink, Thread* onThread,
++                              const std::string& headers_, int flags, unsigned redirects)
++{
++    CheckDownloadCancelled(onThread);
++    CheckForInsecureURL(url, "update request");
++    if (redirects > 5)
++        throw std::runtime_error("Too many HTTPS redirects.");
+     std::string headers = headers_;
+     char url_path[2048];
+     URL_COMPONENTSA urlc;
+@@ -200,20 +167,28 @@
+     urlc.dwStructSize = sizeof(urlc);
+     urlc.lpszUrlPath = url_path;
+     urlc.dwUrlPathLength = sizeof(url_path);
++    urlc.dwUserNameLength = 1;
++    urlc.dwPasswordLength = 1;
+ 
+     if ( !InternetCrackUrlA(url.c_str(), 0, ICU_DECODE, &urlc) )
+         throw Win32Exception();
+ 
+-    InetHandle inet = InternetOpen
++    if (urlc.nScheme != INTERNET_SCHEME_HTTPS || urlc.dwUserNameLength || urlc.dwPasswordLength)
++        throw std::runtime_error("Only HTTPS without URL credentials is permitted.");
++
++    // Run synchronously on the existing checker/downloader worker. No callback
++    // or pending read may retain a pointer to this function's stack or sink.
++    InetHandle inet(InternetOpen
+                       (
+                           MakeUserAgent().c_str(),
+                           INTERNET_OPEN_TYPE_PRECONFIG,
+                           NULL, // lpszProxyName
+                           NULL, // lpszProxyBypass
+-                          INTERNET_FLAG_ASYNC // dwFlags
+-                      );
++                          0 // synchronous; no status callback or request context
++                      ));
+     if ( !inet )
+         throw Win32Exception();
++    SetRequestTimeouts(inet);
+ 
+     DWORD dwOption = HTTP_PROTOCOL_FLAG_HTTP2;
+     InternetSetOptionW(inet, INTERNET_OPTION_ENABLE_HTTP_PROTOCOL, &dwOption, sizeof(dwOption));
+@@ -228,7 +203,11 @@
+     // Never allow local caching, always contact the server for both
+     // appcast feeds and downloads. This is useful in case of
+     // misconfigured servers.
+-    DWORD dwFlags = INTERNET_FLAG_NO_CACHE_WRITE | INTERNET_FLAG_RELOAD;
++    // Redirects are checked BEFORE any request to the new URL. Do not rely on
++    // WinINet's HTTPS-to-HTTP redirect prompts or post-request URL inspection.
++    DWORD dwFlags = INTERNET_FLAG_NO_CACHE_WRITE | INTERNET_FLAG_RELOAD |
++                    INTERNET_FLAG_NO_AUTO_REDIRECT | INTERNET_FLAG_NO_UI |
++                    INTERNET_FLAG_NO_COOKIES | INTERNET_FLAG_NO_AUTH;
+     // For some requests (appcast feeds), don't even allow proxies to cache,
+     // as we need the most up-to-date information.
+     if ( flags & Download_BypassProxies )
+@@ -236,129 +215,84 @@
+     if ( urlc.nScheme == INTERNET_SCHEME_HTTPS )
+         dwFlags |= INTERNET_FLAG_SECURE;
+ 
+-    InetHandle conn;
+-
+-    DownloadCallbackContext context(&conn);
+-    inet.SetStatusCallback(&DownloadInternetStatusCallback);
+-
+-    HINTERNET conn_raw = InternetOpenUrlA
++    CheckDownloadCancelled(onThread);
++    InetHandle conn(InternetOpenUrlA
+                          (
+                              inet,
+                              url.c_str(),
+                              headers.c_str(),
+                              (DWORD)headers.length(),
+                              dwFlags,
+-                             (DWORD_PTR)&context  // dwContext
+-                         );
+-    // InternetOpenUrl() may return NULL handle and then fill it in asynchronously from 
+-    // DownloadInternetStatusCallback. We must make sure we don't overwrite the handle
+-    // in that case, or throw an error.
+-    if (conn_raw)
+-    {
+-        conn = conn_raw;
+-    }
+-    else
+-    {
+-        if (GetLastError() != ERROR_IO_PENDING)
+-            throw Win32Exception();
+-    }
+-
+-    WaitUntilSignaledWithTerminationCheck(context.eventRequestComplete, onThread);
+-
+-    // Check returned status code - we need to detect 404 instead of
+-    // downloading the human-readable 404 page:
+-    DWORD statusCode;
+-    if ( GetHttpHeader(conn, HTTP_QUERY_STATUS_CODE, statusCode) && statusCode >= 400 )
+-    {
+-        throw std::runtime_error("Update file not found on the server.");
+-    }
++                             0 // no borrowed request context
++                         ));
++    const DWORD requestError = GetLastError();
++    CheckDownloadCancelled(onThread);
++    if (!conn)
++    {
++        SetLastError(requestError);
++        throw Win32Exception();
++    }
++
++    DWORD statusCode = 0;
++    if (!GetHttpHeader(conn, HTTP_QUERY_STATUS_CODE, statusCode))
++        throw std::runtime_error("Missing HTTP status.");
++    if (statusCode == 301 || statusCode == 302 || statusCode == 303 ||
++        statusCode == 307 || statusCode == 308)
++    {
++        char location[8192];
++        DWORD length = sizeof(location);
++        if (!HttpQueryInfoA(conn, HTTP_QUERY_LOCATION, location, &length, NULL))
++            throw std::runtime_error("Invalid HTTPS redirect.");
++        char next[16384];
++        DWORD nextLength = sizeof(next);
++        if (!InternetCombineUrlA(url.c_str(), location, next, &nextLength, 0))
++            throw std::runtime_error("Invalid redirect URL.");
++        CheckForInsecureURL(next, "redirect");
++        // Finish this request before opening the next one. Custom headers stay
++        // on the original URL, not on redirected origins.
++        conn.Close();
++        inet.Close();
++        CheckDownloadCancelled(onThread);
++        DownloadFileHTTPS(next, sink, onThread, std::string(), flags, redirects + 1);
++        return;
++    }
++    if (statusCode != 200)
++        throw std::runtime_error("Update server returned an unexpected HTTP status.");
+ 
+     // Get content length if possible:
+     DWORD contentLength;
+     if ( GetHttpHeader(conn, HTTP_QUERY_CONTENT_LENGTH, contentLength) )
+         sink->SetLength(contentLength);
+ 
+-    // Get filename fron Content-Disposition, if available
+-    char contentDisposition[512];
+-    DWORD cdSize = 512;
+-    bool filename_set = false;
+-    if ( HttpQueryInfoA(conn, HTTP_QUERY_CONTENT_DISPOSITION, contentDisposition, &cdSize, NULL) )
+-    {
+-        char *ptr = strstr(contentDisposition, "filename=");
+-        if ( ptr )
+-        {
+-            char c_filename[512];
+-            ptr += 9;
+-            while ( *ptr == ' ' )
+-                ptr++;
+-
+-            bool quoted = false;
+-            if ( *ptr == '"' || *ptr == '\'')
+-            {
+-                quoted = true;
+-                ptr++;
+-            }
+-
+-            char *ptr2 = c_filename;
+-            while ( *ptr != ';' && *ptr != 0)
+-                *ptr2++ = *ptr++;
+-
+-            if ( quoted )
+-                *(ptr2 - 1) = 0;
+-            else
+-                *ptr2 = 0;
+-
+-            sink->SetFilename(AnsiToWide(c_filename));
+-            filename_set = true;
+-        }
+-    }
+-
+-    if ( !filename_set )
+-    {
+-        DWORD ousize = 0;
+-        InternetQueryOptionA(conn, INTERNET_OPTION_URL, NULL, &ousize);
+-        if (GetLastError() == ERROR_INSUFFICIENT_BUFFER)
+-        {
+-            DataBuffer<char> optionurl(ousize);
+-            if ( InternetQueryOptionA(conn, INTERNET_OPTION_URL, optionurl, &ousize) )
+-                sink->SetFilename(GetURLFileName(optionurl));
+-            else
+-                sink->SetFilename(GetURLFileName(urlc.lpszUrlPath));
+-        }
+-        else
+-        {
+-            sink->SetFilename(GetURLFileName(urlc.lpszUrlPath));
+-        }
+-    }
++    // Never parse response names. Neither Content-Disposition nor the URL
++    // controls a local pathname (including before signature verification).
++    sink->SetFilename(L"payload.exe");
+ 
+     // Download the data:
+     char buffer[10240];
+     for ( ;; )
+     {
+-        INTERNET_BUFFERS ibuf = { 0 };
+-        ibuf.dwStructSize = sizeof(ibuf);
+-        ibuf.lpvBuffer = buffer;
+-        ibuf.dwBufferLength = sizeof(buffer);
+-
+-        if (!InternetReadFileEx(conn, &ibuf, IRF_ASYNC | IRF_NO_WAIT, NULL))
++        CheckDownloadCancelled(onThread);
++        DWORD bytesRead = 0;
++        const BOOL read = InternetReadFile(conn, buffer, sizeof(buffer), &bytesRead);
++        const DWORD readError = GetLastError();
++        CheckDownloadCancelled(onThread);
++        if (!read)
+         {
+-            if (GetLastError() != ERROR_IO_PENDING)
+-                throw Win32Exception();
+-
+-            WaitUntilSignaledWithTerminationCheck(context.eventRequestComplete, onThread);
+-            continue;
++            SetLastError(readError);
++            throw Win32Exception();
+         }
+-
+-        if (ibuf.dwBufferLength == 0)
+-        {
+-            if (context.lastError != ERROR_SUCCESS)
+-                throw Win32Exception();
+-            else
+-                break; // all of the file was downloaded
+-        }
+-
+-        sink->Add(ibuf.lpvBuffer, ibuf.dwBufferLength);
+-    }
++        if (bytesRead == 0)
++            break;
++
++        sink->Add(buffer, bytesRead);
++    }
++}
++
++void DownloadFile(const std::string& url, IDownloadSink* sink, Thread* onThread,
++                  const std::string& headers, int flags)
++{
++    DownloadFileHTTPS(url, sink, onThread, headers, flags, 0);
+ }
+ 
+ } // namespace winsparkle
+diff --git a/src/download.h b/src/download.h
+index f182f8ce470a..37499f26054b 100644
+--- a/src/download.h
++++ b/src/download.h
+@@ -27,11 +27,16 @@
+ #define _download_h_
+ 
+ #include <string>
++#include <stdexcept>
+ 
+ namespace winsparkle
+ {
+ 
+ class Thread;
++
++// Limits apply to actual decoded bytes, not untrusted Content-Length values.
++static const size_t MaxAppcastBytes = 1024 * 1024;
++static const size_t MaxPayloadBytes = 512 * 1024 * 1024;
+ 
+ /**
+     Abstraction for storing downloaded data.
+@@ -59,12 +64,18 @@
+  */
+ struct StringDownloadSink : public IDownloadSink
+ {
+-    virtual void SetLength(size_t) {}
++    virtual void SetLength(size_t len)
++    {
++        if (len > MaxAppcastBytes)
++            throw std::runtime_error("Appcast exceeds size limit.");
++    }
+ 
+     virtual void SetFilename(const std::wstring&) {}
+ 
+     virtual void Add(const void *data, size_t len)
+     {
++        if (len > MaxAppcastBytes || this->data.size() > MaxAppcastBytes - len)
++            throw std::runtime_error("Appcast exceeds size limit.");
+         this->data.append(reinterpret_cast<const char*>(data), len);
+     }
+ 
+diff --git a/src/settings.cpp b/src/settings.cpp
+index 9047e908b6ad..d0bef492d2cb 100644
+--- a/src/settings.cpp
++++ b/src/settings.cpp
+@@ -42,7 +42,6 @@
+ std::wstring Settings::ms_appName;
+ std::wstring Settings::ms_appVersion;
+ std::wstring Settings::ms_appBuildVersion;
+-std::string  Settings::ms_DSAPubKey;
+ std::string  Settings::ms_EdDSAPubKey;
+ std::map<std::string, std::string> Settings::ms_httpHeaders;
+ 
+@@ -345,13 +344,6 @@
+     ms_configMethods.config_delete(name, ms_configMethods.user_data);
+ }
+ 
+-void Settings::SetDSAPubKeyPem(const std::string &pem)
+-{
+-    CriticalSectionLocker lock(ms_csVars);
+-    SignatureVerifier::VerifyDSAPubKeyPem(pem);
+-    ms_DSAPubKey = pem;
+-}
+-
+ void Settings::SetEdDSAPubKey(const std::string& pubkey_base64)
+ {
+     CriticalSectionLocker lock(ms_csVars);
+diff --git a/src/settings.h b/src/settings.h
+index 0b65c0d7cc8f..196b86c163b8 100644
+--- a/src/settings.h
++++ b/src/settings.h
+@@ -113,15 +113,6 @@
+         return ms_registryPath;
+     }
+ 
+-    /// Return DSA public key to verify update file signature
+-    static const std::string &GetDSAPubKeyPem()
+-    {
+-        CriticalSectionLocker lock(ms_csVars);
+-        if ( ms_DSAPubKey.empty() )
+-            ms_DSAPubKey = GetCustomResource("DSAPub", "DSAPEM");
+-        return ms_DSAPubKey;
+-    }
+-
+     /// Return EdDSA public key to verify update file signature
+     static const std::string& GetEdDSAPubKey()
+     {
+@@ -129,17 +120,6 @@
+         if (ms_EdDSAPubKey.empty())
+             ms_EdDSAPubKey = GetCustomResource("EdDSAPub", "EDDSA");
+         return ms_EdDSAPubKey;
+-    }
+-
+-    /// Return true if DSA public key is available
+-    static bool HasDSAPubKeyPem()
+-    {
+-        try
+-        {
+-            return !GetDSAPubKeyPem().empty();
+-        }
+-        CATCH_ALL_EXCEPTIONS
+-        return false;
+     }
+ 
+     /// Return true if EdDSA public key is available
+@@ -280,10 +260,6 @@
+         CriticalSectionLocker lock(ms_csVars);
+         ms_configMethods = customConfigMethods ? *customConfigMethods : GetDefaultConfigMethods();
+     }
+-
+-    /// Set PEM data and verify that it contains valid DSA public key
+-    static void SetDSAPubKeyPem(const std::string &pem);
+-    //@}
+ 
+     /// Set base64-encoded data and verify it contains valid EdDSA public key
+     static void SetEdDSAPubKey(const std::string& pubkey_base64);
+@@ -393,7 +369,6 @@
+     static std::wstring ms_appName;
+     static std::wstring ms_appVersion;
+     static std::wstring ms_appBuildVersion;
+-    static std::string  ms_DSAPubKey;
+     static std::string  ms_EdDSAPubKey;
+     static std::map<std::string, std::string> ms_httpHeaders;
+     static win_sparkle_config_methods_t ms_configMethods;
+diff --git a/src/signatureverifier.cpp b/src/signatureverifier.cpp
+index 91ab8862ce26..5e78ccd66a39 100644
+--- a/src/signatureverifier.cpp
++++ b/src/signatureverifier.cpp
+@@ -24,348 +24,112 @@
+  */
+ 
+ #include "signatureverifier.h"
+-
+-#include "error.h"
+ #include "settings.h"
+-#include "utils.h"
+-
+-#include <openssl/dsa.h>
+-#include <openssl/err.h>
+-#include <openssl/pem.h>
+-#include <openssl/sha.h>
++#include "download.h"
+ 
+ #include <ed25519.h>
+-
+-#include <stdexcept>
++#include <cstdio>
++#include <memory>
+ #include <vector>
+-
+ #include <windows.h>
+ #include <wincrypt.h>
++#include <bcrypt.h>
+ 
+ #ifdef _MSC_VER
+ #pragma comment(lib, "crypt32.lib")
++#pragma comment(lib, "bcrypt.lib")
+ #endif
+ 
+ namespace winsparkle
+ {
+-
+ namespace
+ {
+ 
+-class CFile
++// Decode and re-encode with Windows APIs. Reject empty, noncanonical and
++// oversized input before passing it to the Ed25519 implementation.
++std::string Base64ToBin(const std::string& base64, DWORD expectedSize)
+ {
+-    FILE *f;
+-    CFile(const CFile &);
+-    CFile &operator=(const CFile &);
+-public:
+-    CFile(FILE *file): f(file) {}
++    if (base64.size() != ((expectedSize + 2) / 3) * 4)
++        throw BadSignatureException("Invalid base64 length.");
+ 
+-    operator FILE*()
++    DWORD size = expectedSize;
++    std::string bin(size, '\0');
++    if (!CryptStringToBinaryA(base64.data(), static_cast<DWORD>(base64.size()),
++                             CRYPT_STRING_BASE64 | CRYPT_STRING_STRICT,
++                             reinterpret_cast<BYTE*>(&bin[0]), &size, NULL, NULL) || size != expectedSize)
++        throw BadSignatureException("Invalid base64 data.");
++
++    DWORD encodedSize = 0;
++    if (!CryptBinaryToStringA(reinterpret_cast<const BYTE*>(bin.data()), size,
++                             CRYPT_STRING_BASE64 | CRYPT_STRING_NOCRLF, NULL, &encodedSize))
++        throw BadSignatureException("Cannot encode base64.");
++    std::string encoded(encodedSize, '\0');
++    if (!CryptBinaryToStringA(reinterpret_cast<const BYTE*>(bin.data()), size,
++                             CRYPT_STRING_BASE64 | CRYPT_STRING_NOCRLF, &encoded[0], &encodedSize))
++        throw BadSignatureException("Cannot encode base64.");
++    encoded.resize(encodedSize);
++    if (encoded != base64)
++        throw BadSignatureException("Noncanonical base64 data.");
++    return bin;
++}
++
++std::vector<unsigned char> ReadPayload(const std::wstring& filename)
++{
++    std::unique_ptr<FILE, decltype(&fclose)> file(_wfopen(filename.c_str(), L"rb"), fclose);
++    if (!file || fseek(file.get(), 0, SEEK_END) != 0)
++        throw std::runtime_error("Cannot read update file.");
++    const long size = ftell(file.get());
++    // Match the streaming download limit before allocating the private buffer.
++    if (size <= 0 || static_cast<size_t>(size) > MaxPayloadBytes || fseek(file.get(), 0, SEEK_SET) != 0)
++        throw std::runtime_error("Invalid update file size.");
++    std::vector<unsigned char> payload(static_cast<size_t>(size));
++    if (fread(payload.data(), 1, payload.size(), file.get()) != payload.size() || ferror(file.get()))
++        throw std::runtime_error("Cannot read update file.");
++    return payload;
++}
++
++struct CNGHash
++{
++    BCRYPT_ALG_HANDLE algorithm = NULL;
++    BCRYPT_HASH_HANDLE hash = NULL;
++    ~CNGHash()
+     {
+-        return f;
+-    }
+-
+-    ~CFile()
+-    {
+-        if (f)
+-            fclose(f);
++        if (hash) BCryptDestroyHash(hash);
++        if (algorithm) BCryptCloseAlgorithmProvider(algorithm, 0);
+     }
+ };
+ 
+-class WinCryptRSAContext
++SHA256Digest HashVerifiedBuffer(const std::vector<unsigned char>& payload)
+ {
+-    HCRYPTPROV handle;
+-
+-    WinCryptRSAContext(const WinCryptRSAContext &);
+-    WinCryptRSAContext &operator=(const WinCryptRSAContext &);
+-public:
+-    WinCryptRSAContext()
+-    {
+-        if (!CryptAcquireContextW(&handle, NULL, NULL, PROV_RSA_FULL, CRYPT_VERIFYCONTEXT))
+-            throw Win32Exception("Failed to create crypto context");
+-    }
+-
+-    ~WinCryptRSAContext()
+-    {
+-        if (!CryptReleaseContext(handle, 0))
+-            LogError("Failed to release crypto context");
+-    }
+-
+-    operator HCRYPTPROV()
+-    {
+-        return handle;
+-    }
+-};
+-
+-class WinCryptSHA1Hash
+-{
+-    HCRYPTHASH handle;
+-
+-    WinCryptSHA1Hash(const WinCryptSHA1Hash&);
+-    WinCryptSHA1Hash& operator=(const WinCryptSHA1Hash &);
+-public:
+-    WinCryptSHA1Hash(WinCryptRSAContext &context)
+-    {
+-        if (!CryptCreateHash(HCRYPTPROV(context), CALG_SHA1, 0, 0, &handle))
+-            throw Win32Exception("Failed to create crypto hash");
+-    }
+-
+-    ~WinCryptSHA1Hash()
+-    {
+-        if (handle)
+-        {
+-            if (!CryptDestroyHash(handle))
+-            {
+-                LogError("Failed to destroy crypto hash");
+-            }
+-        }
+-    }
+-
+-    void hashData(const void *buffer, size_t buffer_len)
+-    {
+-        if (!CryptHashData(handle, (CONST BYTE  *)buffer, (DWORD)buffer_len, 0))
+-            throw Win32Exception("Failed to hash data");
+-    }
+-
+-    void hashFile(const std::wstring &filename)
+-    {
+-        CFile f(_wfopen(filename.c_str(), L"rb"));
+-        if (!f)
+-            throw std::runtime_error(WideToAnsi(L"Failed to open file " + filename));
+-
+-        const int BUF_SIZE = 8192;
+-        unsigned char buf[BUF_SIZE];
+-
+-        while (size_t read_bytes = fread(buf, 1, BUF_SIZE, f))
+-        {
+-            hashData(buf, read_bytes);
+-        }
+-
+-        if (ferror(f))
+-            throw std::runtime_error(WideToAnsi(L"Failed to read file " + filename));
+-    }
+-
+-    void sha1Val(unsigned char(&sha1)[SHA_DIGEST_LENGTH])
+-    {
+-        DWORD hash_len = SHA_DIGEST_LENGTH;
+-        if (!CryptGetHashParam(handle, HP_HASHVAL, sha1, &hash_len, 0))
+-            throw Win32Exception("Failed to get SHA1 val");
+-    }
+-
+-};
+-
+-/**
+-    Light-weight dynamic loader of OpenSSL library.
+-    Loads only minimum required symbols, just enough to verify DSA SHA1 signature of the file.
+- */
+-class TinySSL
+-{
+-    TinySSL() {}
+-public:
+-    static TinySSL &inst()
+-    {
+-        static TinySSL instance;
+-        return instance;
+-    }
+-
+-    ~TinySSL()
+-    {
+-    }
+-
+-    void VerifyDSASHA1Signature(const std::wstring &filename, const std::string &signature)
+-    {
+-        unsigned char sha1[SHA_DIGEST_LENGTH];
+-
+-        {
+-            WinCryptRSAContext ctx;
+-            // SHA1 of file
+-            {
+-                WinCryptSHA1Hash hash(ctx);
+-                hash.hashFile(filename);
+-                hash.sha1Val(sha1);
+-            }
+-            // SHA1 of SHA1 of file
+-            {
+-                WinCryptSHA1Hash hash(ctx);
+-                hash.hashData(sha1, ARRAYSIZE(sha1));
+-                hash.sha1Val(sha1);
+-            }
+-        }
+-
+-        DSAPub pubKey(Settings::GetDSAPubKeyPem());
+-
+-        const int code = DSA_verify(0, sha1, ARRAYSIZE(sha1), (const unsigned char*)signature.c_str(), (int)signature.size(), pubKey);
+-
+-        if (code == -1) // OpenSSL error
+-            throw BadSignatureException(ERR_error_string(ERR_get_error(), nullptr));
+-
+-        if (code != 1)
+-            throw BadSignatureException();
+-    }
+-
+-private:
+-    class BIOWrap
+-    {
+-        BIO* bio;
+-
+-        BIOWrap(const BIOWrap &);
+-        BIOWrap &operator=(const BIOWrap &);
+-
+-    public:
+-        BIOWrap(const std::string &mem_buf)
+-            : bio(BIO_new_mem_buf(mem_buf.c_str(), int(mem_buf.size())))
+-        {
+-            if (!bio)
+-                throw std::invalid_argument("Cannot set PEM key mem buffer");
+-        }
+-
+-        operator BIO*()
+-        {
+-            return bio;
+-        }
+-
+-        ~BIOWrap()
+-        {
+-            BIO_free(bio);
+-        }
+-
+-    }; // BIOWrap
+-
+-public:
+-    class DSAPub
+-    {
+-        DSA *dsa;
+-
+-        DSAPub(const DSAPub &);
+-        DSAPub &operator=(const DSAPub &);
+-
+-    public:
+-        DSAPub(const std::string &pem_key)
+-            : dsa(NULL)
+-        {
+-            BIOWrap bio(pem_key);
+-            if (!PEM_read_bio_DSA_PUBKEY(bio, &dsa, NULL, NULL))
+-            {
+-                throw std::invalid_argument("Cannot read DSA public key from PEM");
+-            }
+-        }
+-
+-        operator DSA*()
+-        {
+-            return dsa;
+-        }
+-
+-        ~DSAPub()
+-        {
+-            if (dsa)
+-                DSA_free(dsa);
+-        }
+-
+-    }; // DSAWrap
+-
+-}; // TinySSL
+-
+-std::string Base64ToBin(const std::string &base64)
+-{
+-    DWORD nDestinationSize = 0;
+-    std::string bin;
+-
+-    bool ok = false;
+-
+-    if (CryptStringToBinaryA(&base64[0], (DWORD)base64.size(), CRYPT_STRING_BASE64, NULL, &nDestinationSize, NULL, NULL))
+-    {
+-        bin.resize(nDestinationSize);
+-        if (CryptStringToBinaryA(&base64[0], (DWORD)base64.size(), CRYPT_STRING_BASE64, (BYTE *)&bin[0], &nDestinationSize, NULL, NULL))
+-        {
+-            ok = true;
+-        }
+-    }
+-
+-    if (!ok)
+-        throw std::runtime_error("Failed to decode base64 string");
+-
+-    return bin;
++    CNGHash cng;
++    SHA256Digest digest;
++    if (BCryptOpenAlgorithmProvider(&cng.algorithm, BCRYPT_SHA256_ALGORITHM, NULL, 0) < 0 ||
++        BCryptCreateHash(cng.algorithm, &cng.hash, NULL, 0, NULL, 0, 0) < 0 ||
++        BCryptHashData(cng.hash, const_cast<PUCHAR>(payload.data()), static_cast<ULONG>(payload.size()), 0) < 0 ||
++        BCryptFinishHash(cng.hash, digest.data(), static_cast<ULONG>(digest.size()), 0) < 0)
++        throw std::runtime_error("CNG SHA-256 failed.");
++    return digest;
+ }
+ 
+-} // anonynous
+-
+-void SignatureVerifier::VerifyDSAPubKeyPem(const std::string &pem)
+-{
+-    // DSAPub::DSAPub() throw if not valid
+-    TinySSL::DSAPub dsa_pub(pem);
+-    (void)dsa_pub;
+-}
++} // anonymous namespace
+ 
+ void SignatureVerifier::VerifyEdDSAPubKey(const std::string& pubkey_base64)
+ {
+-    const std::string pubkey = Base64ToBin(pubkey_base64);
+-    if (pubkey.size() != 32)
+-    {
+-        throw BadSignatureException("Invalid public key size.");
+-    }
++    Base64ToBin(pubkey_base64, 32);
+ }
+ 
+-void SignatureVerifier::VerifyDSASHA1SignatureValid(const std::wstring &filename, const std::string &signature_base64)
++SHA256Digest SignatureVerifier::VerifyEdDSASignatureValid(const std::wstring& filename, const std::string& signature_base64)
+ {
+-    try
+-    {
+-        if (signature_base64.size() == 0)
+-            throw BadSignatureException("Missing DSA signature!");
+-        TinySSL::inst().VerifyDSASHA1Signature(filename, Base64ToBin(signature_base64));
+-    }
+-    catch (BadSignatureException&)
+-    {
+-        throw;
+-    }
+-    catch (const std::exception &e)
+-    {
+-        throw BadSignatureException(e.what());
+-    }
+-    catch (...)
+-    {
++    const std::string signature = Base64ToBin(signature_base64, 64);
++    const std::string pubkey = Base64ToBin(Settings::GetEdDSAPubKey(), 32);
++    // Not a mapping or a second pathname read. Both algorithms consume this
++    // single private buffer, which cannot change between verification and hash.
++    const std::vector<unsigned char> payload = ReadPayload(filename);
++    if (ed25519_verify(reinterpret_cast<const unsigned char*>(signature.data()),
++                       payload.data(), payload.size(),
++                       reinterpret_cast<const unsigned char*>(pubkey.data())) != 1)
+         throw BadSignatureException();
+-    }
+-}
+-
+-void SignatureVerifier::VerifyEdDSASignatureValid(const std::wstring& filename, const std::string& signature_base64)
+-{
+-    if (signature_base64.size() == 0)
+-        throw BadSignatureException("Missing EdDSA signature!");
+-
+-    CFile f(_wfopen(filename.c_str(), L"rb"));
+-    if (!f || ferror(f))
+-        throw std::runtime_error(WideToAnsi(L"Failed to read file " + filename));
+-
+-    fseek(f, 0, SEEK_END);
+-    long lsize = ftell(f);
+-    if (lsize < 0)
+-        throw std::runtime_error(WideToAnsi(L"Failed to read file " + filename));
+-    size_t size = static_cast<size_t>(lsize);
+-    rewind(f);
+-
+-    std::vector<unsigned char> payload(size);
+-    size_t bytes_read = fread(payload.data(), 1, (size_t)size, f);
+-    if (bytes_read != size || ferror(f))
+-        throw std::runtime_error(WideToAnsi(L"Failed to read file " + filename));
+-
+-    const std::string signature = Base64ToBin(signature_base64);
+-    if (signature.size() != 64)
+-    {
+-        throw BadSignatureException("Invalid signature size.");
+-    }
+-
+-    const std::string pubkey = Base64ToBin(Settings::GetEdDSAPubKey());
+-    if (pubkey.size() != 32)
+-    {
+-        throw BadSignatureException("Invalid public key size.");
+-    }
+-
+-    int result = ed25519_verify(reinterpret_cast<const unsigned char*>(signature.data()),
+-                                payload.data(),
+-                                payload.size(),
+-                                reinterpret_cast<const unsigned char*>(pubkey.data()));
+-    if (result != 1)
+-        throw BadSignatureException();
++    return HashVerifiedBuffer(payload);
+ }
+ 
+ } // namespace winsparkle
+diff --git a/src/signatureverifier.h b/src/signatureverifier.h
+index 912897dc3be9..bfcde3c11040 100644
+--- a/src/signatureverifier.h
++++ b/src/signatureverifier.h
+@@ -26,6 +26,7 @@
+ #ifndef _signatureverifier_h_
+ #define _signatureverifier_h_
+ 
++#include <array>
+ #include <stdexcept>
+ #include <string>
+ 
+@@ -39,23 +40,17 @@
+     BadSignatureException(const std::string& msg) : std::runtime_error("Invalid update signature: " + msg) {}
+ };
+ 
++typedef std::array<unsigned char, 32> SHA256Digest;
++
+ class SignatureVerifier
+ {
+ public:
+-    // Throws an exception if pem is not a valid DSA public key in PEM format
+-    static void VerifyDSAPubKeyPem(const std::string &pem);
+-
+-    // Throws an exception if pem is not a valid EdDSA public key in base64 format
++    // Throws an exception if the Ed25519 public key is not canonical base64.
+     static void VerifyEdDSAPubKey(const std::string& pubkey_base64);
+ 
+-    // Verify DSA signature of SHA1 hash of the file. Equivalent to:
+-    // openssl dgst -sha1 -binary < filename | openssl dgst -sha1 -verify dsa_pub.pem -signature signature.bin
+-    // Throws BadSignatureException on failure.
+-    static void VerifyDSASHA1SignatureValid(const std::wstring &filename, const std::string &signature_base64);
+-
+-    // Verify EdDSA signature of the file.
+-    // Throws BadSignatureException on failure.
+-    static void VerifyEdDSASignatureValid(const std::wstring& filename, const std::string& signature_base64);
++    // Verify Ed25519 and hash the SAME private, immutable payload buffer.
++    // Returns a digest only after verification succeeds. Throws on any failure.
++    static SHA256Digest VerifyEdDSASignatureValid(const std::wstring& filename, const std::string& signature_base64);
+ };
+ 
+ } // namespace winsparkle
+diff --git a/src/ui.cpp b/src/ui.cpp
+index ba63b81a0d5b..49c062eb04fa 100644
+--- a/src/ui.cpp
++++ b/src/ui.cpp
+@@ -52,13 +52,8 @@
+ #include <wx/timer.h>
+ #include <wx/settings.h>
+ #include <wx/msgdlg.h>
+-#include <wx/webview.h>
+-#include <wx/msw/webview_ie.h>
+-
+-#include <exdisp.h>
+-#include <mshtml.h>
++#include <wx/textctrl.h>
+ #include <commctrl.h>
+-#include <shellapi.h>
+ 
+ 
+ #if !wxCHECK_VERSION(2,9,0)
+@@ -155,7 +150,9 @@
+     size_t       sizeDownloaded = 0;
+     size_t       sizeTotal = 0;
+     std::wstring updateFile;
+-    bool         installAutomatically;
++    SHA256Digest verifiedDigest = {};
++    std::shared_ptr<const int> downloadToken;
++    bool         installAutomatically = false;
+     ErrorCode    error = Err_Generic;
+ };
+ 
+@@ -291,25 +288,6 @@
+ };
+ 
+ 
+-enum WebBrowserSourceKind
+-{
+-    WebBrowserSourceNone,
+-    WebBrowserSourceRemote,
+-    WebBrowserSourceInline
+-};
+-
+-struct WebBrowserState
+-{
+-    WebBrowserSourceKind SourceKind = WebBrowserSourceNone;
+-    bool PageLoaded = false;
+-
+-    void Reset(WebBrowserSourceKind kind)
+-    {
+-        PageLoaded = false;
+-        SourceKind = kind;
+-    }
+-};
+-
+ } // anonymous namespace
+ 
+ 
+@@ -438,23 +416,26 @@
+ {
+ public:
+     UpdateDialog();
++    ~UpdateDialog();
+ 
+     // changes state into "checking for updates"
+     void StateCheckingUpdates();
+     // change state into "no updates found"
+     void StateNoUpdateFound(bool installAutomatically);
+     // change state into "update error"
+-    void StateUpdateError(ErrorCode err);
++    void StateUpdateError(ErrorCode err, const std::shared_ptr<const int>& token = {});
+     // change state into "a new version is available"
+     void StateUpdateAvailable(const Appcast& info, bool installAutomatically);
+     // change state into "downloading update"
+     void StateDownloading();
+     // update download progress
+-    void DownloadProgress(size_t downloaded, size_t total);
++    void DownloadProgress(size_t downloaded, size_t total, const std::shared_ptr<const int>& token);
+     // change state into "update downloaded"
+-    void StateUpdateDownloaded(const std::wstring& updateFile, const std::string &installerArguments);
++    void StateUpdateDownloaded(const std::wstring& updateFile, const SHA256Digest& digest,
++                               const std::shared_ptr<const int>& token);
+ 
+ private:
++    bool HasActiveUpdate() const { return bool(m_downloadToken); }
+     void EnablePulsing(bool enable);
+     void OnTimer(wxTimerEvent& event);
+     void OnCloseButton(wxCommandEvent& event);
+@@ -487,25 +468,25 @@
+     wxButton     *m_installButton;
+     wxSizer      *m_updateButtonsSizer;
+     wxSizer      *m_releaseNotesSizer;
+-    wxPanel      *m_browserParent;
+-    wxWebView    *m_webBrowser;
++    wxTextCtrl   *m_releaseNotes;
+ 
+     // current appcast data (only valid after StateUpdateAvailable())
+     Appcast m_appcast;
+     // current update file (only valid after StateUpdateDownloaded)
+     wxString m_updateFile;
+-    // space separated arguments to update file (only valid after StateUpdateDownloaded)
+-    std::string m_installerArguments;
++    // Digest copied from the verifier, never recomputed from m_updateFile.
++    SHA256Digest m_verifiedDigest = {};
++    bool m_hasVerifiedInstaller = false;
+     // downloader (only valid between OnInstall and OnUpdateDownloaded)
+     UpdateDownloader* m_downloader;
++    // Freeze the displayed offer from download consent through confirmation.
++    std::shared_ptr<const int> m_downloadToken;
+     // whether the update should be installed without prompting the user
+     bool m_installAutomatically;
+     // whether an error occurred (used to properly call NotifyUpdateCancelled)
+     bool m_errorOccurred;
+     // whether window closure was updater-initiated (i.e. not caused by user)
+     bool m_closeInitiatedByUpdater;
+-    // browser state in process of loading the release notes
+-    WebBrowserState m_webBrowserState;
+ 
+     static const int RELNOTES_WIDTH = 460;
+     static const int RELNOTES_HEIGHT = 200;
+@@ -541,15 +522,13 @@
+     SetBoldFont(notesLabel);
+     m_releaseNotesSizer->Add(notesLabel, wxSizerFlags().Border(wxTOP, PX(10)));
+ 
+-    m_browserParent = new wxPanel(this, wxID_ANY,
+-                                  wxDefaultPosition,
+-                                  wxSize(PX(RELNOTES_WIDTH), PX(RELNOTES_HEIGHT)));
+-    m_browserParent->SetBackgroundColour(*wxWHITE);
+-    m_webBrowser = NULL;
++    m_releaseNotes = new wxTextCtrl(this, wxID_ANY, "", wxDefaultPosition,
++                                    wxSize(PX(RELNOTES_WIDTH), PX(RELNOTES_HEIGHT)),
++                                    wxTE_MULTILINE | wxTE_READONLY);
+ 
+     m_releaseNotesSizer->Add
+                          (
+-                             m_browserParent,
++                             m_releaseNotes,
+                              wxSizerFlags(1).Expand().Border(wxTOP, PX(10))
+                          );
+ 
+@@ -604,6 +583,15 @@
+ }
+ 
+ 
++UpdateDialog::~UpdateDialog()
++{
++    if (m_downloader)
++    {
++        m_downloader->TerminateAndJoin();
++        delete m_downloader;
++    }
++}
++
+ void UpdateDialog::EnablePulsing(bool enable)
+ {
+     if ( enable && !m_timer.IsRunning() )
+@@ -675,18 +663,19 @@
+ 
+ void UpdateDialog::OnInstall(wxCommandEvent&)
+ {
++    if (HasActiveUpdate())
++        return;
+     if ( !m_appcast.HasDownload() )
+     {
+-        wxLaunchDefaultBrowser(m_appcast.WebBrowserURL, wxBROWSER_NEW_WINDOW);
+-        m_closeInitiatedByUpdater = true;
+-        Close();
++        // No browser/download-page fallback in this integration.
++        StateUpdateError(Err_Generic);
+     }
+     else if ( m_downloader == NULL )
+     {
++        // Bind the offer before starting the worker or processing its events.
++        m_downloader = new UpdateDownloader(m_appcast);
++        m_downloadToken = m_downloader->GetToken();
+         StateDownloading();
+-
+-        // Run the download in background.
+-        m_downloader = new UpdateDownloader(m_appcast);
+         m_downloader->Start();
+     }
+ }
+@@ -727,36 +716,12 @@
+ 
+ bool UpdateDialog::RunInstaller()
+ {
+-    switch (ApplicationController::UserRunInstallerCallback(m_updateFile.t_str()))
+-    {
+-        case 0:
+-            // carry on with default handling
+-            break;
+-        case 1:
+-            // user callback handled installation
+-            return true;
+-        case WINSPARKLE_RETURN_ERROR:
+-        default:
+-            // some error occured (either runtime or unexpected return value)
+-            return false;
+-    }
+-
+-    std::wstring wArgs;
+-
+-    SHELLEXECUTEINFO sei;
+-    ::ZeroMemory(&sei, sizeof(SHELLEXECUTEINFO));
+-    sei.cbSize = sizeof(SHELLEXECUTEINFO);
+-    sei.lpFile = m_updateFile.t_str();
+-    sei.nShow = SW_SHOWDEFAULT;
+-    sei.fMask = SEE_MASK_FLAG_NO_UI;	// We display our own dialog box on error
+-
+-    if (! m_installerArguments.empty())
+-    {
+-        wArgs = AnsiToWide(m_installerArguments);
+-        sei.lpParameters = wArgs.c_str();
+-    }
+-
+-    return ::ShellExecuteEx(&sei) ? true : false;
++    if (!m_hasVerifiedInstaller)
++        return false;
++    // Consume this confirmation once, even if the host rejects handoff.
++    m_hasVerifiedInstaller = false;
++    return ApplicationController::VerifiedInstallerCallback(
++        m_updateFile.t_str(), m_verifiedDigest.data());
+ }
+ 
+ void UpdateDialog::SetMessage(const wxString& text, int width)
+@@ -775,6 +740,8 @@
+ 
+ void UpdateDialog::StateCheckingUpdates()
+ {
++    if (HasActiveUpdate())
++        return;
+     LayoutChangesGuard guard(this);
+ 
+     SetMessage(_("Checking for updates..."));
+@@ -795,6 +762,8 @@
+ 
+ void UpdateDialog::StateNoUpdateFound(bool installAutomatically)
+ {
++    if (HasActiveUpdate())
++        return;
+     m_installAutomatically = installAutomatically;
+ 
+     if ( m_installAutomatically )
+@@ -841,9 +810,23 @@
+ }
+ 
+ 
+-void UpdateDialog::StateUpdateError(ErrorCode err)
+-{
++void UpdateDialog::StateUpdateError(ErrorCode err, const std::shared_ptr<const int>& token)
++{
++    if (token)
++    {
++        if (!m_downloader || token != m_downloadToken)
++            return; // stale error from a cancelled or different download
++        m_downloader->Join();
++        delete m_downloader;
++        m_downloader = NULL;
++    }
++    else if (HasActiveUpdate())
++    {
++        return; // unrelated checker failure must not replace the active offer
++    }
++    m_downloadToken.reset();
+     m_errorOccurred = true;
++    m_hasVerifiedInstaller = false;
+ 
+     LayoutChangesGuard guard(this);
+ 
+@@ -879,17 +862,14 @@
+ 
+ void UpdateDialog::StateUpdateAvailable(const Appcast& info, bool installAutomatically)
+ {
++    if (HasActiveUpdate())
++        return;
+     m_appcast = info;
+-    m_installAutomatically = installAutomatically;
+-
+-    if ( installAutomatically )
+-    {
+-        wxCommandEvent nullEvent;
+-        OnInstall(nullEvent);
+-        return;
+-    }
+-
+-    const bool showRelnotes = !info.ReleaseNotesURL.empty() || !info.Description.empty();
++    (void)installAutomatically;
++    m_installAutomatically = false;
++    m_hasVerifiedInstaller = false;
++
++    const bool showRelnotes = !info.Description.empty();
+ 
+     {
+         LayoutChangesGuard guard(this);
+@@ -946,8 +926,7 @@
+         MakeResizable(showRelnotes);
+     }
+ 
+-    // Only show the release notes now that the layout was updated, as it may
+-    // take some time to load the MSIE control:
++    // Notes are literal text. Remote releaseNotesLink is never loaded.
+     if ( showRelnotes )
+         ShowReleaseNotes(info);
+ }
+@@ -973,8 +952,10 @@
+ }
+ 
+ 
+-void UpdateDialog::DownloadProgress(size_t downloaded, size_t total)
+-{
++void UpdateDialog::DownloadProgress(size_t downloaded, size_t total, const std::shared_ptr<const int>& token)
++{
++    if (!m_downloader || token != m_downloadToken)
++        return;
+     wxString label;
+ 
+     if ( total )
+@@ -1004,21 +985,18 @@
+ }
+ 
+ 
+-void UpdateDialog::StateUpdateDownloaded(const std::wstring& updateFile, const std::string& installerArguments)
+-{
++void UpdateDialog::StateUpdateDownloaded(const std::wstring& updateFile, const SHA256Digest& digest,
++                                         const std::shared_ptr<const int>& token)
++{
++    if (!m_downloader || token != m_downloadToken)
++        return; // stale completion from a cancelled download
+     m_downloader->Join();
+     delete m_downloader;
+     m_downloader = NULL;
+ 
+     m_updateFile = updateFile;
+-    m_installerArguments = installerArguments;
+-
+-    if ( m_installAutomatically )
+-    {
+-        wxCommandEvent nullEvent;
+-        OnRunInstaller(nullEvent);
+-        return;
+-    }
++    m_verifiedDigest = digest;
++    m_hasVerifiedInstaller = true;
+ 
+     LayoutChangesGuard guard(this);
+ 
+@@ -1032,7 +1010,8 @@
+     HIDE(m_heading);
+     SHOW(m_progress);
+     HIDE(m_progressLabel);
+-    HIDE(m_closeButtonSizer);
++    m_closeButton->SetLabel(_("Cancel"));
++    SHOW(m_closeButtonSizer);
+     SHOW(m_runInstallerButtonSizer);
+     HIDE(m_releaseNotesSizer);
+     HIDE(m_updateButtonsSizer);
+@@ -1042,94 +1021,9 @@
+ 
+ void UpdateDialog::ShowReleaseNotes(const Appcast& info)
+ {
+-    if ( !m_webBrowser )
+-    {
+-        wxBusyCursor busy;
+-
+-        if (!wxWebView::IsBackendAvailable(wxWebViewBackendEdge))
+-            wxWebViewIE::MSWSetEmulationLevel(wxWEBVIEWIE_EMU_IE11);
+-        // Note that about:blank is used so that subsequent SetPage() call doesn't fail with
+-        // MSIE. See https://github.com/vslavik/winsparkle/issues/155 and
+-        // https://github.com/wxWidgets/wxWidgets/issues/14768
+-        m_webBrowser = wxWebView::New(m_browserParent, wxID_ANY, "about:blank",
+-                                      wxDefaultPosition, wxSize(PX(RELNOTES_WIDTH), PX(RELNOTES_HEIGHT)));
+-        auto sizer = new wxBoxSizer(wxVERTICAL);
+-        sizer->Add(m_webBrowser, wxSizerFlags(1).Expand());
+-        m_browserParent->SetSizer(sizer);
+-
+-        // The subsequent code's purpose to is to reliably ensure that external links in the release
+-        // notes are opened in the default browser, and not in the embedded web view. This is surprisingly
+-        // complicated, because we need to ensure that the release notes page itself won't open
+-        // externally as well. And the two supported backends (MSIE and Edge) behave wildly differently.
+-        //
+-        // Edge:
+-        //
+-        //    ReleaseNotesURL:
+-        //        1. wxEVT_WEBVIEW_NAVIGATING(ReleaseNotesURL)
+-        //        2. wxEVT_WEBVIEW_LOADED(ReleaseNotesURL)
+-        //
+-        //    Description only (inline notes):
+-        //        1. wxEVT_WEBVIEW_NAVIGATING("data:text/html;...")
+-        //        2. wxEVT_WEBVIEW_LOADED("about:blank")
+-        //
+-        // MSIE:
+-        //
+-        //    ReleaseNotesURL:
+-        //        1. wxEVT_WEBVIEW_LOADED("about:blank")
+-        //        2. wxEVT_WEBVIEW_NAVIGATING(ReleaseNotesURL)
+-        //        3. wxEVT_WEBVIEW_LOADED(ReleaseNotesURL)
+-        //
+-        //    Description only (inline notes):
+-        //        1. wxEVT_WEBVIEW_LOADED("")
+-        //
+-        // To further complicate matters, the ReleaseNotesURL page may be a redirect, triggering
+-        // a chain of navigating events before eventually landing at loaded.
+-
+-        m_webBrowser->Bind(wxEVT_WEBVIEW_LOADED, [this](wxWebViewEvent& evt)
+-            {
+-                switch (this->m_webBrowserState.SourceKind)
+-                {
+-                    case WebBrowserSourceInline:
+-                        // for inline release notes, loaded event means the page is ready:
+-                        this->m_webBrowserState.PageLoaded = true;
+-                        break;
+-
+-                    case WebBrowserSourceRemote:
+-                        // for remote, we need to filter out internal events like about:blank:
+-                        if (evt.GetURL().starts_with("http"))
+-                            this->m_webBrowserState.PageLoaded = true;
+-                        break;
+-
+-                    case WebBrowserSourceNone:
+-                        break;
+-                }
+-            });
+-
+-        // Open all links in the default browser once the documented is loaded.
+-        // Note that wxEVT_WEBVIEW_NAVIGATING is emitted for redirects during page loading
+-        // as well, as we can only "hijack" the event once the release notes page was loaded
+-        m_webBrowser->Bind(wxEVT_WEBVIEW_NAVIGATING, [this](wxWebViewEvent& evt)
+-			{
+-                auto& url = evt.GetURL();
+-                if (this->m_webBrowserState.PageLoaded && url.starts_with("http"))
+-                {
+-                    wxLaunchDefaultBrowser(url);
+-                    evt.Veto();
+-                }
+-            });
+-    }
+-
+-    if (!info.ReleaseNotesURL.empty())
+-    {
+-        m_webBrowserState.Reset(WebBrowserSourceRemote);
+-        m_webBrowser->LoadURL(info.ReleaseNotesURL);
+-    }
+-    else if ( !info.Description.empty() )
+-    {
+-        m_webBrowserState.Reset(WebBrowserSourceInline);
+-        m_webBrowser->SetPage(wxString::FromUTF8(info.Description), "");
+-    }
+-
++    // wxTextCtrl does not interpret HTML, scripts, URLs or markup. Bound the
++    // displayed text; do not fetch releaseNotesLink, images or other resources.
++    m_releaseNotes->ChangeValue(wxString::FromUTF8(info.Description.substr(0, 65536)));
+     SetWindowStyleFlag(GetWindowStyleFlag() | wxRESIZE_BORDER);
+ }
+ 
+@@ -1401,7 +1295,7 @@
+     if ( m_win )
+     {
+         EventPayload payload(event.GetPayload<EventPayload>());
+-        m_win->StateUpdateError(payload.error);
++        m_win->StateUpdateError(payload.error, payload.downloadToken);
+     }
+ }
+ 
+@@ -1410,7 +1304,7 @@
+     if ( m_win )
+     {
+         EventPayload payload(event.GetPayload<EventPayload>());
+-        m_win->DownloadProgress(payload.sizeDownloaded, payload.sizeTotal);
++        m_win->DownloadProgress(payload.sizeDownloaded, payload.sizeTotal, payload.downloadToken);
+     }
+ }
+ 
+@@ -1419,7 +1313,7 @@
+     if ( m_win )
+     {
+         EventPayload payload(event.GetPayload<EventPayload>());
+-        m_win->StateUpdateDownloaded(payload.updateFile, payload.appcast.enclosure.InstallerArguments);
++        m_win->StateUpdateDownloaded(payload.updateFile, payload.verifiedDigest, payload.downloadToken);
+     }
+ }
+ 
+@@ -1592,29 +1486,32 @@
+ 
+ 
+ /*static*/
+-void UI::NotifyDownloadProgress(size_t downloaded, size_t total)
++void UI::NotifyDownloadProgress(size_t downloaded, size_t total, std::shared_ptr<const int> token)
+ {
+     UIThreadAccess uit;
+     EventPayload payload;
+     payload.sizeDownloaded = downloaded;
+     payload.sizeTotal = total;
++    payload.downloadToken = token;
+     uit.App().SendMsg(MSG_DOWNLOAD_PROGRESS, &payload);
+ }
+ 
+ 
+ /*static*/
+-void UI::NotifyUpdateDownloaded(const std::wstring& updateFile, const Appcast &appcast)
++void UI::NotifyUpdateDownloaded(const std::wstring& updateFile, const SHA256Digest& digest,
++                                std::shared_ptr<const int> token)
+ {
+     UIThreadAccess uit;
+     EventPayload payload;
+     payload.updateFile = updateFile;
+-    payload.appcast = appcast;
++    payload.verifiedDigest = digest;
++    payload.downloadToken = token;
+     uit.App().SendMsg(MSG_UPDATE_DOWNLOADED, &payload);
+ }
+ 
+ 
+ /*static*/
+-void UI::NotifyUpdateError(ErrorCode err)
++void UI::NotifyUpdateError(ErrorCode err, std::shared_ptr<const int> token)
+ {
+     ApplicationController::NotifyUpdateError();
+ 
+@@ -1625,6 +1522,7 @@
+ 
+     EventPayload payload;
+     payload.error = err;
++    payload.downloadToken = token;
+     uit.App().SendMsg(MSG_UPDATE_ERROR, &payload);
+ }
+ 
+diff --git a/src/ui.h b/src/ui.h
+index e4cd890bdd61..e62a964ba804 100644
+--- a/src/ui.h
++++ b/src/ui.h
+@@ -28,6 +28,8 @@
+ 
+ #include "threads.h"
+ #include "appcast.h"
++#include "signatureverifier.h"
++#include <memory>
+ 
+ namespace winsparkle
+ {
+@@ -75,7 +77,7 @@
+         (i.e. the user is manually checking for updates), "update error"
+         message is shown. Otherwise, does nothing.
+      */
+-    static void NotifyUpdateError(ErrorCode err = Err_Generic);
++    static void NotifyUpdateError(ErrorCode err = Err_Generic, std::shared_ptr<const int> token = {});
+ 
+     /**
+         Notifies the UI that a new version is available.
+@@ -87,12 +89,13 @@
+     /**
+         Notifies the UI about download progress.
+      */
+-    static void NotifyDownloadProgress(size_t downloaded, size_t total);
++    static void NotifyDownloadProgress(size_t downloaded, size_t total, std::shared_ptr<const int> token);
+ 
+     /**
+         Notifies the UI that an update was downloaded.
+      */
+-    static void NotifyUpdateDownloaded(const std::wstring& updateFile, const Appcast &appcast);
++    static void NotifyUpdateDownloaded(const std::wstring& updateFile, const SHA256Digest& digest,
++                                       std::shared_ptr<const int> token);
+ 
+     /**
+         Shows the WinSparkle window in "checking for updates..." state.
+diff --git a/src/updatechecker.cpp b/src/updatechecker.cpp
+index aee5b3356a5a..b3a0da5b3002 100644
+--- a/src/updatechecker.cpp
++++ b/src/updatechecker.cpp
+@@ -25,6 +25,7 @@
+  */
+ 
+ #include "updatechecker.h"
++#include "appcontroller.h"
+ #include "appcast.h"
+ #include "ui.h"
+ #include "error.h"
+@@ -222,6 +223,7 @@
+ {
+     try
+     {
++        ApplicationController::RequireHardenedConfiguration();
+         const std::string url = Settings::GetAppcastURL();
+         if ( url.empty() )
+             throw std::runtime_error("Appcast URL not specified.");
+@@ -248,8 +250,9 @@
+ 
+         auto appcast = all.front();
+ 
+-        if (!appcast.ReleaseNotesURL.empty())
+-            CheckForInsecureURL(appcast.ReleaseNotesURL, "release notes");
++        // Remote release notes are not fetched. Require an installable payload.
++        if (!appcast.HasDownload())
++            throw std::runtime_error("An HTTPS update payload is required.");
+         if (!appcast.enclosure.DownloadURL.empty())
+             CheckForInsecureURL(appcast.enclosure.DownloadURL, "update file");
+ 
+@@ -275,6 +278,10 @@
+ 
+         UI::NotifyUpdateAvailable(appcast, ShouldAutomaticallyInstall());
+     }
++    catch (const TerminateThreadException&)
++    {
++        throw; // cancellation is not a network error
++    }
+     catch ( ... )
+     {
+         UI::NotifyUpdateError();
+@@ -303,6 +310,7 @@
+ 
+     while (true)
+     {
++        CheckShouldTerminate();
+         // time to wait for next iteration: either a reasonable default or
+         // time to next scheduled update check if checks are enabled
+         unsigned sleepTimeInSeconds = 60 * 60; // 1 hour
+@@ -321,7 +329,20 @@
+             time_t nextCheck = lastCheck + interval;
+             if (currentTime >= nextCheck)
+             {
+-                PerformUpdateCheck();
++                try
++                {
++                    PerformUpdateCheck();
++                }
++                catch (const TerminateThreadException&)
++                {
++                    throw;
++                }
++                catch (...)
++                {
++                    // The check has reported the failure. Keep the scheduler
++                    // alive, but do not retry before the normal interval.
++                    CheckShouldTerminate();
++                }
+                 sleepTimeInSeconds = interval;
+             }
+             else
+@@ -330,7 +351,8 @@
+             }
+         }
+ 
+-        m_terminateEvent.WaitUntilSignaled(sleepTimeInSeconds * 1000);
++        if (m_terminateEvent.WaitUntilSignaled(sleepTimeInSeconds * 1000))
++            return;
+     }
+ }
+ 
+diff --git a/src/updatedownloader.cpp b/src/updatedownloader.cpp
+index 2af057d8cb68..5abf3bee02d7 100644
+--- a/src/updatedownloader.cpp
++++ b/src/updatedownloader.cpp
+@@ -75,6 +75,8 @@
+         UuidCreate(&uuid);
+         RPC_WSTR uuidStr;
+         RPC_STATUS status = UuidToString(&uuid, &uuidStr);
++        if (status != RPC_S_OK)
++            throw std::runtime_error("Cannot create temporary directory name");
+         dir += reinterpret_cast<wchar_t*>(uuidStr);
+         RpcStringFree(&uuidStr);
+ 
+@@ -87,8 +89,8 @@
+ 
+ struct UpdateDownloadSink : public IDownloadSink
+ {
+-    UpdateDownloadSink(Thread& thread, const std::wstring& dir)
+-        : m_thread(thread),
++    UpdateDownloadSink(Thread& thread, const std::wstring& dir, std::shared_ptr<const int> token)
++        : m_thread(thread), m_token(token),
+           m_dir(dir), m_file(NULL),
+           m_downloaded(0), m_total(0), m_lastUpdate(-1)
+     {}
+@@ -106,14 +108,21 @@
+ 
+     std::wstring GetFilePath(void) { return m_path; }
+ 
+-    virtual void SetLength(size_t l) { m_total = l; }
++    virtual void SetLength(size_t l)
++    {
++        if (l > MaxPayloadBytes)
++            throw std::runtime_error("Update payload exceeds size limit.");
++        m_total = l;
++    }
+ 
+     virtual void SetFilename(const std::wstring& filename)
+     {
+         if ( m_file )
+             throw std::runtime_error("Update file already set");
+ 
+-        m_path = m_dir + L"\\" + filename;
++        // The HTTP filename is untrusted. This integration supports NSIS only.
++        (void)filename;
++        m_path = m_dir + L"\\payload.exe";
+         m_file = _wfopen(m_path.c_str(), L"wb");
+         if ( !m_file )
+             throw std::runtime_error("Cannot save update file");
+@@ -125,6 +134,8 @@
+             throw std::runtime_error("Filename is not net");
+ 
+         m_thread.CheckShouldTerminate();
++        if (len > MaxPayloadBytes || m_downloaded > MaxPayloadBytes - len)
++            throw std::runtime_error("Update payload exceeds size limit.");
+ 
+         if ( fwrite(data, len, 1, m_file) != 1 )
+             throw std::runtime_error("Cannot save update file");
+@@ -135,12 +146,13 @@
+         if ( now == -1 || m_downloaded == m_total ||
+              ((double(now - m_lastUpdate) / CLOCKS_PER_SEC) >= 0.1) )
+         {
+-          UI::NotifyDownloadProgress(m_downloaded, m_total);
++          UI::NotifyDownloadProgress(m_downloaded, m_total, m_token);
+           m_lastUpdate = now;
+         }
+     }
+ 
+     Thread& m_thread;
++    std::shared_ptr<const int> m_token;
+     size_t m_downloaded, m_total;
+     FILE *m_file;
+     std::wstring m_dir;
+@@ -157,7 +169,7 @@
+ 
+ UpdateDownloader::UpdateDownloader(const Appcast& appcast)
+     : Thread("WinSparkle updater"),
+-      m_appcast(appcast)
++      m_appcast(appcast), m_token(new const int(0))
+ {
+ }
+ 
+@@ -173,39 +185,32 @@
+ 
+     try
+     {
++      ApplicationController::RequireHardenedConfiguration();
+       const std::wstring tmpdir = CreateUniqueTempDirectory();
+       Settings::WriteConfigValue("UpdateTempDir", tmpdir);
+ 
+-      UpdateDownloadSink sink(*this, tmpdir);
++      UpdateDownloadSink sink(*this, tmpdir, m_token);
+       DownloadFile(m_appcast.enclosure.DownloadURL, &sink, this, Settings::GetHttpHeadersString());
+       sink.Close();
+ 
+-      if (Settings::HasEdDSAPubKey())
+-      {
+-          SignatureVerifier::VerifyEdDSASignatureValid(sink.GetFilePath(), m_appcast.enclosure.EdDsaSignature);
+-      }
+-      else if (Settings::HasDSAPubKeyPem())
+-      {
+-          LogWarning("Using deprecated DSA signature. Please update your app to use EdDSA.");
+-          SignatureVerifier::VerifyDSASHA1SignatureValid(sink.GetFilePath(), m_appcast.enclosure.DsaSignature);
+-      }
+-      else
+-      {
+-          // backward compatibility - accept as is, but complain about it
+-          LogError("Using unsigned updates!");
+-      }
+-
+-      UI::NotifyUpdateDownloaded(sink.GetFilePath(), m_appcast);
++      const SHA256Digest digest = SignatureVerifier::VerifyEdDSASignatureValid(
++          sink.GetFilePath(), m_appcast.enclosure.EdDsaSignature);
++      CheckShouldTerminate();
++      UI::NotifyUpdateDownloaded(sink.GetFilePath(), digest, m_token);
++    }
++    catch (const TerminateThreadException&)
++    {
++        throw; // do not report cancellation as an error or wait on a host callback
+     }
+     catch (BadSignatureException&)
+     {
+         CleanLeftovers();  // remove potentially corrupted file
+-        UI::NotifyUpdateError(Err_BadSignature);
++        UI::NotifyUpdateError(Err_BadSignature, m_token);
+         throw;
+     }
+     catch ( ... )
+     {
+-        UI::NotifyUpdateError();
++        UI::NotifyUpdateError(Err_Generic, m_token);
+         throw;
+     }
+ }
+diff --git a/src/updatedownloader.h b/src/updatedownloader.h
+index 674e8225ca92..36e6fed0e98a 100644
+--- a/src/updatedownloader.h
++++ b/src/updatedownloader.h
+@@ -29,6 +29,7 @@
+ #include "threads.h"
+ #include "appcast.h"
+ 
++#include <memory>
+ #include <string>
+ 
+ namespace winsparkle
+@@ -46,6 +47,8 @@
+     /// Creates updater thread.
+     UpdateDownloader(const Appcast& appcast);
+ 
++    std::shared_ptr<const int> GetToken() const { return m_token; }
++
+     /**
+         Perform any necessary cleanup after previous updates.
+ 
+@@ -62,6 +65,8 @@
+ 
+ private:
+     Appcast m_appcast;
++    // Retained by queued UI events so a cancelled session cannot be reused.
++    std::shared_ptr<const int> m_token;
+ };
+ 
+ } // namespace winsparkle
+diff --git a/src/utils.h b/src/utils.h
+index c4d752fbfc39..51a168fbb8cb 100644
+--- a/src/utils.h
++++ b/src/utils.h
+@@ -120,10 +120,7 @@
+ {
+     if (url.compare(0, 8, "https://") != 0)
+     {
+-        LogError("----------------------------");
+-        LogError("*** USING INSECURE URL: " + purpose + " from " + url + " ***");
+-        LogError("----------------------------");
+-        return false;
++        throw std::runtime_error("HTTPS is required for " + purpose);
+     }
+     return true;
+ }

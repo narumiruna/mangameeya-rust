@@ -1,0 +1,1501 @@
+diff --git a/Autoupdate/AppInstaller.m b/Autoupdate/AppInstaller.m
+--- a/Autoupdate/AppInstaller.m
++++ b/Autoupdate/AppInstaller.m
+@@ -31,6 +31,10 @@
+ #import "SUConstants.h"
+ #import "SUCodeSigningVerifier.h"
+ #import <os/lock.h>
++#import "SPUInstallationCommitState.h"
++#import "SUPlainInstaller.h"
++#import "SUPipedUnarchiver.h"
++#import <Security/SecRandom.h>
+ 
+ 
+ #include "AppKitPrevention.h"
+@@ -59,6 +63,7 @@
+     AgentConnection *_agentConnection;
+ 
+     SUUpdateValidator *_updateValidator;
++    SUPipedUnarchiver *_unarchiver; // Main queue owns the cancellable ZIP worker.
+ 
+     NSString *_hostBundleIdentifier;
+     NSString *_homeDirectory;
+@@ -90,7 +95,9 @@
+     
+     BOOL _receivedUpdaterPong;
+     
+-    BOOL _willCompleteInstallation;
++    BOOL _acceptedCommitConnection; // Protected by _newConnectionLock; no reconnect/resume.
++    SPUInstallationCommitState _commitState; // Main queue only, zero initialized.
++    NSInteger _runningArchitecture;
+     BOOL _receivedInstallationData;
+     BOOL _finishedValidation;
+     BOOL _agentInitiatedConnection;
+@@ -130,7 +137,7 @@
+ {
+     os_unfair_lock_lock(&_newConnectionLock);
+     {
+-        if (_activeConnection != nil) {
++        if (_activeConnection != nil || _acceptedCommitConnection) {
+             os_unfair_lock_unlock(&_newConnectionLock);
+             
+             SULog(SULogLevelError, @"Error: Rejecting multiple XPC connections for installer...");
+@@ -143,9 +150,9 @@
+         BOOL connectionCodeSigningValidationSkipped = NO;
+     #endif
+         
+-        // It's safe to allow any connections once stage 1 installation is complete and appcast data has been received.
+-        // This is to allow general updaters to resume the installation.
+-        if (!_performedStage1Installation || !_receivedAppcastItemData) {
++        // Hardened sessions always authenticate the original connection. General
++        // updaters and later connections cannot resume or commit this session.
++        {
+             BOOL passesValidation;
+             NSError *validationError = nil;
+             SUValidateConnectionStatus status = [SUCodeSigningVerifier validateConnection:newConnection error:&validationError];
+@@ -154,7 +161,7 @@
+                     passesValidation = YES;
+                     break;
+                 case SUValidateConnectionStatusSetNoRequirementSuccess:
+-                    passesValidation = YES;
++                    passesValidation = NO;
+ #if SPARKLE_BUILD_PACKAGE_SUPPORT
+                     connectionCodeSigningValidationSkipped = YES;
+ #endif
+@@ -179,6 +186,7 @@
+         _connectionCodeSigningValidationSkipped = connectionCodeSigningValidationSkipped;
+ #endif
+         _activeConnection = newConnection;
++        _acceptedCommitConnection = YES;
+     }
+     os_unfair_lock_unlock(&_newConnectionLock);
+     
+@@ -205,7 +213,7 @@
+         dispatch_async(dispatch_get_main_queue(), ^{
+             __typeof__(self) strongSelf = weakSelf;
+             if (strongSelf != nil) {
+-                if (strongSelf->_activeConnection != nil && !strongSelf->_willCompleteInstallation) {
++                if (strongSelf->_activeConnection != nil && SPUCommitDisarm(&strongSelf->_commitState)) {
+                     [strongSelf cleanupAndExitWithStatus:EXIT_FAILURE error:[NSError errorWithDomain:SUSparkleErrorDomain code:SPUInstallerError userInfo:@{ NSLocalizedDescriptionKey: @"Invalidation on remote port being called, and installation is not close enough to completion!" }]];
+                 }
+                 strongSelf->_communicator = nil;
+@@ -252,8 +260,8 @@
+     
+     NSError *prevalidationError = nil;
+     BOOL success = NO;
+-    if (!unarchiver) {
+-        prevalidationError = [NSError errorWithDomain:SUSparkleErrorDomain code:SUUnarchivingError userInfo:@{ NSLocalizedDescriptionKey: [NSString stringWithFormat:@"No valid unarchiver was found for %@", archivePath] }];
++    if (![archivePath.pathExtension isEqualToString:@"zip"] || ![unarchiver isKindOfClass:SUPipedUnarchiver.class]) {
++        prevalidationError = [NSError errorWithDomain:SUSparkleErrorDomain code:SUUnarchivingError userInfo:@{ NSLocalizedDescriptionKey: @"Hardened application updates require a full ZIP archive with a cancellable extractor" }];
+         
+         success = NO;
+     } else {
+@@ -299,8 +307,12 @@
+     if (!success) {
+         [self unarchiverDidFailWithError:prevalidationError];
+     } else {
++        _unarchiver = (SUPipedUnarchiver *)unarchiver;
+         [unarchiver
+          unarchiveWithCompletionBlock:^(NSError * _Nullable error) {
++             if (self->_unarchiver != unarchiver) {
++                 return; // Cancellation already joined this worker; ignore late notifications.
++             }
+              if (error != nil) {
+                  [self unarchiverDidFailWithError:[NSError errorWithDomain:SUSparkleErrorDomain code:SUUnarchivingError userInfo:@{ NSLocalizedDescriptionKey: [NSString stringWithFormat:@"Failed to unarchive %@", archivePath], NSUnderlyingErrorKey: (NSError * _Nonnull)error }]];
+              } else {
+@@ -322,6 +334,9 @@
+              }
+          }
+          progressBlock:^(double progress) {
++             if (self->_unarchiver != unarchiver) {
++                 return;
++             }
+              if (sizeof(progress) == sizeof(uint64_t)) {
+                  uint64_t progressValue = CFSwapInt64HostToLittle(*(uint64_t *)&progress);
+                  NSData *data = [NSData dataWithBytes:&progressValue length:sizeof(progressValue)];
+@@ -332,15 +347,21 @@
+     }
+ }
+ 
+-- (void)clearUpdateDirectory SPU_OBJC_DIRECT
+-{
++- (BOOL)clearUpdateDirectory SPU_OBJC_DIRECT
++{
++    // Detach first so queued notifications cannot restart validation after disarm.
++    SUPipedUnarchiver *unarchiver = _unarchiver;
++    _unarchiver = nil;
++    [unarchiver cancelAndWait];
+     if (_updateDirectoryPath != nil) {
+         NSError *theError = nil;
+         if (![[[SUFileManager alloc] init] removeItemAtURL:[NSURL fileURLWithPath:_updateDirectoryPath] error:&theError]) {
+             SULog(SULogLevelError, @"Couldn't remove update folder: %@.", theError);
++            return NO;
+         }
+         _updateDirectoryPath = nil;
+     }
++    return YES;
+ }
+ 
+ - (void)unarchiverDidFailWithError:(NSError *)error SPU_OBJC_DIRECT
+@@ -404,7 +425,10 @@
+                 [self->_agentConnection.agent listenForTerminationWithCompletion:^{
+                     dispatch_async(dispatch_get_main_queue(), ^{
+                         self->_targetTerminated = YES;
+-                        
++                        SPUCommitHostTerminated(&self->_commitState);
++                        if (self->_commitState.phase == SPUCommitDisarmed) {
++                            [self cleanupAndExitWithStatus:EXIT_FAILURE error:nil];
++                        }
+                         if (self->_performedStage1Installation) {
+                             [self finishInstallationAfterHostTermination];
+                         }
+@@ -412,6 +436,8 @@
+                 }];
+             } else {
+                 self->_targetTerminated = YES;
++                SPUCommitHostTerminated(&self->_commitState);
++                [self cleanupAndExitWithStatus:EXIT_FAILURE error:nil];
+             }
+             
+             [self startInstallation];
+@@ -427,8 +453,16 @@
+ 
+ - (void)handleMessageWithIdentifier:(int32_t)identifier data:(NSData *)data
+ {
+-    if (identifier == SPUInstallationData && _updateDirectoryPath == nil) {
++    if (identifier == SPURequestCommitCapability) {
+         dispatch_async(dispatch_get_main_queue(), ^{
++            const uint8_t version = 1;
++            [self->_communicator handleMessageWithIdentifier:SPUCommitCapability data:[NSData dataWithBytes:&version length:sizeof(version)]];
++        });
++    } else if (identifier == SPUInstallationData && _updateDirectoryPath == nil) {
++        dispatch_async(dispatch_get_main_queue(), ^{
++            if (self->_commitState.phase == SPUCommitDisarmed) {
++                return; // Disarm is final; the live ACK port cannot start another writer.
++            }
+             // Mark that we have received the installation data
+             // Do not rely on eg: self->_updateDirectoryPath != nil because we may set it to nil again if an early stage fails (i.e, archive extraction)
+             self->_receivedInstallationData = YES;
+@@ -440,11 +474,20 @@
+             }
+             
+             NSString *installationType = installationData.installationType;
+-            if (!SPUValidInstallationType(installationType)) {
++            if (![installationType isEqualToString:SPUInstallationTypeApplication]) {
+                 [self cleanupAndExitWithStatus:EXIT_FAILURE error:[NSError errorWithDomain:SUSparkleErrorDomain code:SPUInstallerError userInfo:@{ NSLocalizedDescriptionKey: [NSString stringWithFormat:@"Error: Received invalid installation type: %@", installationType] }]];
+                 return;
+             }
+             
++            if (installationData.expectedVersion.length == 0) {
++                [self cleanupAndExitWithStatus:EXIT_FAILURE error:[NSError errorWithDomain:SUSparkleErrorDomain code:SUValidationError userInfo:@{ NSLocalizedDescriptionKey: @"The selected appcast item must provide an expected update version" }]];
++                return;
++            }
++            self->_runningArchitecture = installationData.runningArchitecture;
++            if ((self->_runningArchitecture != NSBundleExecutableArchitectureX86_64 && self->_runningArchitecture != NSBundleExecutableArchitectureARM64) ||
++                ![installationData.relaunchPath isEqualToString:installationData.hostBundlePath]) {
++                [self cleanupAndExitWithStatus:EXIT_FAILURE error:nil];
++            }
+             NSBundle *hostBundle = [NSBundle bundleWithPath:installationData.hostBundlePath];
+             
+             NSString *bundleIdentifier = hostBundle.bundleIdentifier;
+@@ -651,12 +694,15 @@
+             }
+         }
+         os_unfair_lock_unlock(&_newConnectionLock);
+-    } else if (identifier == SPUResumeInstallationToStage2 && data.length == sizeof(uint8_t) * 2) {
+-        // Because anyone can ask us to resume the installation, it may be wise to think about backwards compatibility here if IPC changes
+-        uint8_t relaunch = *((const uint8_t *)data.bytes);
+-        uint8_t showsUI = *((const uint8_t *)data.bytes + 1);
++    } else if (identifier == SPUCommitInstallation && data.length == SPU_INSTALLATION_NONCE_LENGTH + 2) {
++        uint8_t relaunch = *((const uint8_t *)data.bytes + SPU_INSTALLATION_NONCE_LENGTH);
++        uint8_t showsUI = *((const uint8_t *)data.bytes + SPU_INSTALLATION_NONCE_LENGTH + 1);
+         
+         dispatch_async(dispatch_get_main_queue(), ^{
++            if (!SPUCommitAuthorize(&self->_commitState, data.bytes, SPU_INSTALLATION_NONCE_LENGTH, NSProcessInfo.processInfo.systemUptime)) {
++                [self cleanupAndExitWithStatus:EXIT_FAILURE error:nil];
++            }
++            [self->_communicator handleMessageWithIdentifier:SPUInstallationCommitAcknowledged data:[data subdataWithRange:NSMakeRange(0, SPU_INSTALLATION_NONCE_LENGTH)]];
+             // This flag has an impact on showing UI progress during installations
+             self->_shouldShowUI = (BOOL)showsUI;
+             // Don't test if the application was alive initially, leave that to the progress agent if we decide to relaunch
+@@ -678,9 +724,41 @@
+                 });
+             }
+         });
++    } else if (identifier == SPUResumeInstallationToStage2) {
++        // Legacy RESUME is not authorization. It can only retry termination
++        // after this session's COMMIT has already advanced stage 2.
++        dispatch_async(dispatch_get_main_queue(), ^{
++            if (self->_commitState.phase == SPUCommitAuthorized) {
++                dispatch_async(self->_installerQueue, ^{
++                    if (self->_performedStage2Installation && !self->_performedStage3Installation) {
++                        dispatch_async(dispatch_get_main_queue(), ^{
++                            if (self->_commitState.phase == SPUCommitAuthorized) {
++                                [self->_agentConnection.agent sendTerminationSignal];
++                            }
++                        });
++                    }
++                });
++            }
++        });
+     } else if (identifier == SPUCancelInstallation) {
+         dispatch_async(dispatch_get_main_queue(), ^{
+-            [self cleanupAndExitWithStatus:0 error:nil];
++            if (!SPUCommitDisarm(&self->_commitState)) {
++                // COMMIT is irreversible. Do not claim cancellation succeeded.
++                return;
++            }
++            // Drain staging work before removing our private staging directory.
++            if (self->_installerQueue != nil) {
++                dispatch_sync(self->_installerQueue, ^{});
++            }
++            if (![self clearUpdateDirectory]) {
++                [self cleanupAndExitWithStatus:EXIT_FAILURE error:nil];
++            }
++            [self->_communicator handleMessageWithIdentifier:SPUInstallationDisarmed data:data];
++            // Keep the original port alive until the host receives the ACK and
++            // invalidates it. A failed delivery must not be reported as success.
++            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 5 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
++                [self cleanupAndExitWithStatus:EXIT_SUCCESS error:nil];
++            });
+         });
+     } else if (identifier == SPUUpdaterAlivePong) {
+         _receivedUpdaterPong = YES;
+@@ -689,8 +767,9 @@
+ 
+ - (void)startInstallation SPU_OBJC_DIRECT
+ {
+-    _willCompleteInstallation = YES;
+-    
++    if (_commitState.phase == SPUCommitDisarmed) {
++        return;
++    }
+     dispatch_queue_attr_t queuePriority = dispatch_queue_attr_make_with_qos_class(DISPATCH_QUEUE_SERIAL, QOS_CLASS_USER_INITIATED, 0);
+     
+     _installerQueue = dispatch_queue_create("org.sparkle-project.sparkle.installer", queuePriority);
+@@ -714,6 +793,14 @@
+             return;
+         }
+         
++        if (![installer isKindOfClass:SUPlainInstaller.class]) {
++            dispatch_async(dispatch_get_main_queue(), ^{
++                [self cleanupAndExitWithStatus:EXIT_FAILURE error:nil];
++            });
++            return;
++        }
++        ((SUPlainInstaller *)installer).requiredArchitecture = self->_runningArchitecture;
++        ((SUPlainInstaller *)installer).requiredVersion = self->_verifierInformation.expectedVersion;
+         NSError *firstStageError = nil;
+         if (![installer performInitialInstallation:&firstStageError]) {
+             self->_installer = nil;
+@@ -731,11 +818,22 @@
+             self->_performedStage1Installation = YES;
+             os_unfair_lock_unlock(&self->_newConnectionLock);
+             
++            uint8_t nonce[SPU_INSTALLATION_NONCE_LENGTH];
++            if (SecRandomCopyBytes(kSecRandomDefault, sizeof(nonce), nonce) != errSecSuccess) {
++                [self cleanupAndExitWithStatus:EXIT_FAILURE error:nil];
++            }
++            if (!SPUCommitPrepare(&self->_commitState, nonce, NSProcessInfo.processInfo.systemUptime)) {
++                [self cleanupAndExitWithStatus:EXIT_FAILURE error:nil];
++            }
+             uint8_t targetTerminated = (uint8_t)self->_targetTerminated;
+-            
+-            NSData *sendData = [NSData dataWithBytes:&targetTerminated length:sizeof(targetTerminated)];
+-            
++            NSMutableData *sendData = [NSMutableData dataWithBytes:&targetTerminated length:sizeof(targetTerminated)];
++            [sendData appendBytes:nonce length:sizeof(nonce)];
+             [self->_communicator handleMessageWithIdentifier:SPUInstallationFinishedStage1 data:sendData];
++            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(SPU_INSTALLATION_COMMIT_LIFETIME * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
++                if (SPUCommitDisarm(&self->_commitState)) {
++                    [self cleanupAndExitWithStatus:EXIT_FAILURE error:nil];
++                }
++            });
+             
+             if (self->_targetTerminated) {
+                 // Stage 2 can still be run before we finish installation
+@@ -765,6 +863,9 @@
+ - (void)finishInstallationAfterHostTermination SPU_OBJC_DIRECT
+ {
+     assert(self->_targetTerminated);
++    if (!SPUCommitBeginFinalInstallation(&_commitState)) {
++        return;
++    }
+     
+     // Show our installer progress UI tool if only after a certain amount of time passes
+     __block BOOL shouldShowUIProgress = YES;
+@@ -858,6 +959,9 @@
+     [_agentConnection invalidate];
+     _agentConnection = nil;
+     
++    if (_installerQueue != nil) {
++        dispatch_sync(_installerQueue, ^{});
++    }
+     [self clearUpdateDirectory];
+     
+     exit(status);
+diff --git a/Autoupdate/SPUInstallationCommitState.h b/Autoupdate/SPUInstallationCommitState.h
+new file mode 100644
+--- /dev/null
++++ b/Autoupdate/SPUInstallationCommitState.h
+@@ -0,0 +1,81 @@
++// Project hardening for Sparkle 2.10.1. No persistent authorization.
++#ifndef SPU_INSTALLATION_COMMIT_STATE_H
++#define SPU_INSTALLATION_COMMIT_STATE_H
++
++#include <stdbool.h>
++#include <stddef.h>
++#include <stdint.h>
++#include <string.h>
++
++#define SPU_INSTALLATION_NONCE_LENGTH 16
++#define SPU_INSTALLATION_COMMIT_LIFETIME 300.0
++
++typedef enum {
++    SPUCommitUnprepared = 0,
++    SPUCommitPrepared,
++    SPUCommitAuthorized,
++    SPUCommitDisarmed,
++    SPUCommitInstalling
++} SPUInstallationCommitPhase;
++
++typedef struct {
++    SPUInstallationCommitPhase phase;
++    uint8_t nonce[SPU_INSTALLATION_NONCE_LENGTH];
++    double deadline;
++    bool hostTerminated;
++} SPUInstallationCommitState;
++
++// All calls belong to the installer's main queue. The nonce travels only on
++// the original authenticated XPC connection, never in defaults or argv.
++static inline bool SPUCommitPrepare(SPUInstallationCommitState *state, const void *nonce, double now)
++{
++    if (state->phase != SPUCommitUnprepared || state->hostTerminated) {
++        return false;
++    }
++    memcpy(state->nonce, nonce, sizeof(state->nonce));
++    state->deadline = now + SPU_INSTALLATION_COMMIT_LIFETIME;
++    state->phase = SPUCommitPrepared;
++    return true;
++}
++
++static inline bool SPUCommitAuthorize(SPUInstallationCommitState *state, const void *nonce, size_t length, double now)
++{
++    if (state->phase != SPUCommitPrepared || state->hostTerminated) {
++        return false;
++    }
++    if (now >= state->deadline) {
++        state->phase = SPUCommitDisarmed;
++        return false;
++    }
++    if (length != sizeof(state->nonce) || memcmp(state->nonce, nonce, length) != 0) {
++        return false;
++    }
++    state->phase = SPUCommitAuthorized;
++    return true;
++}
++
++static inline bool SPUCommitDisarm(SPUInstallationCommitState *state)
++{
++    if (state->phase == SPUCommitAuthorized || state->phase == SPUCommitInstalling) {
++        return false;
++    }
++    state->phase = SPUCommitDisarmed;
++    return true;
++}
++
++static inline void SPUCommitHostTerminated(SPUInstallationCommitState *state)
++{
++    state->hostTerminated = true;
++    (void)SPUCommitDisarm(state);
++}
++
++static inline bool SPUCommitBeginFinalInstallation(SPUInstallationCommitState *state)
++{
++    if (state->phase != SPUCommitAuthorized || !state->hostTerminated) {
++        return false;
++    }
++    state->phase = SPUCommitInstalling;
++    return true;
++}
++
++#endif
+diff --git a/Autoupdate/SPUInstallationInputData.h b/Autoupdate/SPUInstallationInputData.h
+--- a/Autoupdate/SPUInstallationInputData.h
++++ b/Autoupdate/SPUInstallationInputData.h
+@@ -34,6 +34,8 @@
+ @property (nonatomic, copy, readonly, nullable) NSString *decryptionPassword;
+ @property (nonatomic, copy, readonly, nullable) NSString *expectedVersion;
+ @property (nonatomic, readonly) uint64_t expectedContentLength;
++// Set by the running host, not by hardware detection or appcast metadata.
++@property (nonatomic) NSInteger runningArchitecture;
+ 
+ @end
+ 
+diff --git a/Autoupdate/SPUInstallationInputData.m b/Autoupdate/SPUInstallationInputData.m
+--- a/Autoupdate/SPUInstallationInputData.m
++++ b/Autoupdate/SPUInstallationInputData.m
+@@ -84,7 +84,11 @@
+     NSString *expectedVersion = [decoder decodeObjectOfClass:[NSString class] forKey:SUExpectedVersionKey];
+     uint64_t expectedContentLength = (uint64_t)[decoder decodeInt64ForKey:SUExpectedContentLength];
+     
+-    return [self initWithRelaunchPath:relaunchPath hostBundlePath:hostBundlePath updateURLBookmarkData:updateURLBookmarkData installationType:installationType signatures:signatures decryptionPassword:decryptionPassword expectedVersion:expectedVersion expectedContentLength:expectedContentLength];
++    self = [self initWithRelaunchPath:relaunchPath hostBundlePath:hostBundlePath updateURLBookmarkData:updateURLBookmarkData installationType:installationType signatures:signatures decryptionPassword:decryptionPassword expectedVersion:expectedVersion expectedContentLength:expectedContentLength];
++    if (self != nil) {
++        self.runningArchitecture = [decoder decodeIntegerForKey:@"SURunningArchitecture"];
++    }
++    return self;
+ }
+ 
+ - (void)encodeWithCoder:(NSCoder *)coder
+@@ -101,6 +105,7 @@
+         [coder encodeObject:_expectedVersion forKey:SUExpectedVersionKey];
+     }
+     [coder encodeInt64:(int64_t)_expectedContentLength forKey:SUExpectedContentLength];
++    [coder encodeInteger:self.runningArchitecture forKey:@"SURunningArchitecture"];
+ }
+ 
+ + (BOOL)supportsSecureCoding
+diff --git a/Autoupdate/SPUMessageTypes.h b/Autoupdate/SPUMessageTypes.h
+--- a/Autoupdate/SPUMessageTypes.h
++++ b/Autoupdate/SPUMessageTypes.h
+@@ -23,7 +23,10 @@
+     SPUInstallationFinishedStage2 = 7,
+     SPUInstallationFinishedStage3 = 8,
+     SPUUpdaterAlivePing = 9,
+-    SPUInstallerError = 10
++    SPUInstallerError = 10,
++    SPUCommitCapability = 11,
++    SPUInstallationCommitAcknowledged = 12,
++    SPUInstallationDisarmed = 13
+ };
+ 
+ typedef NS_ENUM(int32_t, SPUUpdaterMessageType)
+@@ -32,7 +35,9 @@
+     SPUSentUpdateAppcastItemData = 1,
+     SPUResumeInstallationToStage2 = 2,
+     SPUUpdaterAlivePong = 3,
+-    SPUCancelInstallation = 4
++    SPUCancelInstallation = 4,
++    SPURequestCommitCapability = 5,
++    SPUCommitInstallation = 6
+ };
+ 
+ BOOL SPUInstallerMessageTypeIsLegal(SPUInstallerMessageType oldMessageType, SPUInstallerMessageType newMessageType);
+diff --git a/Autoupdate/SPUMessageTypes.m b/Autoupdate/SPUMessageTypes.m
+--- a/Autoupdate/SPUMessageTypes.m
++++ b/Autoupdate/SPUMessageTypes.m
+@@ -50,6 +50,9 @@
+         case SPUInstallationFinishedStage3:
+             legal = (oldMessageType == SPUInstallationFinishedStage2);
+             break;
++        case SPUCommitCapability:
++        case SPUInstallationCommitAcknowledged:
++        case SPUInstallationDisarmed:
+         case SPUInstallerError:
+         case SPUUpdaterAlivePing:
+             // Having this state being dependent on other installation states would make the complicate our logic
+diff --git a/Autoupdate/SUPipedUnarchiver.h b/Autoupdate/SUPipedUnarchiver.h
+--- a/Autoupdate/SUPipedUnarchiver.h
++++ b/Autoupdate/SUPipedUnarchiver.h
+@@ -20,6 +20,11 @@
+ 
+ + (BOOL)canUnarchivePath:(NSString *)path;
+ 
++// Single-use cancellation. Call outside the extraction queue. Stops the owned
++// child and joins all extraction work, including any non-piping retry. Queued
++// main-thread notifications can still arrive; the owner must discard them.
++- (void)cancelAndWait;
++
+ @end
+ 
+ NS_ASSUME_NONNULL_END
+diff --git a/Autoupdate/SUPipedUnarchiver.m b/Autoupdate/SUPipedUnarchiver.m
+--- a/Autoupdate/SUPipedUnarchiver.m
++++ b/Autoupdate/SUPipedUnarchiver.m
+@@ -18,6 +18,10 @@
+ {
+     NSString *_archivePath;
+     NSString *_extractionDirectory;
++    dispatch_queue_t _extractionQueue;
++    // Protected by @synchronized(self), including task launch and cancellation.
++    NSTask *_task;
++    BOOL _cancelled;
+ }
+ 
+ // pipingData == NO is only supported for zip archives
+@@ -79,8 +83,28 @@
+     if (self != nil) {
+         _archivePath = [archivePath copy];
+         _extractionDirectory = [extractionDirectory copy];
++        _extractionQueue = dispatch_queue_create("org.sparkle-project.sparkle.extraction", DISPATCH_QUEUE_SERIAL);
+     }
+     return self;
++}
++
++- (void)cancelAndWait
++{
++    @synchronized (self) {
++        _cancelled = YES;
++        if (_task.running) {
++            [_task terminate];
++        }
++    }
++    // The worker only queues notifications to main; it never waits for them.
++    dispatch_sync(_extractionQueue, ^{});
++}
++
++- (BOOL)isCancelled SPU_OBJC_DIRECT
++{
++    @synchronized (self) {
++        return _cancelled;
++    }
+ }
+ 
+ - (BOOL)needsVerifyBeforeExtractionKey
+@@ -95,7 +119,7 @@
+     assert(arguments != nil);
+     assert(command != nil);
+     
+-    dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
++    dispatch_async(_extractionQueue, ^{
+         @autoreleasepool {
+             SUUnarchiverNotifier *notifier = [[SUUnarchiverNotifier alloc] initWithCompletionBlock:completionBlock progressBlock:progressBlock];
+             NSError *extractError = nil;
+@@ -118,7 +142,7 @@
+                     useNonPipingWorkaround = [self->_archivePath.pathExtension isEqualToString:@"zip"] && ([extractError.domain isEqualToString:SUSparkleErrorDomain] && extractError.code == SUUnarchivingError && [underlyingError.domain isEqualToString:NSPOSIXErrorDomain] && underlyingError.code == EPIPE);
+                 }
+                 
+-                if (!useNonPipingWorkaround) {
++                if ([self isCancelled] || !useNonPipingWorkaround) {
+                     [notifier notifyFailureWithError:extractError];
+                 } else {
+                     // Re-create the extraction directory, then try extracting without piping
+@@ -205,12 +229,21 @@
+     [task setLaunchPath:command];
+     [task setArguments:[args arrayByAddingObject:destination]];
+     
+-    NSError *launchError = nil;
+-    if (![task launchAndReturnError:&launchError]) {
+-        if (outError != NULL) {
+-            *outError = launchError;
+-        }
+-        return NO;
++    @synchronized (self) {
++        if (_cancelled) {
++            if (outError != NULL) {
++                *outError = [NSError errorWithDomain:NSCocoaErrorDomain code:NSUserCancelledError userInfo:nil];
++            }
++            return NO;
++        }
++        NSError *launchError = nil;
++        if (![task launchAndReturnError:&launchError]) {
++            if (outError != NULL) {
++                *outError = launchError;
++            }
++            return NO;
++        }
++        _task = task;
+     }
+     
+     NSError *underlyingOutError = nil;
+@@ -262,6 +295,9 @@
+     }
+     
+     [task waitUntilExit];
++    @synchronized (self) {
++        _task = nil;
++    }
+     
+     if ([task terminationStatus] != 0) {
+         NSMutableDictionary *userInfo = [@{ NSLocalizedDescriptionKey:[NSString stringWithFormat:@"Extraction failed, command '%@' returned %d", command, [task terminationStatus]]} mutableCopy];
+diff --git a/Autoupdate/SUPlainInstaller.h b/Autoupdate/SUPlainInstaller.h
+--- a/Autoupdate/SUPlainInstaller.h
++++ b/Autoupdate/SUPlainInstaller.h
+@@ -21,4 +21,9 @@
+  */
+ - (instancetype)initWithHost:(SUHost *)host bundlePath:(NSString *)bundlePath installationPath:(NSString *)installationPath;
+ 
++@property (nonatomic) NSInteger requiredArchitecture;
++// The selected appcast item's version, not a value read from the payload.
++// Initial installation fails if this is absent or differs from CFBundleVersion.
++@property (nonatomic, copy, nullable) NSString *requiredVersion;
++
+ @end
+diff --git a/Autoupdate/SUPlainInstaller.m b/Autoupdate/SUPlainInstaller.m
+--- a/Autoupdate/SUPlainInstaller.m
++++ b/Autoupdate/SUPlainInstaller.m
+@@ -30,6 +30,7 @@
+     
+     BOOL _newAndOldBundlesOnSameVolume;
+     BOOL _canPerformSafeAtomicSwap;
++    BOOL _preserveOldBackup;
+ }
+ 
+ - (instancetype)initWithHost:(SUHost *)host bundlePath:(NSString *)bundlePath installationPath:(NSString *)installationPath
+@@ -306,8 +307,23 @@
+                 *error = [NSError errorWithDomain:SUSparkleErrorDomain code:SUInstallationError userInfo:userInfo];
+             }
+             
+-            // Attempt to restore our old app back the way it was on failure
+-            [fileManager moveItemAtURL:oldTempURL toURL:oldURL error:NULL];
++            // A failed restoration must not delete the only old copy during cleanup.
++            NSError *restoreError = nil;
++            if (![fileManager moveItemAtURL:oldTempURL toURL:oldURL error:&restoreError]) {
++                _preserveOldBackup = YES;
++                NSString *message = [NSString stringWithFormat:@"Installation and restoration failed. The old app is retained at %@. Restoration error: %@", oldTempURL.path, restoreError.localizedDescription];
++                SULog(SULogLevelError, @"%@", message);
++                if (error != NULL) {
++                    NSMutableDictionary *userInfo = [NSMutableDictionary dictionaryWithDictionary:@{
++                        NSLocalizedDescriptionKey: message,
++                        NSFilePathErrorKey: oldTempURL.path
++                    }];
++                    if (installMoveError != nil) {
++                        userInfo[NSUnderlyingErrorKey] = installMoveError;
++                    }
++                    *error = [NSError errorWithDomain:SUSparkleErrorDomain code:SUInstallationError userInfo:userInfo];
++                }
++            }
+             
+             return NO;
+         }
+@@ -322,19 +338,31 @@
+ 
+ - (BOOL)performInitialInstallation:(NSError * __autoreleasing *)error
+ {
+-    // Prevent malicious downgrades
++    // Reject downgrades and replays, even if the appcast advertises a newer version.
+     // Note that we may not be able to do this for package installations, hence this code being done here
+     NSString *hostVersion = [_host version];
+     
+     NSBundle *bundle = [NSBundle bundleWithPath:_bundlePath];
+     SUHost *updateHost = [[SUHost alloc] initWithBundle:bundle];
++    NSString *hostIdentifier = _host.bundle.bundleIdentifier;
++    NSArray<NSNumber *> *architectures = bundle.executableArchitectures;
++    // Project packages are single-architecture. A universal update could relaunch
++    // as arm64 after an x86_64/Rosetta session, so it is not accepted here.
++    if (hostIdentifier.length == 0 || ![hostIdentifier isEqualToString:bundle.bundleIdentifier] ||
++        (self.requiredArchitecture != NSBundleExecutableArchitectureX86_64 && self.requiredArchitecture != NSBundleExecutableArchitectureARM64) ||
++        architectures.count != 1 || architectures.firstObject.integerValue != self.requiredArchitecture) {
++        if (error != NULL) {
++            *error = [NSError errorWithDomain:SUSparkleErrorDomain code:SUValidationError userInfo:@{ NSLocalizedDescriptionKey: @"Update identifier or executable architecture does not match the running host" }];
++        }
++        return NO;
++    }
+     NSString *updateVersion = [updateHost objectForInfoDictionaryKey:(__bridge NSString *)kCFBundleVersionKey ofClass:NSString.class];
+     
+     id<SUVersionComparison> comparator = [[SUStandardVersionComparator alloc] init];
+-    if (!updateVersion || [comparator compareVersion:hostVersion toVersion:updateVersion] == NSOrderedDescending) {
++    if (hostVersion.length == 0 || updateVersion.length == 0 || [comparator compareVersion:hostVersion toVersion:updateVersion] != NSOrderedAscending) {
+         
+         if (error != NULL) {
+-            NSString *errorMessage = [NSString stringWithFormat:@"For security reasons, updates that downgrade version of the application are not allowed. Refusing to downgrade app from version %@ to %@. Aborting update.", hostVersion, updateVersion];
++            NSString *errorMessage = [NSString stringWithFormat:@"The update bundle version must be strictly newer than the installed version. Refusing to install version %@ over version %@. Aborting update.", updateVersion, hostVersion];
+             
+             *error = [NSError errorWithDomain:SUSparkleErrorDomain code:SUDowngradeError userInfo:@{ NSLocalizedDescriptionKey: errorMessage }];
+         }
+@@ -342,6 +370,16 @@
+         return NO;
+     }
+     
++    // Signature validation authenticates the payload, not the appcast's version claim.
++    if (![self.requiredVersion isKindOfClass:NSString.class] || self.requiredVersion.length == 0 ||
++        ![updateVersion isEqualToString:self.requiredVersion]) {
++        if (error != NULL) {
++            NSString *message = [NSString stringWithFormat:@"The update bundle version %@ does not match the required appcast version %@, or the required version is missing. Aborting update.", updateVersion, self.requiredVersion];
++            *error = [NSError errorWithDomain:SUSparkleErrorDomain code:SUValidationError userInfo:@{ NSLocalizedDescriptionKey: message }];
++        }
++        return NO;
++    }
++
+     SUFileManager *fileManager = [[SUFileManager alloc] init];
+     
+     BOOL updateHasCustomUpdateSecurityPolicy = NO;
+@@ -401,7 +439,7 @@
+         [fileManager removeItemAtURL:_temporaryNewDirectory error:NULL];
+     }
+     
+-    if (_temporaryOldDirectory != nil) {
++    if (_temporaryOldDirectory != nil && !_preserveOldBackup) {
+         [fileManager removeItemAtURL:_temporaryOldDirectory error:NULL];
+     }
+ }
+diff --git a/Sparkle/SPUInstallerDriver.m b/Sparkle/SPUInstallerDriver.m
+--- a/Sparkle/SPUInstallerDriver.m
++++ b/Sparkle/SPUInstallerDriver.m
+@@ -27,6 +27,7 @@
+ #import "SPUInstallationType.h"
+ #import "SUConstants.h"
+ #import "SPUProbeInstallStatus.h"
++#import "../Autoupdate/SPUInstallationCommitState.h"
+ 
+ 
+ #include "AppKitPrevention.h"
+@@ -42,6 +43,7 @@
+ #endif
+ 
+ @interface SPUInstallerDriver () <SUInstallerCommunicationProtocol>
++- (void)cancelPreparedInstallationWithCompletion:(void (^)(NSError * _Nullable))completion SPU_OBJC_DIRECT;
+ @end
+ 
+ @implementation SPUInstallerDriver
+@@ -67,6 +69,15 @@
+     BOOL _systemDomain;
+     BOOL _aborted;
+     BOOL _notifiedDelegateInstallationWillFinish;
++    BOOL _supportsExplicitCommit;
++    BOOL _commitRequested;
++    BOOL _commitSent;
++    BOOL _commitAcknowledged;
++    BOOL _cancelPending;
++    BOOL _disarmedAcknowledged;
++    BOOL _commitShowUI;
++    NSData *_commitNonce;
++    void (^_cancellationCompletion)(NSError * _Nullable);
+ }
+ 
+ - (instancetype)initWithHost:(SUHost *)host applicationBundle:(NSBundle *)applicationBundle updater:(id)updater updaterDelegate:(id<SPUUpdaterDelegate>)updaterDelegate delegate:(nullable id<SPUInstallerDriverDelegate>)delegate
+@@ -191,6 +202,11 @@
+                     NSLocalizedFailureReasonErrorKey:[NSString stringWithFormat:@"The remote port connection was invalidated from the updater. %@. For additional details, check Console logs for %@", additionalFailureReason, impactedTools]
+                 };
+                 
++                if (strongSelf->_cancellationCompletion != nil) {
++                    void (^completion)(NSError *) = strongSelf->_cancellationCompletion;
++                    strongSelf->_cancellationCompletion = nil;
++                    completion([NSError errorWithDomain:SUSparkleErrorDomain code:SUInstallationError userInfo:genericUserInfo]);
++                }
+                 [strongSelf _reportInstallerError:strongSelf->_installerError genericErrorCode:SUInstallationError genericUserInfo:genericUserInfo];
+             }
+         });
+@@ -228,6 +244,22 @@
+ 
+ - (void)sendInstallationData SPU_OBJC_DIRECT
+ {
++    if (!_supportsExplicitCommit) {
++        // A stock/mixed helper must never receive installation data: it could
++        // otherwise install on quit before we detect the missing capability.
++        [_installerConnection handleMessageWithIdentifier:SPURequestCommitCapability data:[NSData data]];
++        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, FIRST_INSTALLER_MESSAGE_TIMEOUT * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
++            if (!self->_supportsExplicitCommit) {
++                [self->_delegate installerIsRequestingAbortInstallWithError:[NSError errorWithDomain:SUSparkleErrorDomain code:SUInstallationError userInfo:@{NSLocalizedDescriptionKey: @"Installer does not support explicit installation COMMIT"}]];
++            }
++        });
++        return;
++    }
++    if (![_host.bundle.bundlePath isEqualToString:NSBundle.mainBundle.bundlePath] ||
++        ![_applicationBundle.bundlePath isEqualToString:_host.bundle.bundlePath]) {
++        [_delegate installerIsRequestingAbortInstallWithError:[NSError errorWithDomain:SUSparkleErrorDomain code:SUInstallationError userInfo:@{NSLocalizedDescriptionKey: @"Hardened updates require the running application as host and relaunch target"}]];
++        return;
++    }
+     NSString *pathToRelaunch = _applicationBundle.bundlePath;
+     
+     id<SPUUpdaterDelegate> updaterDelegate = _updaterDelegate;
+@@ -252,6 +284,13 @@
+     
+     SPUInstallationInputData *installationData = [[SPUInstallationInputData alloc] initWithRelaunchPath:pathToRelaunch hostBundlePath:_host.bundlePath updateURLBookmarkData:_updateURLBookmarkData installationType:_updateItem.installationType signatures:_updateItem.signatures decryptionPassword:decryptionPassword expectedVersion:_updateItem.versionString expectedContentLength:_updateItem.contentLength];
+     
++#if defined(__x86_64__)
++    installationData.runningArchitecture = NSBundleExecutableArchitectureX86_64;
++#elif defined(__arm64__)
++    installationData.runningArchitecture = NSBundleExecutableArchitectureARM64;
++#else
++#error Unsupported running executable architecture
++#endif
+     NSData *archivedData = SPUArchiveRootObjectSecurely(installationData);
+     if (archivedData == nil) {
+         [delegate installerIsRequestingAbortInstallWithError:[NSError errorWithDomain:SUSparkleErrorDomain code:SUInstallationError userInfo:@{ NSLocalizedDescriptionKey:@"An error occurred while encoding the installer parameters. Please try again later." }]];
+@@ -286,6 +325,9 @@
+ 
+ - (void)_handleMessageWithIdentifier:(int32_t)identifier data:(NSData *)data SPU_OBJC_DIRECT
+ {
++    if (_aborted) {
++        return;
++    }
+     if (!SPUInstallerMessageTypeIsLegal(_currentStage, (SPUInstallerMessageType)identifier)) {
+         SULog(SULogLevelError, @"Error: received out of order message with current stage: %d, requested stage: %d", _currentStage, identifier);
+         return;
+@@ -293,7 +335,31 @@
+     
+     id<SPUInstallerDriverDelegate> delegate = _delegate;
+     
+-    if (identifier == SPUExtractionStarted) {
++    if (identifier == SPUCommitCapability) {
++        if (!_supportsExplicitCommit && data.length == 1 && ((const uint8_t *)data.bytes)[0] == 1) {
++            _supportsExplicitCommit = YES;
++            [self sendInstallationData];
++        }
++    } else if (identifier == SPUInstallationDisarmed) {
++        if (_cancelPending && [data isEqualToData:(_commitNonce ?: [NSData data])]) {
++            _cancelPending = NO;
++            _disarmedAcknowledged = YES;
++            _aborted = YES;
++            [_installerConnection invalidate];
++            _installerConnection = nil;
++            void (^completion)(NSError *) = _cancellationCompletion;
++            _cancellationCompletion = nil;
++            if (completion != nil) {
++                completion(nil);
++            }
++            [delegate installerIsRequestingAbortInstallWithError:nil];
++        }
++    } else if (identifier == SPUInstallationCommitAcknowledged) {
++        if (_commitRequested && !_cancelPending && !_commitAcknowledged && [data isEqualToData:_commitNonce]) {
++            _commitAcknowledged = YES;
++            [self installWithToolAndRelaunch:_relaunch displayingUserInterface:_commitShowUI];
++        }
++    } else if (identifier == SPUExtractionStarted) {
+         _extractionAttempts++;
+         _currentStage = (SPUInstallerMessageType)identifier;
+         [delegate installerDidStartExtracting];
+@@ -320,7 +386,27 @@
+     } else if (identifier == SPUInstallationStartedStage1) {
+         _currentStage = (SPUInstallerMessageType)identifier;
+     } else if (identifier == SPUInstallationFinishedStage1) {
++        if (!_supportsExplicitCommit || data.length != 1 + SPU_INSTALLATION_NONCE_LENGTH) {
++            [delegate installerIsRequestingAbortInstallWithError:[NSError errorWithDomain:SUSparkleErrorDomain code:SUInstallationError userInfo:@{NSLocalizedDescriptionKey: @"Missing installation session capability"}]];
++            return;
++        }
++        _commitNonce = [data subdataWithRange:NSMakeRange(1, SPU_INSTALLATION_NONCE_LENGTH)];
+         _currentStage = (SPUInstallerMessageType)identifier;
++        id<SPUUpdaterDelegate> updaterDelegate = _updaterDelegate;
++        id updater = _updater;
++        if (updater != nil && [updaterDelegate respondsToSelector:@selector(updater:didPrepareInstallationWithCancellation:)]) {
++            __weak __typeof__(self) weakSelf = self;
++            [updaterDelegate updater:updater didPrepareInstallationWithCancellation:^(void (^completion)(NSError * _Nullable)) {
++                dispatch_async(dispatch_get_main_queue(), ^{
++                    __typeof__(self) strongSelf = weakSelf;
++                    if (strongSelf == nil) {
++                        completion([NSError errorWithDomain:SUSparkleErrorDomain code:SUInstallationError userInfo:@{NSLocalizedDescriptionKey: @"Installation session no longer exists; disarm was not acknowledged"}]);
++                    } else {
++                        [strongSelf cancelPreparedInstallationWithCompletion:completion];
++                    }
++                });
++            }];
++        }
+         
+         // Let the installer keep a copy of the appcast item data
+         // We may want to ask for it later (note the updater can relaunch without the app necessarily having relaunched)
+@@ -508,18 +594,21 @@
+ 
+ - (void)installWithToolAndRelaunch:(BOOL)relaunch displayingUserInterface:(BOOL)showUI
+ {
++    if (_aborted || _cancelPending) {
++        return;
++    }
+     assert(_updateItem);
+     
+     id<SPUInstallerDriverDelegate> delegate = _delegate;
+     
+-    if (![self mayUpdateAndRestart])
++    if (!_commitAcknowledged && ![self mayUpdateAndRestart])
+     {
+         [delegate installerIsRequestingAbortInstallWithError:nil];
+         return;
+     }
+     
+     // Give the host app an opportunity to postpone the install and relaunch.
+-    if (!_postponedOnce)
++    if (!_commitAcknowledged && !_postponedOnce)
+     {
+         id updater = _updater;
+         id<SPUUpdaterDelegate> updaterDelegate = _updaterDelegate;
+@@ -534,47 +623,112 @@
+         }
+     }
+     
+-    if (_updateWillInstallHandler != NULL) {
++    if (!_commitAcknowledged) {
++        if (_commitRequested || _cancelPending || _aborted) {
++            return;
++        }
++        _commitRequested = YES;
++        _relaunch = relaunch;
++        _commitShowUI = showUI;
++        id updater = _updater;
++        id<SPUUpdaterDelegate> updaterDelegate = _updaterDelegate;
++        if (updater == nil || _commitNonce.length != SPU_INSTALLATION_NONCE_LENGTH ||
++            ![updaterDelegate respondsToSelector:@selector(updater:requestInstallationCommitForUpdate:completion:)]) {
++            [self cancelUpdate];
++            return;
++        }
++        __weak __typeof__(self) weakSelf = self;
++        [updaterDelegate updater:updater requestInstallationCommitForUpdate:_updateItem completion:^(BOOL consentAndFlushSucceeded) {
++            dispatch_async(dispatch_get_main_queue(), ^{
++                __typeof__(self) strongSelf = weakSelf;
++                if (strongSelf == nil || strongSelf->_aborted || strongSelf->_cancelPending || strongSelf->_commitSent) {
++                    return;
++                }
++                if (!consentAndFlushSucceeded) {
++                    [strongSelf cancelUpdate];
++                    return;
++                }
++                // Consume the host reply once, before sending COMMIT.
++                if (strongSelf->_commitNonce == nil) {
++                    return;
++                }
++                strongSelf->_commitSent = YES;
++                NSMutableData *commit = [strongSelf->_commitNonce mutableCopy];
++                uint8_t options[2] = {(uint8_t)relaunch, (uint8_t)showUI};
++                [commit appendBytes:options length:sizeof(options)];
++                [strongSelf->_installerConnection handleMessageWithIdentifier:SPUCommitInstallation data:commit];
++                dispatch_after(dispatch_time(DISPATCH_TIME_NOW, FIRST_INSTALLER_MESSAGE_TIMEOUT * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
++                    if (!strongSelf->_commitAcknowledged && !strongSelf->_aborted) {
++                        [strongSelf->_delegate installerIsRequestingAbortInstallWithError:[NSError errorWithDomain:SUSparkleErrorDomain code:SUInstallationError userInfo:@{NSLocalizedDescriptionKey: @"COMMIT acknowledgement timed out; installation authorization is uncertain, not canceled"}]];
++                    }
++                });
++            });
++        }];
++        return;
++    }
++    if (!_notifiedDelegateInstallationWillFinish && _updateWillInstallHandler != NULL) {
+         _updateWillInstallHandler();
+     }
+-    
+-    // Set up connection to the installer if one is not set up already
+-    [self setUpConnection];
+-    
+-    // For resumability, we'll assume we are far enough for the installation to continue
+-    _currentStage = SPUInstallationFinishedStage1;
++    // The original connection and monotonic stage remain in use. A retry must
++    // neither reconnect nor reset stage 2 back to stage 1.
+     
+     _relaunch = relaunch;
+     
+     // The user can request trying to relaunch/quit the app multiple times
+     // Avoid re-notifying the delegate twice
++    BOOL retryTermination = _notifiedDelegateInstallationWillFinish;
+     if (!_notifiedDelegateInstallationWillFinish) {
+         _notifiedDelegateInstallationWillFinish = YES;
+         [delegate installerWillFinishInstallationAndRelaunch:relaunch];
+     }
+     
+-    uint8_t response[2] = {(uint8_t)relaunch, (uint8_t)showUI};
+-    NSData *responseData = [NSData dataWithBytes:response length:sizeof(response)];
+-    
+-    // the installer will send us SPUInstallationFinishedStage2 when stage 2 is done
+-    [_installerConnection handleMessageWithIdentifier:SPUResumeInstallationToStage2 data:responseData];
++    // COMMIT has already been acknowledged. RESUME can only retry a termination
++    // request; it cannot authorize installation or replace the process waiter.
++    if (retryTermination) {
++        [_installerConnection handleMessageWithIdentifier:SPUResumeInstallationToStage2 data:[NSData data]];
++    }
++}
++
++- (void)cancelPreparedInstallationWithCompletion:(void (^)(NSError * _Nullable))completion SPU_OBJC_DIRECT
++{
++    if (_disarmedAcknowledged) {
++        completion(nil);
++        return;
++    }
++    if (_cancelPending || _commitSent || _aborted || _installerConnection == nil) {
++        completion([NSError errorWithDomain:SUSparkleErrorDomain code:SUInstallationError userInfo:@{NSLocalizedDescriptionKey: @"Cannot acknowledge disarm for this installation session"}]);
++        return;
++    }
++    _cancelPending = YES;
++    _cancellationCompletion = [completion copy];
++    [_installerConnection handleMessageWithIdentifier:SPUCancelInstallation data:_commitNonce ?: [NSData data]];
++    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, FIRST_INSTALLER_MESSAGE_TIMEOUT * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
++        if (self->_cancellationCompletion != nil) {
++            void (^pendingCompletion)(NSError *) = self->_cancellationCompletion;
++            self->_cancellationCompletion = nil;
++            pendingCompletion([NSError errorWithDomain:SUSparkleErrorDomain code:SUInstallationError userInfo:@{NSLocalizedDescriptionKey: @"Timed out waiting for installer disarm acknowledgement"}]);
++            [self->_delegate installerIsRequestingAbortInstallWithError:nil];
++        }
++    });
+ }
+ 
+ - (void)cancelUpdate
+ {
+-    // Set up connection to the installer if one is not set up already
+-    [self setUpConnection];
+-    
++    [self cancelPreparedInstallationWithCompletion:^(NSError *error) {
++        if (error != nil) {
++            [self->_delegate installerIsRequestingAbortInstallWithError:error];
++        }
++    }];
++}
++
++- (void)abortInstall
++{
+     _aborted = YES;
+-    
+-    [_installerConnection handleMessageWithIdentifier:SPUCancelInstallation data:[NSData data]];
+-    
+-    [_delegate installerIsRequestingAbortInstallWithError:nil];
+-}
+-
+-- (void)abortInstall
+-{
+-    _aborted = YES;
++    if (_cancellationCompletion != nil) {
++        void (^completion)(NSError *) = _cancellationCompletion;
++        _cancellationCompletion = nil;
++        completion([NSError errorWithDomain:SUSparkleErrorDomain code:SUInstallationError userInfo:@{NSLocalizedDescriptionKey: @"Installation ended without a disarm acknowledgement"}]);
++    }
+     if (_installerConnection != nil) {
+         [_installerConnection invalidate];
+         _installerConnection = nil;
+diff --git a/Sparkle/SPUUpdater.h b/Sparkle/SPUUpdater.h
+--- a/Sparkle/SPUUpdater.h
++++ b/Sparkle/SPUUpdater.h
+@@ -47,6 +47,13 @@
+  */
+ SU_EXPORT NS_SWIFT_UI_ACTOR @interface SPUUpdater : NSObject
+ 
++/** Project-hardened protocol version. Stock Sparkle does not have this selector.
++ Check respondsToSelector: before invoking it when loading at runtime.
++ Version 1 requires explicit session COMMIT and acknowledged precommit disarm.
++ This does not establish that the host's save barrier is correct.
++ */
+++ (NSUInteger)explicitInstallationCommitVersion;
++
+ /**
+  Initializes a new `SPUUpdater` instance
+  
+diff --git a/Sparkle/SPUUpdater.m b/Sparkle/SPUUpdater.m
+--- a/Sparkle/SPUUpdater.m
++++ b/Sparkle/SPUUpdater.m
+@@ -81,6 +81,11 @@
+     BOOL _updatingMainBundle;
+ }
+ 
+++ (NSUInteger)explicitInstallationCommitVersion
++{
++    return 1;
++}
++
+ @synthesize userAgentString = _userAgentString;
+ @synthesize httpHeaders = _httpHeaders;
+ @synthesize sessionInProgress = _sessionInProgress;
+diff --git a/Sparkle/SPUUpdaterDelegate.h b/Sparkle/SPUUpdaterDelegate.h
+--- a/Sparkle/SPUUpdaterDelegate.h
++++ b/Sparkle/SPUUpdaterDelegate.h
+@@ -69,6 +69,28 @@
+ NS_SWIFT_UI_ACTOR @protocol SPUUpdaterDelegate <NSObject>
+ @optional
+ 
++/** Project-hardened SDK bridge, called on the main thread after preparation.
++ Retain the cancellation block while this session is prepared. Before an ordinary
++ quit, invoke it and wait for completion with nil error. Nil means the installer
++ acknowledged disarm and removed its staging directory. A timeout, stale session,
++ lost connection, or COMMIT already sent returns an error, never a false ACK.
++ The completion runs on the main thread. Do not block that thread waiting for it.
++ Cancellation cannot undo COMMIT. Discard the block when the session ends.
++ */
++- (void)updater:(SPUUpdater *)updater didPrepareInstallationWithCancellation:(void (^)(void (^completion)(NSError * _Nullable error)))cancellation;
++
++/** Project-hardened SDK bridge, called only after Sparkle's final Install choice.
++ Reply YES once, on completion of explicit user consent AND the host's successful
++ final save/export/GPUI flush barrier. Reply NO on failure or cancellation. Missing
++ implementation, no reply within the session lifetime (300 seconds), host death,
++ and lost XPC all fail closed before COMMIT. No user default can authorize COMMIT.
++ Sparkle sends COMMIT on the original authenticated connection and waits for its
++ ACK before termination notifications. The installer still waits for real process
++ exit before bundle replacement. This callback may reply asynchronously; it must
++ not block the main thread. Keep the host barrier closed after a YES reply.
++ */
++- (void)updater:(SPUUpdater *)updater requestInstallationCommitForUpdate:(SUAppcastItem *)update completion:(void (^)(BOOL consentAndFlushSucceeded))completion;
++
+ /**
+  Returns whether to allow Sparkle to check for updates.
+  
+diff --git a/Sparkle/SPUUserDriver.h b/Sparkle/SPUUserDriver.h
+--- a/Sparkle/SPUUserDriver.h
++++ b/Sparkle/SPUUserDriver.h
+@@ -211,9 +211,13 @@
+  * Let the user know that the update is ready to install and relaunch, and ask them whether they want to proceed.
+  * Note if the target application has already terminated, this method may not be invoked.
+  *
+- * A reply of `SPUUserUpdateChoiceInstall` installs the update the new update immediately. The application is relaunched only if it is still running by the time this reply is invoked. If the application terminates on its own, Sparkle will attempt to automatically install the update.
+- *
+- * A reply of `SPUUserUpdateChoiceDismiss` dismisses the update installation for the time being. Note the update may still be installed automatically after the application terminates.
++ * Project-hardened build: `SPUUserUpdateChoiceInstall` requests a host COMMIT through
++ * SPUUpdaterDelegate. It does not authorize installation by itself. The host must
++ * first complete explicit consent and its final save barrier. Ordinary termination
++ * or a crash before COMMIT cancels preparation; it never authorizes installation.
++ *
++ * A reply of `SPUUserUpdateChoiceDismiss` leaves the update uncommitted. The session
++ * expires after 300 seconds. A normal quit must first request acknowledged disarm.
+  *
+  * A reply of `SPUUserUpdateChoiceSkip` cancels the current update that has begun installing and dismisses the update. In this circumstance, the update is canceled but this update version is not skipped in the future.
+  *
+diff --git a/Tests/SUInstallerTest.m b/Tests/SUInstallerTest.m
+--- a/Tests/SUInstallerTest.m
++++ b/Tests/SUInstallerTest.m
+@@ -13,6 +13,375 @@
+ #import "SUInstallerProtocol.h"
+ #import "SPUInstallationType.h"
+ #import <unistd.h>
++#import <objc/runtime.h>
++#import "SUPlainInstaller.h"
++#import "SUFileManager.h"
++#import "SUPipedUnarchiver.h"
++#import <signal.h>
++#import "SUErrors.h"
++#import "../Autoupdate/SPUInstallationCommitState.h"
++
++// These tests run the same policy header and plain installer as Autoupdate.
++// They do not claim an authenticated XPC or GPUI integration test.
++static NSString *SUFailureDestination;
++static NSUInteger SURemainingMoveFailures;
++static IMP SUOriginalMove;
++static IMP SUOriginalSwap;
++static IMP SUOriginalTaskLaunch;
++static NSTask *SUExtractionTask;
++static dispatch_semaphore_t SUExtractionStarted;
++static NSUInteger SUExtractionLaunches;
++
++// Keep the real child alive with its input pipe open until cancellation. This
++// fixture tests ownership/join, not ZIP parsing or authenticated XPC delivery.
++static BOOL SUHoldExtractionTask(id object, SEL selector, NSError **error)
++{
++    NSTask *task = object;
++    BOOL extraction = [task.launchPath isEqualToString:@"/usr/bin/ditto"];
++    if (extraction) {
++        SUExtractionLaunches++;
++        task.launchPath = @"/bin/sleep";
++        task.arguments = @[@"30"];
++    }
++    BOOL launched = ((BOOL (*)(id, SEL, NSError **))SUOriginalTaskLaunch)(object, selector, error);
++    if (extraction) {
++        SUExtractionTask = task;
++        dispatch_semaphore_signal(SUExtractionStarted);
++    }
++    return launched;
++}
++
++static BOOL SUFailSwap(id object, SEL selector, NSURL *source, NSURL *destination, NSError **error)
++{
++    (void)object; (void)selector; (void)source; (void)destination;
++    if (error != NULL) { *error = [NSError errorWithDomain:NSCocoaErrorDomain code:NSFileWriteUnknownError userInfo:nil]; }
++    return NO;
++}
++
++static BOOL SUFailMove(id object, SEL selector, NSURL *source, NSURL *destination, NSError **error)
++{
++    if (SURemainingMoveFailures > 0 && [destination.path isEqualToString:SUFailureDestination]) {
++        SURemainingMoveFailures--;
++        if (error != NULL) { *error = [NSError errorWithDomain:NSCocoaErrorDomain code:NSFileWriteUnknownError userInfo:nil]; }
++        return NO;
++    }
++    return ((BOOL (*)(id, SEL, NSURL *, NSURL *, NSError **))SUOriginalMove)(object, selector, source, destination, error);
++}
++
++@interface SUHardenedInstallerTest : XCTestCase
++@end
++
++@implementation SUHardenedInstallerTest
++
++- (NSInteger)runningArchitecture
++{
++#if defined(__x86_64__)
++    return NSBundleExecutableArchitectureX86_64;
++#else
++    return NSBundleExecutableArchitectureARM64;
++#endif
++}
++
++- (NSURL *)newFixtureDirectory
++{
++    NSURL *directory = [NSURL fileURLWithPath:[NSTemporaryDirectory() stringByAppendingPathComponent:NSUUID.UUID.UUIDString] isDirectory:YES];
++    XCTAssertTrue([NSFileManager.defaultManager createDirectoryAtURL:directory withIntermediateDirectories:YES attributes:nil error:NULL]);
++    return directory;
++}
++
++- (NSBundle *)bundleIn:(NSURL *)root name:(NSString *)name identifier:(NSString *)identifier version:(NSString *)version architecture:(NSInteger)architecture
++{
++    NSURL *bundleURL = [root URLByAppendingPathComponent:name isDirectory:YES];
++    NSURL *contents = [bundleURL URLByAppendingPathComponent:@"Contents" isDirectory:YES];
++    NSURL *macOS = [contents URLByAppendingPathComponent:@"MacOS" isDirectory:YES];
++    XCTAssertTrue([NSFileManager.defaultManager createDirectoryAtURL:macOS withIntermediateDirectories:YES attributes:nil error:NULL]);
++    NSDictionary *info = @{@"CFBundleIdentifier": identifier, @"CFBundleVersion": version, @"CFBundleExecutable": @"Fixture", @"CFBundlePackageType": @"APPL"};
++    XCTAssertTrue([info writeToURL:[contents URLByAppendingPathComponent:@"Info.plist"] atomically:YES]);
++    NSURL *source = [root URLByAppendingPathComponent:[name stringByAppendingString:@".c"]];
++    XCTAssertTrue([@"int main(void) { return 0; }\n" writeToURL:source atomically:YES encoding:NSUTF8StringEncoding error:NULL]);
++    NSTask *compiler = [[NSTask alloc] init];
++    compiler.executableURL = [NSURL fileURLWithPath:@"/usr/bin/xcrun"];
++    compiler.arguments = @[@"clang", @"-arch", architecture == NSBundleExecutableArchitectureX86_64 ? @"x86_64" : @"arm64", @"-mmacosx-version-min=12.0", source.path, @"-o", [macOS URLByAppendingPathComponent:@"Fixture"].path];
++    NSError *error = nil;
++    XCTAssertTrue([compiler launchAndReturnError:&error], @"%@", error);
++    [compiler waitUntilExit];
++    XCTAssertEqual(compiler.terminationStatus, 0);
++    return [NSBundle bundleWithURL:bundleURL];
++}
++
++- (SUPlainInstaller *)installerFrom:(NSBundle *)oldBundle to:(NSBundle *)newBundle expectedVersion:(nullable NSString *)expectedVersion
++{
++    SUPlainInstaller *installer = [[SUPlainInstaller alloc] initWithHost:[[SUHost alloc] initWithBundle:oldBundle] bundlePath:newBundle.bundlePath installationPath:oldBundle.bundlePath];
++    installer.requiredArchitecture = self.runningArchitecture;
++    installer.requiredVersion = expectedVersion; // Intended feed metadata, not payload metadata.
++    return installer;
++}
++
++- (void)testCancelExtractionJoinsOwnedChildAndWorker
++{
++    NSURL *root = [self newFixtureDirectory];
++    NSString *archive = [[NSBundle bundleForClass:self.class] pathForResource:@"SparkleTestCodeSignApp" ofType:@"zip"];
++    XCTAssertNotNil(archive);
++    SUPipedUnarchiver *unarchiver = [[SUPipedUnarchiver alloc] initWithArchivePath:archive extractionDirectory:root.path];
++    XCTestExpectation *completed = [self expectationWithDescription:@"Canceled extraction reports failure"];
++    Method launch = class_getInstanceMethod(NSTask.class, @selector(launchAndReturnError:));
++    SUOriginalTaskLaunch = method_getImplementation(launch);
++    SUExtractionStarted = dispatch_semaphore_create(0);
++    SUExtractionLaunches = 0;
++    void (*originalSIGPIPE)(int) = signal(SIGPIPE, SIG_IGN);
++    method_setImplementation(launch, (IMP)SUHoldExtractionTask);
++    @try {
++        [unarchiver unarchiveWithCompletionBlock:^(NSError *error) {
++            XCTAssertNotNil(error);
++            [completed fulfill];
++        } progressBlock:nil waitForCleanup:NO];
++        XCTAssertEqual(dispatch_semaphore_wait(SUExtractionStarted, dispatch_time(DISPATCH_TIME_NOW, 5 * NSEC_PER_SEC)), 0L);
++        XCTAssertTrue(SUExtractionTask.running);
++        double start = NSProcessInfo.processInfo.systemUptime;
++        [unarchiver cancelAndWait];
++        XCTAssertLessThan(NSProcessInfo.processInfo.systemUptime - start, 5.0);
++        XCTAssertFalse(SUExtractionTask.running);
++        XCTAssertEqual(SUExtractionLaunches, 1U); // No non-piping retry after cancellation.
++        [unarchiver cancelAndWait]; // Idempotent, including after child exit.
++        XCTAssertTrue([NSFileManager.defaultManager removeItemAtURL:root error:NULL]);
++        [self waitForExpectationsWithTimeout:5 handler:nil];
++        XCTAssertFalse([NSFileManager.defaultManager fileExistsAtPath:root.path]);
++    } @finally {
++        [unarchiver cancelAndWait];
++        method_setImplementation(launch, SUOriginalTaskLaunch);
++        signal(SIGPIPE, originalSIGPIPE);
++        SUExtractionTask = nil;
++        SUExtractionStarted = nil;
++        [NSFileManager.defaultManager removeItemAtURL:root error:NULL];
++    }
++}
++
++- (void)testCancelBeforeExtractionPreventsChildLaunch
++{
++    NSURL *root = [self newFixtureDirectory];
++    NSString *archive = [[NSBundle bundleForClass:self.class] pathForResource:@"SparkleTestCodeSignApp" ofType:@"zip"];
++    XCTAssertNotNil(archive);
++    SUPipedUnarchiver *unarchiver = [[SUPipedUnarchiver alloc] initWithArchivePath:archive extractionDirectory:root.path];
++    XCTestExpectation *completed = [self expectationWithDescription:@"Canceled worker does not extract"];
++    @try {
++        [unarchiver cancelAndWait];
++        [unarchiver unarchiveWithCompletionBlock:^(NSError *error) {
++            XCTAssertNotNil(error);
++            [completed fulfill];
++        } progressBlock:nil waitForCleanup:NO];
++        [unarchiver cancelAndWait];
++        XCTAssertEqual([NSFileManager.defaultManager contentsOfDirectoryAtPath:root.path error:NULL].count, 0U);
++        XCTAssertTrue([NSFileManager.defaultManager removeItemAtURL:root error:NULL]);
++        [self waitForExpectationsWithTimeout:5 handler:nil];
++        XCTAssertFalse([NSFileManager.defaultManager fileExistsAtPath:root.path]);
++    } @finally {
++        [unarchiver cancelAndWait];
++        [NSFileManager.defaultManager removeItemAtURL:root error:NULL];
++    }
++}
++
++- (void)testCommitPolicy
++{
++    uint8_t nonce[SPU_INSTALLATION_NONCE_LENGTH] = {1};
++    uint8_t other[SPU_INSTALLATION_NONCE_LENGTH] = {2};
++    SPUInstallationCommitState state = {0};
++    XCTAssertFalse(SPUCommitAuthorize(&state, nonce, sizeof(nonce), 1));
++    XCTAssertTrue(SPUCommitPrepare(&state, nonce, 1));
++    XCTAssertFalse(SPUCommitAuthorize(&state, other, sizeof(other), 2));
++    XCTAssertFalse(SPUCommitAuthorize(&state, nonce, sizeof(nonce) - 1, 2));
++    XCTAssertFalse(SPUCommitBeginFinalInstallation(&state));
++    XCTAssertTrue(SPUCommitDisarm(&state));
++    XCTAssertFalse(SPUCommitAuthorize(&state, nonce, sizeof(nonce), 2));
++    SPUCommitHostTerminated(&state);
++    XCTAssertFalse(SPUCommitBeginFinalInstallation(&state));
++
++    state = (SPUInstallationCommitState){0};
++    XCTAssertTrue(SPUCommitPrepare(&state, nonce, 1));
++    SPUCommitHostTerminated(&state); // Crash/ordinary quit is not COMMIT.
++    XCTAssertFalse(SPUCommitAuthorize(&state, nonce, sizeof(nonce), 2));
++    XCTAssertFalse(SPUCommitBeginFinalInstallation(&state));
++
++    state = (SPUInstallationCommitState){0};
++    XCTAssertTrue(SPUCommitPrepare(&state, nonce, 1));
++    XCTAssertFalse(SPUCommitAuthorize(&state, nonce, sizeof(nonce), 1 + SPU_INSTALLATION_COMMIT_LIFETIME));
++    XCTAssertEqual(state.phase, SPUCommitDisarmed);
++
++    state = (SPUInstallationCommitState){0};
++    XCTAssertTrue(SPUCommitPrepare(&state, nonce, 1));
++    XCTAssertTrue(SPUCommitAuthorize(&state, nonce, sizeof(nonce), 2));
++    XCTAssertFalse(SPUCommitAuthorize(&state, nonce, sizeof(nonce), 2));
++    XCTAssertFalse(SPUCommitDisarm(&state));
++    XCTAssertFalse(SPUCommitBeginFinalInstallation(&state));
++    SPUCommitHostTerminated(&state); // Real process waiter must notify first.
++    XCTAssertTrue(SPUCommitBeginFinalInstallation(&state));
++    XCTAssertFalse(SPUCommitBeginFinalInstallation(&state));
++}
++
++- (void)testStrictIdentityArchitectureAndDowngrade
++{
++    NSURL *root = [self newFixtureDirectory];
++    @try {
++        NSBundle *old = [self bundleIn:root name:@"Installed.app" identifier:@"test.sparkle.hardened" version:@"2" architecture:self.runningArchitecture];
++        NSBundle *wrongID = [self bundleIn:root name:@"WrongID.app" identifier:@"test.other" version:@"3" architecture:self.runningArchitecture];
++        NSBundle *wrongArch = [self bundleIn:root name:@"WrongArch.app" identifier:old.bundleIdentifier version:@"3" architecture:self.runningArchitecture == NSBundleExecutableArchitectureX86_64 ? NSBundleExecutableArchitectureARM64 : NSBundleExecutableArchitectureX86_64];
++        NSBundle *downgrade = [self bundleIn:root name:@"Downgrade.app" identifier:old.bundleIdentifier version:@"1" architecture:self.runningArchitecture];
++        for (NSBundle *update in @[wrongID, wrongArch, downgrade]) {
++            SUPlainInstaller *installer = [self installerFrom:old to:update expectedVersion:update == downgrade ? @"1" : @"3"];
++            NSError *error = nil;
++            XCTAssertFalse([installer performInitialInstallation:&error]);
++            XCTAssertNotNil(error);
++            if (update == downgrade) { XCTAssertEqual(error.code, SUDowngradeError); }
++            [installer performCleanup];
++            XCTAssertTrue([NSFileManager.defaultManager fileExistsAtPath:old.executablePath]);
++        }
++    } @finally {
++        [NSFileManager.defaultManager removeItemAtURL:root error:NULL];
++    }
++}
++
++- (void)checkRejectedActualVersion:(NSString *)actualVersion expectedVersion:(nullable NSString *)expectedVersion errorCode:(NSInteger)errorCode
++{
++    NSURL *root = [self newFixtureDirectory];
++    @try {
++        NSBundle *old = [self bundleIn:root name:@"Installed.app" identifier:@"test.sparkle.hardened" version:@"2" architecture:self.runningArchitecture];
++        NSBundle *update = [self bundleIn:root name:@"Update.app" identifier:old.bundleIdentifier version:actualVersion architecture:self.runningArchitecture];
++        NSString *installedInfoPath = [old.bundlePath stringByAppendingPathComponent:@"Contents/Info.plist"];
++        NSData *originalInfo = [NSData dataWithContentsOfFile:installedInfoPath];
++        NSData *originalExecutable = [NSData dataWithContentsOfFile:old.executablePath];
++        XCTAssertNotNil(originalInfo);
++        XCTAssertNotNil(originalExecutable);
++        SUPlainInstaller *installer = [self installerFrom:old to:update expectedVersion:expectedVersion];
++        NSError *error = nil;
++        XCTAssertFalse([installer performInitialInstallation:&error]);
++        XCTAssertEqualObjects(error.domain, SUSparkleErrorDomain);
++        XCTAssertEqual(error.code, errorCode);
++        XCTAssertTrue(error.localizedDescription.length > 0);
++        [installer performCleanup];
++        XCTAssertEqualObjects([NSData dataWithContentsOfFile:installedInfoPath], originalInfo);
++        XCTAssertEqualObjects([NSData dataWithContentsOfFile:old.executablePath], originalExecutable);
++    } @finally {
++        [NSFileManager.defaultManager removeItemAtURL:root error:NULL];
++    }
++}
++
++- (void)testRejectCurrentVersionReplayAdvertisedAsNewer
++{
++    [self checkRejectedActualVersion:@"2" expectedVersion:@"3" errorCode:SUDowngradeError];
++    [self checkRejectedActualVersion:@"2" expectedVersion:@"2" errorCode:SUDowngradeError];
++}
++
++- (void)testRejectNewerPayloadWithDifferentAdvertisedVersion
++{
++    [self checkRejectedActualVersion:@"3" expectedVersion:@"4" errorCode:SUValidationError];
++}
++
++- (void)testRejectMissingExpectedVersion
++{
++    [self checkRejectedActualVersion:@"3" expectedVersion:nil errorCode:SUValidationError];
++    [self checkRejectedActualVersion:@"3" expectedVersion:@"" errorCode:SUValidationError];
++}
++
++- (void)testRejectUniversalPayloadToKeepRunningSlice
++{
++    NSURL *root = [self newFixtureDirectory];
++    @try {
++        NSBundle *old = [self bundleIn:root name:@"Installed.app" identifier:@"test.sparkle.hardened" version:@"1" architecture:self.runningArchitecture];
++        NSBundle *update = [self bundleIn:root name:@"Universal.app" identifier:old.bundleIdentifier version:@"2" architecture:self.runningArchitecture];
++        NSInteger otherArchitecture = self.runningArchitecture == NSBundleExecutableArchitectureX86_64 ? NSBundleExecutableArchitectureARM64 : NSBundleExecutableArchitectureX86_64;
++        NSBundle *other = [self bundleIn:root name:@"Other.app" identifier:old.bundleIdentifier version:@"2" architecture:otherArchitecture];
++        NSURL *fat = [root URLByAppendingPathComponent:@"universal-executable"];
++        NSTask *lipo = [[NSTask alloc] init];
++        lipo.executableURL = [NSURL fileURLWithPath:@"/usr/bin/xcrun"];
++        lipo.arguments = @[@"lipo", @"-create", update.executablePath, other.executablePath, @"-output", fat.path];
++        XCTAssertTrue([lipo launchAndReturnError:NULL]);
++        [lipo waitUntilExit];
++        XCTAssertEqual(lipo.terminationStatus, 0);
++        XCTAssertTrue([NSFileManager.defaultManager removeItemAtPath:update.executablePath error:NULL]);
++        XCTAssertTrue([NSFileManager.defaultManager moveItemAtPath:fat.path toPath:update.executablePath error:NULL]);
++        // Use a fresh bundle path so NSBundle cannot reuse thin-image metadata.
++        NSURL *ready = [root URLByAppendingPathComponent:@"UniversalReady.app" isDirectory:YES];
++        XCTAssertTrue([NSFileManager.defaultManager moveItemAtURL:update.bundleURL toURL:ready error:NULL]);
++        SUPlainInstaller *installer = [self installerFrom:old to:[NSBundle bundleWithURL:ready] expectedVersion:@"2"];
++        NSError *error = nil;
++        XCTAssertFalse([installer performInitialInstallation:&error]);
++        XCTAssertEqual(error.code, SUValidationError);
++        [installer performCleanup];
++        XCTAssertTrue([NSFileManager.defaultManager fileExistsAtPath:old.executablePath]);
++    } @finally {
++        [NSFileManager.defaultManager removeItemAtURL:root error:NULL];
++    }
++}
++
++- (void)testRealBundleReplacement
++{
++    NSURL *root = [self newFixtureDirectory];
++    @try {
++        NSBundle *old = [self bundleIn:root name:@"Installed.app" identifier:@"test.sparkle.hardened" version:@"1" architecture:self.runningArchitecture];
++        NSBundle *update = [self bundleIn:root name:@"Update.app" identifier:old.bundleIdentifier version:@"2" architecture:self.runningArchitecture];
++        SUPlainInstaller *installer = [self installerFrom:old to:update expectedVersion:@"2"];
++        NSError *error = nil;
++        XCTAssertTrue([installer performInitialInstallation:&error], @"%@", error);
++        XCTAssertTrue([installer performFinalInstallationProgressBlock:nil error:&error], @"%@", error);
++        [installer performCleanup];
++        NSDictionary *installed = [NSDictionary dictionaryWithContentsOfFile:[old.bundlePath stringByAppendingPathComponent:@"Contents/Info.plist"]];
++        XCTAssertEqualObjects(installed[@"CFBundleVersion"], @"2");
++        XCTAssertTrue([NSFileManager.defaultManager fileExistsAtPath:old.executablePath]);
++    } @finally {
++        [NSFileManager.defaultManager removeItemAtURL:root error:NULL];
++    }
++}
++
++- (void)checkRecoveryWithFailedRestoration:(BOOL)failRestoration
++{
++    NSURL *root = [self newFixtureDirectory];
++    NSString *recoveryPath = nil;
++    Method move = class_getInstanceMethod(SUFileManager.class, @selector(moveItemAtURL:toURL:error:));
++    Method swap = class_getInstanceMethod(SUFileManager.class, @selector(swapItemAtURL:withItemAtURL:error:));
++    SUOriginalMove = method_getImplementation(move);
++    SUOriginalSwap = method_getImplementation(swap);
++    @try {
++        NSBundle *old = [self bundleIn:root name:@"Installed.app" identifier:@"test.sparkle.hardened" version:@"1" architecture:self.runningArchitecture];
++        NSBundle *update = [self bundleIn:root name:@"Update.app" identifier:old.bundleIdentifier version:@"2" architecture:self.runningArchitecture];
++        SUPlainInstaller *installer = [self installerFrom:old to:update expectedVersion:@"2"];
++        NSError *error = nil;
++        XCTAssertTrue([installer performInitialInstallation:&error], @"%@", error);
++        SUFailureDestination = old.bundlePath;
++        SURemainingMoveFailures = failRestoration ? 2 : 1;
++        method_setImplementation(move, (IMP)SUFailMove);
++        method_setImplementation(swap, (IMP)SUFailSwap);
++        XCTAssertFalse([installer performFinalInstallationProgressBlock:nil error:&error]);
++        recoveryPath = error.userInfo[NSFilePathErrorKey];
++        [installer performCleanup];
++        if (failRestoration) {
++            XCTAssertNotNil(recoveryPath);
++            XCTAssertTrue([NSFileManager.defaultManager fileExistsAtPath:[recoveryPath stringByAppendingPathComponent:@"Contents/MacOS/Fixture"]]);
++        } else {
++            recoveryPath = old.bundlePath;
++        }
++        NSDictionary *retained = [NSDictionary dictionaryWithContentsOfFile:[recoveryPath stringByAppendingPathComponent:@"Contents/Info.plist"]];
++        XCTAssertEqualObjects(retained[@"CFBundleVersion"], @"1");
++    } @finally {
++        method_setImplementation(move, SUOriginalMove);
++        method_setImplementation(swap, SUOriginalSwap);
++        SUFailureDestination = nil;
++        [NSFileManager.defaultManager removeItemAtURL:root error:NULL];
++        if (failRestoration && recoveryPath != nil) {
++            [NSFileManager.defaultManager removeItemAtPath:[recoveryPath stringByDeletingLastPathComponent] error:NULL];
++        }
++    }
++}
++
++- (void)testFailedReplacementRestoresOldBundle
++{
++    [self checkRecoveryWithFailedRestoration:NO];
++}
++
++- (void)testFailedRestorationPreservesOldBackup
++{
++    [self checkRecoveryWithFailedRestoration:YES];
++}
++
++@end
+ 
+ @interface SUInstallerTest : XCTestCase
+ 

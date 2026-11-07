@@ -1,10 +1,13 @@
 # MangaMeeya Rust — 確認式自動更新實作計畫
 
 - 日期：2026-11-07
-- 狀態：**已核准執行；第 7.1 節技術 gate 未通過，完整實作 blocked**
+- 狀態：**已核准 SDK 層級修訂；source hardening 與原生 gate 執行中，完整功能仍未完成**
 - Objective：方案 2｜下載後，由使用者確認並重新啟動更新
 - 基準：`main`，`527b1de4f2ce3546d6e3cca1a866b9d2dcb614d1`，應用程式版本 `0.4.0`
-- 預定實作分支：`narumi/feat/confirmed-auto-update`
+- 初次 preflight 分支：`narumi/feat/confirmed-auto-update`（PR #16 已由 owner 合併）
+- SDK 修訂起始基準：`58da7a9858797e372defaf81a7ea786da9364064`
+- 最新整合基準：`origin/main`，`11de5d9e8e14a57da2dbec186bf4773eb18234b4`，版本 `0.4.1`；保留上游 visual-parity、版本及 release-token／revert 變更
+- SDK 修訂分支：`narumi/feat/updater-sdk-hardening`
 
 ## 1. 核准與執行規則
 
@@ -76,8 +79,8 @@ flowchart TD
 
 | 平台 | 決策 | 安裝來源 |
 | --- | --- | --- |
-| Windows x64 | WinSparkle `0.9.4`，小型 Rust C ABI adapter | 既有 NSIS installer，補上安全更新模式 |
-| macOS arm64／x86_64 | Sparkle `2.10.1`，小型 Objective-C／Rust bridge | 各架構已簽署的完整 ZIP app bundle |
+| Windows x64 | 固定來源並修補的 WinSparkle `0.9.4`；驗證綁定的 C ABI adapter | 既有 NSIS installer，補上安全更新模式 |
+| macOS arm64／x86_64 | 固定來源並修補的 Sparkle `2.10.1`；具備明確 COMMIT 的 native bridge | 各架構已簽署的完整 ZIP app bundle |
 | Linux | unsupported adapter；清楚顯示不支援自動安裝 | 不產生 Linux 更新資產 |
 
 1. 沿用 native SDK 的下載、payload signature verification、進度與更新確認視窗。
@@ -88,6 +91,7 @@ flowchart TD
    - native callback 不直接跨 thread 操作 GPUI entity；使用有界事件／回覆機制，支援逾時及取消。
    - FFI 邊界不能傳出 Rust panic；callback、delegate 與 library 的生命週期必須完整管理。
 3. SDK 版本與下載 SHA-256 固定；不追蹤 `latest`，不提交 SDK binary。
+   - 以下 stock binary pin 只保留為原始 preflight 基準，不再視為可接入正式更新的 hardened SDK。核准後的 source-build pin 與修補範圍見第 11 節。
    - WinSparkle：`v0.9.4`，source commit `a8986caf620262f7d4581b241436ceaa0cc9370f`。
    - `WinSparkle-0.9.4.zip`：`6037df37fc263bd1650a1c4949681a9d40ffe991d01f35892a406cb5d103c976`。
    - Sparkle：`2.10.1`，source commit `ab7d71291238df6e0492143b120c9b696a35f603`。
@@ -323,3 +327,62 @@ SDK release metadata、公有 SHA-256、固定版本 headers 與上述官方文�
 8. 繼續前需處理的重大修訂：為兩平台選定能滿足原條件的 SDK-level 解法，或對固定來源做有維護責任的安全／交接修補，先形成修訂設計並取得核准。
    - 本輪沒有選定替代 SDK、建立 fork、修改 SDK source、擴大私鑰權限或降低驗收條件。
    - SDK route 確認後，再完成 native gate 與第 6.2 節的 owner 前置項目。不得先以 unsigned、測試公鑰或自動 install-on-quit 作為正式交付。
+
+## 11. 已核准的 SDK 層級修訂
+
+使用者於 2026-11-08、上述 blocker 報告後明確回覆 `approve`。這次核准允許 SDK 層級修補或替換；不需要重新核准原本的更新目標。執行路線先維持兩個 SDK，對固定來源施加受 review 的小範圍修補，不自行建立下載、解壓或 bundle replacement engine。第 8 節 A1–A15 保持不變。
+
+### 11.1 固定來源與建置邊界
+
+1. WinSparkle 使用官方完整 source archive `WinSparkle-0.9.4-src.zip`。
+   - Source commit：`a8986caf620262f7d4581b241436ceaa0cc9370f`。
+   - SHA-256：`cd77040f828dce0adcf8f0205f776238197deb24f5108bf01a3e5623b703a3b9`。
+   - Archive 大小：64,991,527 bytes，包含固定版本的 source dependencies。
+2. Sparkle 使用 source commit `ab7d71291238df6e0492143b120c9b696a35f603` 的 codeload archive。
+   - SHA-256：`d7e5599d56ddb917cddbb4a719fb534ad5d2d7e80a653446d0eea6a38920b302`。
+   - Archive 大小：16,788,678 bytes，包含 Vendor source。
+3. 在受限的暫存目錄中先驗證 bounded、immutable archive bytes，再做安全解壓與 patch application。
+   - 拒絕絕對路徑、parent traversal、symlink／hardlink、重複路徑及非預期檔案類型。
+   - 對正確來源執行 patch 的 dry run；context 不符時失敗，不以模糊或部分套用繼續。
+   - 原始 SDK、修補後 source、native build 輸出均不提交。Repository 只保留 pins、patch、建置／測試程式及必要 notices。
+4. 每個 SDK 需有 hardened capability marker；host 必須確認，不能誤用 stock DLL／framework。
+5. 原有 reader CI 及 Windows／macOS 套件流程保持不變，直到完整 native gate 通過。
+   - 額外 SDK CI 只驗證 source patch、native build 與明確列出的測試；不需要 production signing secrets。
+   - SDK native unit test 或 build 通過，不等於 GPUI callback、整體安裝、簽署或 A1–A15 全部通過。
+
+### 11.2 Windows 修補
+
+1. Ed25519 verification 必須產生與同一份已驗證 payload buffer 綁定的 SHA-256，經新 C ABI 隨 installer handoff 傳遞。
+   - 不能改成讀取 callback path 後才計算信任根；helper 仍須密封 staging 並在執行前檢查綁定值。
+   - callback 缺少、未準備好或失敗時 fail closed，不落回 unsigned、DSA 或 feed-controlled ShellExecute。
+2. 移除 legacy OpenSSL／DSA 的 SDK build dependency 與程式碼；使用既有 Ed25519 實作及 Windows 原生 hash／encoding API。
+   - 不修改應用程式 AGPL 授權，不自行加入 license exception。
+   - 原生 build 與必要 notices 需證明沒有再連結 legacy libcrypto；不能只憑最外層 MIT metadata 宣稱完成 review。
+3. 將 payload 寫入本機固定檔名，不採用 response 提供的路徑；production 僅允許 HTTPS。
+4. Release notes 改為 inert text，不載入 remote notes HTML／script。
+5. Native callback mailbox 與 DLL 保留到 process 結束；不將 stock `cleanup()` 當成安全 unload barrier。
+   - 所有 host callback 在 SDK configuration lock 外呼叫；active／ready offer 不被其他 check 覆蓋，progress／error／completion 綁定 download token。
+6. 沿用 SDK background worker，以 synchronous WinINet 避免 async callback／buffer 在取消後存取已釋放記憶體。
+   - connect／send／receive 各設定 10,000 ms phase timeout；這不是整體 deadline，取消仍須等待目前的 WinINet call。
+   - appcast 實際 bytes 上限 1 MiB，payload 為 512 MiB；在 append／write、XML int conversion 與 verifier allocation 前拒絕超限資料。
+   - 單次 network／XML 失敗不能終止 periodic scheduler；保留原 interval 與 cancellation，不新增 timer 或 busy retry。
+
+### 11.3 macOS 修補
+
+1. 在真實 installer protocol／state 中加入明確的 session COMMIT。
+   - COMMIT 前 host 普通退出、crash 或連線失效都不能開始替換 app；postpone 不再被誤認為 commit gate。
+   - 取消需要 disarm acknowledgement；不能只 dismiss dialog 或丟棄 continuation。
+   - COMMIT 是一次性 session 狀態，不能用可重播的 user default、公開 command-line flag 或既有 launch token 代替。
+2. 保留官方 installer 及實際 process termination 等待；補上強制 identifier／architecture 相符檢查及失敗復原的舊 app 保留規則。
+   - 實際 CFBundleVersion 必須嚴格大於 installed version，且與 expected version 完全相符；拒絕已簽署的同版本 replay。
+   - network path 僅接受 full ZIP；清除 staging／回覆取消 ACK 前停止並 join 本 session 的 extractor child／worker。
+3. GPUI 終止協調器必須在可 veto 的邊界處理最終 flush，不以 `on_app_quit` 或 `willRelaunch` 取代。
+   - 保留 GPUI delegate 與原本 native event handlers，不先升級 GUI framework。
+4. 先以兩架構 native fixtures 驗證 COMMIT、取消、退出／crash、flush 失敗及 concurrency；未取得證據前不將 hardened framework 接入正式 app。
+
+### 11.4 維護與尚存 blocker
+
+1. 本次核准包含 SDK source-build 與上述安全／交接修補的維護成本，不包含關閉原驗收標準。
+2. SDK 升級需重新 review pin、patch、notice 及 native negative tests，不能自動追蹤 upstream HEAD。
+3. 正式更新公鑰、受保護 private-key storage、Developer ID 與 notarization 仍由 owner 提供；本次 `approve` 不等於已提供 credentials，也不授權產生或上傳正式 private key。
+4. 完整 native GPUI gate 與 A1–A15 仍需證據。若修補路線無法安全達成要求，記錄實際失敗，不產生假裝可更新的正式套件。

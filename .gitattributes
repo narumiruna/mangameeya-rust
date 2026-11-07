@@ -1,1 +1,4 @@
 * text=auto eol=lf
+
+# Patch context must keep upstream line endings and blank context markers.
+packaging/updates/*/*.patch -text whitespace=-blank-at-eol

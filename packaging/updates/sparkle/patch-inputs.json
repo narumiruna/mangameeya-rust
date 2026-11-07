@@ -1,0 +1,40 @@
+{
+  "schema": 1,
+  "commit": "ab7d71291238df6e0492143b120c9b696a35f603",
+  "patch_sha256": "1c2f13590c22256a11b2dd499f8c62ed61b450ed4ae45d2312aede0a157fab99",
+  "inputs": {
+    "Autoupdate/AppInstaller.m": "39369669a98181f81fa58ab7d409c8310fbe4b5ff046fb48bd11a39632195dd1",
+    "Autoupdate/SPUInstallationInputData.h": "5ec4ff8b833f772e5ea459b5080fe65f35d42a83431d0be9605b3c44106c3b67",
+    "Autoupdate/SPUInstallationInputData.m": "282f9135979701e5c9764cc9612f9729e483f7fbdf8e0945456b0eb3d1d5bd18",
+    "Autoupdate/SPUMessageTypes.h": "0e98c3c5d9c99048c4760bd6c3e447e11c6eef6ceb744516f93abe2818929398",
+    "Autoupdate/SPUMessageTypes.m": "cfdf113586d73271c956bd11f3978acad709b2a03874927b9fd1d4d1e0117f14",
+    "Autoupdate/SUPipedUnarchiver.h": "0e352466ac17a12c7c028c08da7294971c210e7064c9efc39e964b207942bd53",
+    "Autoupdate/SUPipedUnarchiver.m": "36e9c42b75ed43827f16ea32d742509bbf96894fba9ae404182826ea5ab67732",
+    "Autoupdate/SUPlainInstaller.h": "baf0a0c0d2ec0c26465fddb77bf750c7d97c4e53d3bb90f2d2da4c37201bfc1d",
+    "Autoupdate/SUPlainInstaller.m": "d5191e8b7684df756383c2122dcfcaaa011d5bae237b2ddbf9fa05986c8f5b55",
+    "Sparkle/SPUInstallerDriver.m": "e813d3e1cae7668ea88b64f9c5a980bf826a06910f99db68da7af99f466deac5",
+    "Sparkle/SPUUpdater.h": "a30b876dc722a2861fb8f271a0bf0c95bd664db4cf2af57d216d190f2e010ee7",
+    "Sparkle/SPUUpdater.m": "c86e3e59a201a9339bbd5a391f12e62d9c31aca125ef6d665a16088a1c144c78",
+    "Sparkle/SPUUpdaterDelegate.h": "20ea4bf5273eaa6560160941d680acec6565965162737f50ea4240845a7dde24",
+    "Sparkle/SPUUserDriver.h": "db9fe6cf78aca0f2f79a99898d38daff566f96c823de2bb2b985511ad77017dc",
+    "Tests/SUInstallerTest.m": "bf348bca2d4514fb68ab7adffaca84e018890bd3139f44f9a915c7dfde7e730a"
+  },
+  "outputs": {
+    "Autoupdate/AppInstaller.m": "b36d18f0ebd6b733eb39718808e383cb9c741532be68da9560c83936b60dbfbd",
+    "Autoupdate/SPUInstallationCommitState.h": "b741445c58085a14dc6015a398698129306b2fc2fab7c5565bb28d02b5a8fa35",
+    "Autoupdate/SPUInstallationInputData.h": "47e9b002c1d83db98e373c5216f4721413800d1ff89c452d8ab265a2a396337e",
+    "Autoupdate/SPUInstallationInputData.m": "9d106146d5fd38726d96746c7b452c3a97f8ea976f047bbe6fec5d69e240570a",
+    "Autoupdate/SPUMessageTypes.h": "ce1b21bc266e54cf3e2da0cd58d26d9841d16ffd627d86aa540687dcf4289aa2",
+    "Autoupdate/SPUMessageTypes.m": "941867f9ccadd3be1ee274d3a02f824b1a1f9e924fedae43b99368d8c035e1eb",
+    "Autoupdate/SUPipedUnarchiver.h": "b3ffd9f4533df52f3c7d82103a61fa6ef2b5f51da8d0f448173173527381f0bd",
+    "Autoupdate/SUPipedUnarchiver.m": "03a1310ed00cb41b733efee95c289878e66732583593708b49ac819ac29fce00",
+    "Autoupdate/SUPlainInstaller.h": "9fe2f978a62fa563e969ca6a9bbd59001fdc31c73917be354577a34a7f20306e",
+    "Autoupdate/SUPlainInstaller.m": "acb41dceebf1a6869ccaa20826dbcdb64420911f4753edb232288e401d9ba250",
+    "Sparkle/SPUInstallerDriver.m": "9dab411693fc6c958bc568a49306294d8deb69557b35da90f2bfec2963f8458c",
+    "Sparkle/SPUUpdater.h": "eb8f2fa3c0cb3d430b09876980fb6e0fce01023cc11133c1aa342f39bf5e3671",
+    "Sparkle/SPUUpdater.m": "2a84bedb9abdf262abbe017cacdd53cecec76d0b4275e26c4be393ff0f7e57ec",
+    "Sparkle/SPUUpdaterDelegate.h": "db7f3caefb92c11533b8dd364553b05bba7f257da387df0397ef6780ad9bdb8f",
+    "Sparkle/SPUUserDriver.h": "1fe9cfa681ef5bdb0909ddc09a7d4db587f2c42bf1c39f528c417099fcfbfad5",
+    "Tests/SUInstallerTest.m": "fb00108f9b664fde7c3be119fdb38747e9995cd9466285ff028b751f0558f1ba"
+  }
+}
