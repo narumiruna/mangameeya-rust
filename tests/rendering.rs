@@ -117,7 +117,15 @@ fn capture_zoom_states(cx: &mut HeadlessAppContext, window: AnyWindowHandle) {
         settle(cx, window);
         cx.update_window(window, |_, window, _| {
             assert_zoom_panel_in_viewport(window);
-            assert_eq!(window.find("zoom-input").value(), Some("100"));
+            let viewer = window.find("viewer").bounds().size;
+            let scale = 1.0_f64
+                .min(f64::from(f32::from(viewer.width) - 24.) / 320.)
+                .min(f64::from(f32::from(viewer.height) - 24.) / 480.);
+            let input: f64 = window.find("zoom-input").value().unwrap().parse().unwrap();
+            assert!(
+                (input - scale * 100.).abs() < 0.0051,
+                "zoom input must match the fitted page, including fractional percentages"
+            );
         })
         .unwrap();
         snapshot(cx, window, &format!("zoom-open-{suffix}"));
@@ -634,7 +642,7 @@ fn open_reader(
 fn main() {
     let mut cx = HeadlessAppContext::with_platform(
         gpui_kit::platform::current_platform(true).text_system(),
-        Arc::new(gpui_kit::assets::Assets),
+        Arc::new(ui::ReaderAssets),
         || {
             #[cfg(target_os = "macos")]
             {

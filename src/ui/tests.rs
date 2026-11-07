@@ -5,6 +5,7 @@ use tempfile::TempDir;
 
 mod desktop;
 mod i18n;
+mod visual;
 mod zoom;
 
 struct Fixture {

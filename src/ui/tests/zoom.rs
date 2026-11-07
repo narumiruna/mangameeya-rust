@@ -351,7 +351,9 @@ fn real_panel_choices_steps_and_keyboard_submission_keep_modes_distinct(cx: &mut
                 FitMode::Custom => unreachable!(),
             };
             close_enough(view.effective_scale().unwrap(), expected);
-            trigger(window, fit, &format!("{:.0}%", expected * 100.));
+            // Match the display's f64 conversion before rounding. A fitted
+            // f32 scale near a half-percent can round differently in f32.
+            trigger(window, fit, &format!("{:.0}%", f64::from(expected) * 100.));
             let previous_focus = window.focused(cx);
             window.click("zoom-trigger", cx);
             selected_choice(window, fit);

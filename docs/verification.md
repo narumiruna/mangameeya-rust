@@ -264,3 +264,48 @@ These checks are not represented as local passes:
 - **Subjective visual acceptance:** A maintainer can review the generated captures and native reading workflow on the intended display and input hardware. Automated geometry and pixel checks do not establish personal usability acceptance. This optional product review is not an agent coding gate.
 
 The project does not require credentials, paid services, or changes to comic sources to build or test locally.
+
+## Desktop visual-parity follow-up
+
+The user approved this follow-up with `resolve findings` after comparing the desktop concept with the Windows application. The follow-up adds visual requirements to the earlier functional layout plan. It does not add a theme switch, change settings fields, or replace the reading engine.
+
+### Corrections
+
+- The default GPUI Kit `Assets` bundle contains component icons, not the full Lucide catalog. Several reader icons were absent. `src/ui/assets.rs` now combines the component bundle with the 18 icons used by the reader. Production, the native fixture, and the rendering test use the same `ReaderAssets` source.
+- Icon buttons no longer set an empty visible label. GPUI Kit treats `Some("")` as a text label and allocates normal text padding and a label gap.
+- The toolbar uses separate command groups, a segmented reading-mode selector, visible reading-direction text in wide windows, and blue selected states. Menu, toolbar, button, and status-row heights are 30, 59, 34, and 47 logical px. The status bar has a separate 1 px top border.
+- The sidebar has a heading and page count, equal-width tabs, selected thumbnail cards, a book-title footer, and left-aligned recent items. Tool tabs use an underline. Image tools have aligned values and a visible reset-scope note. Background choices include color samples and text names.
+- Windows selects a UI font for the current language through the native font resolver. Missing optional language fonts use GPUI's fallback. Ordinary reader text is 13 logical px; secondary text remains 12 logical px.
+- Single pages and spreads are centered vertically without changing their scale. Existing background, sidebar mode, zoom, filter, rotation, and reading preferences are retained.
+- Image, reading, and playback tool rendering use separate helpers. This also removes a Windows debug stack overflow found during the rendering check; the test stack size was not increased.
+
+### Checks on Windows x64 / Rust 1.99.1
+
+| Check | Result |
+| --- | --- |
+| `cargo fmt --all -- --check` | Passed |
+| `cargo test --locked --lib ui::` | 64 passed; no failures or ignored tests |
+| `cargo clippy --locked --all-targets --all-features -- -D warnings` | Passed |
+| `cargo test --locked --test rendering` | Passed native events and geometry with `ReaderAssets` |
+| `cargo test --locked --all-features` | Final run: 169 passed; 3 IPC tests failed |
+| `cargo test --locked --all-features -- --test-threads=1` | 171 passed; IPC queue test failed |
+| Pinned `changenote status` and `git diff --check` | Passed |
+| Native visual fixture | Built, rendered, and exited automatically |
+
+The full-suite failures are not passes. The final parallel failures were `instance::tests::queue_is_bounded_and_rejects_overflow` and `instance::tests::rejects_oversized_payloads_and_path_counts` (`ConnectionReset`, Windows error 10054), plus `instance::tests::forwards_paths_and_empty_focus_requests`. An earlier parallel run had 170 passes and two IPC failures. The serial run, before the final rendering-helper refactor, still failed the queue test. Earlier verification records already report the queue failure. This follow-up does not change IPC code or remove its tests.
+
+The four added tests cover embedded icon data, three-language/three-size chrome geometry, painted reading-direction text and retained preferences, and centered original-size pages. Existing layout tests still check control separation at 1280×800, 960×640, and 800×540. Zoom checks now account for fractional fit percentages after the chrome-height change; they retain numeric scale assertions.
+
+### Native visual evidence and limits
+
+Run `cargo run --locked --example ui_capture` to open the production reader for 15 seconds with generated pages and temporary settings. It does not open user comics or read user settings. The existing constructor still lists the home directory for its file browser. All fixture writes use its temporary directory.
+
+The final Windows capture used `PrintWindow` with client-only/full-content flags on the fixture's own HWND. It does not depend on an unobstructed desktop. The client area was 1280×800 logical px, captured as 1600×1000 physical px at 125% scaling (120 DPI). The image shows the restored toolbar, mode, close, and rotation icons, plus the selected thumbnail and tool-tab styles.
+
+Local artifacts are under `C:/Users/narumi/workspace/mangameeya-rust/target/`:
+
+- `ui-smoke/desktop-windows-after.png`
+- `desktop-visual-ui.log`, `desktop-visual-clippy.log`, and `desktop-visual-rendering.log`
+- `desktop-visual-tests.log` and `desktop-visual-tests-serial.log`
+
+The screenshot and logs are generated evidence, not committed assets. The screenshot uses synthetic artwork, not the concept's artwork or the user's comic. It does not prove pixel-for-pixel parity. Windows 100%/150% screenshots, the full native screenshot state matrix, macOS checks, and user visual approval remain unverified. No package was installed or published, and the running user application was not replaced.

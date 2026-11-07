@@ -1,5 +1,8 @@
 //! Native reader window, commands, and asynchronous image loading.
 
+mod assets;
+pub use assets::ReaderAssets;
+
 use crate::{
     book::{self, Book, DirectoryListing, EntryKind},
     i18n::{Language, Text},
@@ -9,6 +12,7 @@ use crate::{
     settings::{AppSettings, Background, FitMode, ReadingMode, SidebarMode},
 };
 use gpui_kit::assets::IconName;
+use gpui_kit::base::TestTextExt;
 use gpui_kit::component::{
     ActiveTheme, Disableable, Icon, Selectable, Sizable, WindowExt,
     button::{Button, ButtonVariants},
@@ -19,6 +23,7 @@ use gpui_kit::component::{
     resizable::{ResizableState, h_resizable, resizable_panel},
     scroll::{Scrollbar, ScrollbarMode},
     slider::{Slider, SliderEvent, SliderState},
+    theme::Theme,
 };
 use gpui_kit::{
     App, AppContext, Bounds, Context, Entity, ExternalPaths, FocusHandle, Focusable,
@@ -106,6 +111,28 @@ fn panel_widths(width: f32, left: Option<u32>, right: Option<u32>) -> (f32, f32)
     excess -= reduction;
     left -= excess.min((left - 216.).max(0.));
     (left, right)
+}
+
+const CONTROL_HEIGHT: f32 = 34.;
+const TOOLBAR_HEIGHT: f32 = 59.;
+const MENU_HEIGHT: f32 = 30.;
+const STATUS_HEIGHT: f32 = 47.;
+
+fn background_color(background: Background) -> gpui_kit::Hsla {
+    gpui_kit::rgb(match background {
+        Background::Black => 0x08090b,
+        Background::Gray => 0x303238,
+        Background::Paper => 0xeee8da,
+    })
+    .into()
+}
+
+fn direction_label(language: Language, rtl: bool) -> &'static str {
+    language.text(if rtl {
+        Text::DirectionRtl
+    } else {
+        Text::DirectionLtr
+    })
 }
 
 const PAGE_CACHE_BYTES: usize = 256 * 1024 * 1024;
@@ -550,6 +577,22 @@ impl ReaderView {
     fn update_language(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let language = self.language();
         gpui_kit::component::set_locale(language.component_locale());
+        #[cfg(target_os = "windows")]
+        {
+            // Segoe UI's implicit CJK fallback can select a serif family.
+            // Resolve a language-appropriate UI family, with GPUI's fallback
+            // when the optional Windows language font is not installed.
+            let requested = match language {
+                Language::English => "Segoe UI",
+                Language::Japanese => "Yu Gothic UI",
+                Language::TraditionalChinese => "Microsoft JhengHei UI",
+            };
+            let text = cx.text_system();
+            let family = text
+                .get_font_for_id(text.resolve_font(&gpui_kit::font(requested)))
+                .map_or_else(|| ".SystemUIFont".into(), |font| font.family);
+            Theme::update(cx, |theme| theme.font_family = family);
+        }
         set_native_menus(language, cx);
         self.path_input.update(cx, |input, cx| {
             input.set_placeholder(language.text(Text::FolderPath), window, cx);
@@ -1541,12 +1584,13 @@ impl ReaderView {
         command: Command,
         cx: &mut Context<Self>,
     ) -> Button {
-        self.button(id, label, command, cx)
-            .label("")
+        // An empty label is still a text button in GPUI Kit. Do not add one:
+        // normal text padding and the empty-label gap can clip the icon.
+        self.command_button(id, label, command, cx)
             .icon(icon)
             .tooltip(label)
-            .w(px(34.))
-            .h(px(34.))
+            .w(px(CONTROL_HEIGHT))
+            .h(px(CONTROL_HEIGHT))
     }
 
     fn set_reading_mode(&mut self, mode: ReadingMode, window: &mut Window, cx: &mut Context<Self>) {
@@ -1566,10 +1610,19 @@ impl ReaderView {
         command: Command,
         cx: &mut Context<Self>,
     ) -> Button {
+        self.command_button(id, label, command, cx).label(label)
+    }
+
+    fn command_button(
+        &self,
+        id: &'static str,
+        label: &'static str,
+        command: Command,
+        cx: &mut Context<Self>,
+    ) -> Button {
         Button::new(id)
             .small()
             .ghost()
-            .label(label)
             .accessibility_label(label)
             .on_click(cx.listener(move |this, _, window, cx| {
                 this.perform(command, window, cx);
@@ -1701,7 +1754,7 @@ impl ReaderView {
                         Button::new("zoom-trigger")
                             .small()
                             .outline()
-                            .icon(IconName::FileText)
+                            .h(px(CONTROL_HEIGHT))
                             .label(format!("{mode}  |  {percent}"))
                             .child(Icon::new(IconName::ChevronDown).small())
                             .accessibility_label(language.format(
@@ -2013,8 +2066,10 @@ impl ReaderView {
         let language = self.language();
         let mut menus = div()
             .flex()
+            .items_center()
+            .h(px(MENU_HEIGHT))
             .gap_1()
-            .px_2()
+            .px_3()
             .border_b_1()
             .border_color(cx.theme().border);
         for (group, label) in [
@@ -2051,10 +2106,13 @@ impl ReaderView {
             .role(gpui_kit::Role::TabList)
             .aria_label(language.text(Text::ReadingMode))
             .flex()
+            .flex_none()
             .gap_1()
             .p_1()
             .rounded_md()
-            .bg(cx.theme().muted);
+            .border_1()
+            .border_color(cx.theme().border)
+            .bg(cx.theme().sidebar);
         for (id, mode, text, icon, command) in [
             (
                 "mode-single",
@@ -2080,53 +2138,87 @@ impl ReaderView {
         ] {
             let selected = self.reader.settings.preferences.mode == mode;
             modes = modes.child(
-                self.button(id, language.text(text), command, cx)
+                self.command_button(id, language.text(text), command, cx)
                     .icon(icon)
-                    .label(if compact { "" } else { language.text(text) })
+                    .when(!compact, |button| button.label(language.text(text)))
+                    .when(compact, |button| button.w(px(CONTROL_HEIGHT)))
                     .role(gpui_kit::Role::Tab)
                     .selected(selected)
                     .toggled(selected)
                     .tooltip(language.text(text))
-                    .h(px(34.)),
+                    .h(px(30.))
+                    .when(selected, |button| {
+                        button
+                            .bg(cx.theme().background)
+                            .text_color(cx.theme().primary)
+                            .shadow_xs()
+                    }),
             );
         }
-        let direction = language.text(if self.reader.settings.preferences.rtl {
-            Text::RightToLeft
-        } else {
-            Text::LeftToRight
-        });
+        let direction = direction_label(language, self.reader.settings.preferences.rtl);
         let marked = self.reader.book.as_ref().is_some_and(|book| {
             self.reader.settings.bookmarks.get(&book.path) == Some(&self.reader.current)
         });
+        let left_visible = self.reader.settings.preferences.sidebar;
+        let right_visible = self
+            .reader
+            .settings
+            .preferences
+            .panel_layout
+            .inspector_visible;
+        let border = cx.theme().border;
+        let separator = || div().w(px(1.)).h_6().flex_none().bg(border);
         let toolbar = div()
             .id("reader-toolbar")
             .test_support()
             .role(gpui_kit::Role::Group)
             .flex()
             .items_center()
-            .gap_2()
-            .px_2()
-            .py_2()
-            .child(self.icon_button(
-                "open",
-                language.text(Text::Open),
-                IconName::FolderOpen,
-                Command::OpenFile,
-                cx,
-            ))
+            .h(px(TOOLBAR_HEIGHT))
+            .flex_none()
+            .gap_3()
+            .px_4()
+            .when(compact, |bar| bar.gap_2().px_2())
+            .border_b_1()
+            .border_color(cx.theme().border)
             .child(
-                self.icon_button(
-                    "sidebar-toggle",
-                    language.text(Text::Sidebar),
-                    IconName::PanelLeft,
-                    Command::Sidebar,
-                    cx,
-                )
-                .selected(self.reader.settings.preferences.sidebar)
-                .toggled(self.reader.settings.preferences.sidebar),
+                div()
+                    .flex()
+                    .flex_none()
+                    .items_center()
+                    .gap_1()
+                    .child(
+                        self.icon_button(
+                            "open",
+                            language.text(Text::Open),
+                            IconName::FolderOpen,
+                            Command::OpenFile,
+                            cx,
+                        )
+                        .when(!compact, |button| {
+                            button.w_auto().px_3().label(language.text(Text::Open))
+                        }),
+                    )
+                    .child(
+                        self.icon_button(
+                            "sidebar-toggle",
+                            language.text(Text::Sidebar),
+                            IconName::PanelLeft,
+                            Command::Sidebar,
+                            cx,
+                        )
+                        .selected(left_visible)
+                        .toggled(left_visible)
+                        .when(left_visible, |button| {
+                            button
+                                .bg(cx.theme().primary.opacity(0.1))
+                                .text_color(cx.theme().primary)
+                        }),
+                    ),
             )
+            .child(separator())
             .child(modes)
-            .child(div().w(px(1.)).h_6().bg(cx.theme().border))
+            .child(separator())
             .child(self.render_zoom_control(cx))
             .child(
                 self.icon_button(
@@ -2136,61 +2228,69 @@ impl ReaderView {
                     Command::Direction,
                     cx,
                 )
+                .when(!compact, |button| {
+                    button.w_auto().px_3().child(direction.test_text(direction))
+                })
                 .tooltip(format!(
                     "{}: {direction}",
                     language.text(Text::ReadingDirection)
                 )),
             )
-            .child(div().flex_1())
+            .child(div().flex_1().min_w_0())
             .child(
-                self.icon_button(
-                    "bookmark",
-                    language.text(Text::Bookmark),
-                    IconName::Bookmark,
-                    Command::Bookmark,
-                    cx,
-                )
-                .selected(marked)
-                .toggled(marked)
-                .disabled(!opened),
-            )
-            .child(
-                self.icon_button(
-                    "inspector-toggle",
-                    language.text(Text::ReadingTools),
-                    IconName::SlidersHorizontal,
-                    Command::Inspector,
-                    cx,
-                )
-                .selected(
-                    self.reader
-                        .settings
-                        .preferences
-                        .panel_layout
-                        .inspector_visible,
-                )
-                .toggled(
-                    self.reader
-                        .settings
-                        .preferences
-                        .panel_layout
-                        .inspector_visible,
-                ),
-            )
-            .child(self.icon_button(
-                "fullscreen",
-                language.text(Text::Fullscreen),
-                IconName::Maximize,
-                Command::Fullscreen,
-                cx,
-            ))
-            .child(self.icon_button(
-                "preferences",
-                language.text(Text::Preferences),
-                IconName::Ellipsis,
-                Command::Settings,
-                cx,
-            ));
+                div()
+                    .flex()
+                    .flex_none()
+                    .items_center()
+                    .gap_1()
+                    .child(
+                        self.icon_button(
+                            "bookmark",
+                            language.text(Text::Bookmark),
+                            IconName::Bookmark,
+                            Command::Bookmark,
+                            cx,
+                        )
+                        .selected(marked)
+                        .toggled(marked)
+                        .disabled(!opened)
+                        .when(marked, |button| {
+                            button
+                                .bg(cx.theme().primary.opacity(0.1))
+                                .text_color(cx.theme().primary)
+                        }),
+                    )
+                    .child(
+                        self.icon_button(
+                            "inspector-toggle",
+                            language.text(Text::ReadingTools),
+                            IconName::SlidersHorizontal,
+                            Command::Inspector,
+                            cx,
+                        )
+                        .selected(right_visible)
+                        .toggled(right_visible)
+                        .when(right_visible, |button| {
+                            button
+                                .bg(cx.theme().primary.opacity(0.1))
+                                .text_color(cx.theme().primary)
+                        }),
+                    )
+                    .child(self.icon_button(
+                        "fullscreen",
+                        language.text(Text::Fullscreen),
+                        IconName::Maximize,
+                        Command::Fullscreen,
+                        cx,
+                    ))
+                    .child(self.icon_button(
+                        "preferences",
+                        language.text(Text::Preferences),
+                        IconName::Ellipsis,
+                        Command::Settings,
+                        cx,
+                    )),
+            );
         div()
             .flex()
             .flex_col()
@@ -2208,9 +2308,11 @@ impl ReaderView {
             .role(gpui_kit::Role::TabList)
             .aria_label(language.text(Text::Sidebar))
             .flex()
-            .flex_wrap()
             .gap_1()
-            .p_2()
+            .px_2()
+            .pb_2()
+            .border_b_1()
+            .border_color(cx.theme().border)
             .flex_none();
         for (mode, id, label) in [
             (SidebarMode::Files, "檔案", language.text(Text::File)),
@@ -2226,9 +2328,20 @@ impl ReaderView {
                     .small()
                     .ghost()
                     .label(label)
+                    .tooltip(label)
+                    .flex_1()
+                    .min_w_0()
+                    .h(px(32.))
                     .role(gpui_kit::Role::Tab)
                     .selected(self.reader.settings.preferences.sidebar_mode == mode)
                     .toggled(self.reader.settings.preferences.sidebar_mode == mode)
+                    .when(
+                        self.reader.settings.preferences.sidebar_mode == mode,
+                        |tab| {
+                            tab.bg(cx.theme().primary.opacity(0.1))
+                                .text_color(cx.theme().primary)
+                        },
+                    )
                     .on_click(cx.listener(move |this, _, _, cx| {
                         this.reader.settings.preferences.sidebar_mode = mode;
                         this.dirty = true;
@@ -2279,14 +2392,23 @@ impl ReaderView {
                     recent = recent.child(
                         Button::new(SharedString::from(format!("recent:{}", path.display())))
                             .ghost()
-                            .label(
+                            .accessibility_label(
                                 path.file_name()
                                     .unwrap_or(path.as_os_str())
                                     .to_string_lossy()
                                     .into_owned(),
                             )
+                            .child(
+                                div().w_full().min_w_0().text_left().truncate().child(
+                                    path.file_name()
+                                        .unwrap_or(path.as_os_str())
+                                        .to_string_lossy()
+                                        .into_owned(),
+                                ),
+                            )
                             .tooltip(path.to_string_lossy().into_owned())
                             .w_full()
+                            .h(px(CONTROL_HEIGHT))
                             .on_click(cx.listener(move |this, _, window, cx| {
                                 this.open_path(target.clone(), window, cx)
                             })),
@@ -2317,8 +2439,57 @@ impl ReaderView {
             .bg(cx.theme().sidebar)
             .border_r_1()
             .border_color(cx.theme().border)
+            .child(
+                div()
+                    .id("sidebar-heading")
+                    .test_support()
+                    .flex()
+                    .items_center()
+                    .justify_between()
+                    .gap_2()
+                    .h(px(48.))
+                    .px_4()
+                    .flex_none()
+                    .child(
+                        div()
+                            .min_w_0()
+                            .flex_1()
+                            .truncate()
+                            .font_weight(gpui_kit::FontWeight::SEMIBOLD)
+                            .child(
+                                language
+                                    .text(Text::ContentNavigation)
+                                    .test_text(language.text(Text::ContentNavigation)),
+                            ),
+                    )
+                    .child(
+                        div()
+                            .text_xs()
+                            .text_color(cx.theme().muted_foreground)
+                            .child(language.format(
+                                Text::PageCount,
+                                &[("count", self.page_count().to_string())],
+                            )),
+                    ),
+            )
             .child(tabs)
             .child(content)
+            .when_some(self.reader.book.as_ref(), |sidebar, book| {
+                sidebar.child(
+                    div()
+                        .id("sidebar-book-title")
+                        .test_support()
+                        .border_t_1()
+                        .border_color(cx.theme().border)
+                        .px_4()
+                        .py_3()
+                        .text_xs()
+                        .text_color(cx.theme().muted_foreground)
+                        .flex_none()
+                        .truncate()
+                        .child(book.title.clone()),
+                )
+            })
             .into_any_element()
     }
 
@@ -2364,6 +2535,16 @@ impl ReaderView {
                 .ghost()
                 .w_full()
                 .h(px(180.))
+                .border_1()
+                .rounded_md()
+                .border_color(if selected {
+                    cx.theme().primary.opacity(0.25)
+                } else {
+                    cx.theme().transparent
+                })
+                .when(selected, |button| {
+                    button.bg(cx.theme().primary.opacity(0.1))
+                })
                 .selected(selected)
                 .toggled(selected)
                 .tooltip(page.name.clone())
@@ -2402,7 +2583,15 @@ impl ReaderView {
                                         .id(("thumbnail-page", index))
                                         .test_support()
                                         .aria_label((index + 1).to_string())
-                                        .child((index + 1).to_string()),
+                                        .text_size(px(13.))
+                                        .font_weight(gpui_kit::FontWeight::SEMIBOLD)
+                                        .when(selected, |label| {
+                                            label.text_color(cx.theme().primary)
+                                        })
+                                        .child(language.format(
+                                            Text::PageLabel,
+                                            &[("page", (index + 1).to_string())],
+                                        )),
                                 )
                                 .child(
                                     div()
@@ -2412,6 +2601,7 @@ impl ReaderView {
                                         .w_full()
                                         .truncate()
                                         .text_xs()
+                                        .text_color(cx.theme().muted_foreground)
                                         .child(page.name.clone()),
                                 ),
                         ),
@@ -2535,82 +2725,50 @@ impl ReaderView {
             .into_any_element()
     }
 
-    fn render_inspector(&self, cx: &mut Context<Self>) -> gpui_kit::AnyElement {
+    fn render_image_tools(&self, cx: &mut Context<Self>) -> gpui_kit::AnyElement {
         let language = self.language();
-        let mut tabs = div()
-            .flex()
-            .flex_wrap()
-            .gap_1()
-            .p_2()
-            .flex_none()
-            .id("inspector-tabs")
-            .test_support()
-            .role(gpui_kit::Role::TabList)
-            .aria_label(language.text(Text::ReadingTools));
-        for (id, tab, text) in [
-            ("inspector-image", InspectorTab::Image, Text::ImageTab),
-            ("inspector-reading", InspectorTab::Reading, Text::ReadingTab),
-            (
-                "inspector-playback",
-                InspectorTab::Playback,
-                Text::PlaybackTab,
-            ),
+        let mut content = div().flex().flex_col().gap_6().flex_none();
+        content = content.child(
+            div()
+                .text_xs()
+                .text_color(cx.theme().muted_foreground)
+                .child(language.text(Text::ImageAdjustments)),
+        );
+        for (index, text, value) in [
+            (0, Text::Brightness, self.reader.filters.brightness),
+            (1, Text::Contrast, self.reader.filters.contrast),
+            (2, Text::Grayscale, self.reader.filters.grayscale),
         ] {
-            let selected = self.inspector_tab == tab;
-            tabs = tabs.child(
-                Button::new(id)
-                    .small()
-                    .ghost()
-                    .label(language.text(text))
-                    .role(gpui_kit::Role::Tab)
-                    .selected(selected)
-                    .toggled(selected)
-                    .on_click(cx.listener(move |this, _, window, cx| {
-                        this.commit_focused_interval(window, cx);
-                        this.inspector_tab = tab;
-                        this.focus.focus(window, cx);
-                        cx.notify();
-                    })),
-            );
-        }
-        let prefs = &self.reader.settings.preferences;
-        let mut content = div()
-            .id("inspector-content")
-            .test_support()
-            .role(gpui_kit::Role::Group)
-            .flex()
-            .flex_col()
-            .gap_4()
-            .p_3()
-            .flex_1()
-            .min_h_0()
-            .overflow_y_scroll();
-        match self.inspector_tab {
-            InspectorTab::Image => {
-                for (index, text, value) in [
-                    (0, Text::Brightness, self.reader.filters.brightness),
-                    (1, Text::Contrast, self.reader.filters.contrast),
-                    (2, Text::Grayscale, self.reader.filters.grayscale),
-                ] {
-                    content = content.child(
+            content = content.child(
+                div()
+                    .flex()
+                    .flex_col()
+                    .gap_3()
+                    .child(
                         div()
                             .flex()
-                            .flex_col()
-                            .gap_3()
+                            .justify_between()
+                            .child(language.text(text))
                             .child(
                                 div()
-                                    .flex()
-                                    .justify_between()
-                                    .child(language.text(text))
+                                    .text_xs()
+                                    .text_color(cx.theme().muted_foreground)
                                     .child(format!("{value:.0}%")),
-                            )
-                            .child(
-                                Slider::new(&self.filter_sliders[index])
-                                    .accessibility_label(language.text(text)),
                             ),
-                    );
-                }
-                content = content
+                    )
+                    .child(
+                        Slider::new(&self.filter_sliders[index])
+                            .accessibility_label(language.text(text)),
+                    ),
+            );
+        }
+        content = content
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .justify_between()
+                    .child(language.text(Text::Rotation))
                     .child(
                         div()
                             .flex()
@@ -2635,133 +2793,284 @@ impl ReaderView {
                                 )
                                 .tooltip(language.text(Text::RotateRightTip)),
                             ),
-                    )
+                    ),
+            )
+            .child(
+                self.button(
+                    "reset-filters",
+                    language.text(Text::ResetFilters),
+                    Command::ResetFilters,
+                    cx,
+                )
+                .outline()
+                .border_color(cx.theme().border)
+                .icon(IconName::RotateCcw)
+                .h(px(CONTROL_HEIGHT))
+                .w_full(),
+            )
+            .child(
+                div()
+                    .text_xs()
+                    .text_color(cx.theme().muted_foreground)
                     .child(
-                        self.button(
-                            "reset-filters",
-                            language.text(Text::ResetFilters),
-                            Command::ResetFilters,
-                            cx,
-                        )
-                        .outline()
-                        .w_full(),
-                    );
-            }
-            InspectorTab::Reading => {
-                content = content
+                        language
+                            .text(Text::FiltersScope)
+                            .test_text(language.text(Text::FiltersScope)),
+                    ),
+            );
+        content.into_any_element()
+    }
+
+    fn render_reading_preferences(&self, cx: &mut Context<Self>) -> gpui_kit::AnyElement {
+        let language = self.language();
+        let prefs = &self.reader.settings.preferences;
+        let mut content = div().flex().flex_col().gap_6().flex_none();
+        content = content
+            .child(
+                Checkbox::new("remember-position")
+                    .label(language.text(Text::RememberPosition))
+                    .checked(prefs.remember_position)
+                    .on_change(cx.listener(|this, value, _, cx| {
+                        this.reader.settings.preferences.remember_position = *value;
+                        this.dirty = true;
+                        cx.notify();
+                    })),
+            )
+            .child(
+                div()
+                    .flex()
+                    .flex_col()
+                    .gap_2()
+                    .child(language.text(Text::ReadingDirection))
                     .child(
-                        Checkbox::new("remember-position")
-                            .label(language.text(Text::RememberPosition))
-                            .checked(prefs.remember_position)
-                            .on_change(cx.listener(|this, value, _, cx| {
-                                this.reader.settings.preferences.remember_position = *value;
-                                this.dirty = true;
-                                cx.notify();
-                            })),
-                    )
-                    .child(
-                        self.button(
+                        self.command_button(
                             "reading-direction",
                             language.text(Text::ReadingDirection),
                             Command::Direction,
                             cx,
                         )
+                        .child(
+                            direction_label(language, prefs.rtl)
+                                .test_text(direction_label(language, prefs.rtl)),
+                        )
+                        .icon(IconName::ArrowLeftRight)
+                        .outline()
+                        .border_color(cx.theme().border)
+                        .h(px(CONTROL_HEIGHT))
+                        .w_full()
                         .tooltip(language.text(if prefs.rtl {
                             Text::RightToLeft
                         } else {
                             Text::LeftToRight
                         })),
-                    )
-                    .child(language.text(Text::ReadingBackground));
-                let mut backgrounds = div().flex().flex_wrap().gap_1();
-                for (background, id, text) in [
-                    (Background::Black, "黑色", Text::Black),
-                    (Background::Gray, "深灰", Text::Gray),
-                    (Background::Paper, "紙色", Text::Paper),
-                ] {
-                    backgrounds = backgrounds.child(
-                        Button::new(id)
-                            .small()
-                            .ghost()
-                            .label(language.text(text))
-                            .selected(prefs.background == background)
-                            .toggled(prefs.background == background)
-                            .on_click(cx.listener(move |this, _, _, cx| {
-                                this.reader.settings.preferences.background = background;
-                                this.dirty = true;
-                                cx.notify();
-                            })),
-                    );
-                }
-                content = content
-                    .child(backgrounds)
+                    ),
+            )
+            .child(language.text(Text::ReadingBackground));
+        let mut backgrounds = div().flex().gap_2();
+        for (background, id, text) in [
+            (Background::Black, "黑色", Text::Black),
+            (Background::Gray, "深灰", Text::Gray),
+            (Background::Paper, "紙色", Text::Paper),
+        ] {
+            backgrounds = backgrounds.child(
+                Button::new(id)
+                    .small()
+                    .ghost()
+                    .accessibility_label(language.text(text))
+                    .tooltip(language.text(text))
+                    .flex_1()
+                    .min_w_0()
+                    .h_auto()
+                    .py_2()
                     .child(
                         div()
-                            .border_t_1()
-                            .border_color(cx.theme().border)
-                            .pt_3()
-                            .child(language.text(Text::GeneralSettings)),
+                            .flex()
+                            .flex_col()
+                            .gap_2()
+                            .items_center()
+                            .w_full()
+                            .min_w_0()
+                            .child(
+                                div()
+                                    .w_full()
+                                    .h(px(24.))
+                                    .rounded_sm()
+                                    .bg(background_color(background))
+                                    .border_1()
+                                    .border_color(cx.theme().border),
+                            )
+                            .child(div().text_xs().child(language.text(text))),
                     )
-                    .child(language.text(Text::Language));
-                let mut languages = div().flex().flex_wrap().gap_1();
-                for choice in Language::ALL {
-                    languages = languages.child(
-                        Button::new(SharedString::from(format!("language-{}", choice.code())))
-                            .small()
-                            .ghost()
-                            .label(choice.native_name())
-                            .accessibility_label(choice.native_name())
-                            .selected(language == choice)
-                            .toggled(language == choice)
-                            .on_click(cx.listener(move |this, _, window, cx| {
-                                this.set_language(choice, window, cx)
-                            })),
-                    );
-                }
-                content = content
-                    .child(languages)
-                    .child(div().text_xs().child(language.text(Text::SettingsTip)));
-                if let Some(error) = &self.save_error {
-                    content = content
-                        .child(div().text_xs().text_color(cx.theme().danger).child(
-                            language.format(Text::SettingsError, &[("error", error.clone())]),
-                        ))
-                        .child(
-                            Button::new("reset-corrupt-settings")
-                                .small()
-                                .label(language.text(Text::BackupReset))
-                                .on_click(cx.listener(|this, _, window, cx| {
-                                    this.reset_corrupt_settings(window, cx)
-                                })),
-                        );
-                }
-            }
-            InspectorTab::Playback => {
-                content = content
-                    .child(
-                        self.button(
-                            "slideshow",
-                            language.text(if self.reader.slideshow {
-                                Text::Stop
-                            } else {
-                                Text::Slideshow
-                            }),
-                            Command::Slideshow,
-                            cx,
-                        )
-                        .selected(self.reader.slideshow)
-                        .toggled(self.reader.slideshow)
-                        .disabled(self.reader.book.is_none()),
-                    )
-                    .child(language.text(Text::IntervalLabel))
-                    .child(
-                        Input::new(&self.interval_input)
-                            .id("interval-input")
-                            .aria_label(language.text(Text::SlideshowInterval))
-                            .small(),
-                    );
-            }
+                    .selected(prefs.background == background)
+                    .toggled(prefs.background == background)
+                    .when(prefs.background == background, |button| {
+                        button
+                            .bg(cx.theme().primary.opacity(0.1))
+                            .text_color(cx.theme().primary)
+                    })
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        this.reader.settings.preferences.background = background;
+                        this.dirty = true;
+                        cx.notify();
+                    })),
+            );
         }
+        content = content
+            .child(backgrounds)
+            .child(
+                div()
+                    .border_t_1()
+                    .border_color(cx.theme().border)
+                    .pt_4()
+                    .font_weight(gpui_kit::FontWeight::SEMIBOLD)
+                    .child(language.text(Text::GeneralSettings)),
+            )
+            .child(language.text(Text::Language));
+        let mut languages = div().flex().flex_wrap().gap_1();
+        for choice in Language::ALL {
+            languages = languages.child(
+                Button::new(SharedString::from(format!("language-{}", choice.code())))
+                    .small()
+                    .ghost()
+                    .label(choice.native_name())
+                    .accessibility_label(choice.native_name())
+                    .selected(language == choice)
+                    .toggled(language == choice)
+                    .when(language == choice, |button| {
+                        button
+                            .bg(cx.theme().primary.opacity(0.1))
+                            .text_color(cx.theme().primary)
+                    })
+                    .on_click(cx.listener(move |this, _, window, cx| {
+                        this.set_language(choice, window, cx)
+                    })),
+            );
+        }
+        content = content
+            .child(languages)
+            .child(div().text_xs().child(language.text(Text::SettingsTip)));
+        if let Some(error) = &self.save_error {
+            content = content
+                .child(
+                    div()
+                        .text_xs()
+                        .text_color(cx.theme().danger)
+                        .child(language.format(Text::SettingsError, &[("error", error.clone())])),
+                )
+                .child(
+                    Button::new("reset-corrupt-settings")
+                        .small()
+                        .label(language.text(Text::BackupReset))
+                        .on_click(cx.listener(|this, _, window, cx| {
+                            this.reset_corrupt_settings(window, cx)
+                        })),
+                );
+        }
+        content.into_any_element()
+    }
+
+    fn render_playback_tools(&self, cx: &mut Context<Self>) -> gpui_kit::AnyElement {
+        let language = self.language();
+        let mut content = div().flex().flex_col().gap_6().flex_none();
+        content = content
+            .child(
+                self.button(
+                    "slideshow",
+                    language.text(if self.reader.slideshow {
+                        Text::Stop
+                    } else {
+                        Text::Slideshow
+                    }),
+                    Command::Slideshow,
+                    cx,
+                )
+                .selected(self.reader.slideshow)
+                .toggled(self.reader.slideshow)
+                .disabled(self.reader.book.is_none()),
+            )
+            .child(language.text(Text::IntervalLabel))
+            .child(
+                Input::new(&self.interval_input)
+                    .id("interval-input")
+                    .aria_label(language.text(Text::SlideshowInterval))
+                    .small(),
+            );
+        content.into_any_element()
+    }
+
+    fn render_inspector(&self, cx: &mut Context<Self>) -> gpui_kit::AnyElement {
+        let language = self.language();
+        let mut tabs = div()
+            .flex()
+            .gap_4()
+            .px_4()
+            .border_b_1()
+            .border_color(cx.theme().border)
+            .flex_none()
+            .id("inspector-tabs")
+            .test_support()
+            .role(gpui_kit::Role::TabList)
+            .aria_label(language.text(Text::ReadingTools));
+        for (id, tab, text) in [
+            ("inspector-image", InspectorTab::Image, Text::ImageTab),
+            ("inspector-reading", InspectorTab::Reading, Text::ReadingTab),
+            (
+                "inspector-playback",
+                InspectorTab::Playback,
+                Text::PlaybackTab,
+            ),
+        ] {
+            let selected = self.inspector_tab == tab;
+            tabs = tabs.child(
+                Button::new(id)
+                    .small()
+                    .ghost()
+                    .label(language.text(text))
+                    .tooltip(language.text(text))
+                    .flex_1()
+                    .min_w_0()
+                    .h(px(40.))
+                    .px_1()
+                    .rounded_none()
+                    .border_b_2()
+                    .border_color(if selected {
+                        cx.theme().primary
+                    } else {
+                        cx.theme().transparent
+                    })
+                    .bg(cx.theme().transparent)
+                    .text_color(if selected {
+                        cx.theme().primary
+                    } else {
+                        cx.theme().muted_foreground
+                    })
+                    .role(gpui_kit::Role::Tab)
+                    .selected(selected)
+                    .toggled(selected)
+                    .on_click(cx.listener(move |this, _, window, cx| {
+                        this.commit_focused_interval(window, cx);
+                        this.inspector_tab = tab;
+                        this.focus.focus(window, cx);
+                        cx.notify();
+                    })),
+            );
+        }
+        let content = div()
+            .id("inspector-content")
+            .test_support()
+            .role(gpui_kit::Role::Group)
+            .flex()
+            .flex_col()
+            .gap_6()
+            .p_5()
+            .flex_1()
+            .min_h_0()
+            .overflow_y_scroll()
+            .child(match self.inspector_tab {
+                InspectorTab::Image => self.render_image_tools(cx),
+                InspectorTab::Reading => self.render_reading_preferences(cx),
+                InspectorTab::Playback => self.render_playback_tools(cx),
+            });
         div()
             .id("inspector")
             .test_support()
@@ -2778,19 +3087,39 @@ impl ReaderView {
                     .flex()
                     .items_center()
                     .justify_between()
-                    .p_3()
+                    .h(px(57.))
+                    .px_4()
                     .flex_none()
-                    .child(language.text(Text::ReadingTools))
-                    .child(self.icon_button(
-                        "hide-inspector",
-                        language.text(Text::HideInspector),
-                        IconName::X,
-                        Command::Inspector,
-                        cx,
-                    )),
+                    .child(
+                        div()
+                            .font_weight(gpui_kit::FontWeight::SEMIBOLD)
+                            .child(language.text(Text::ReadingTools)),
+                    )
+                    .child(
+                        self.icon_button(
+                            "hide-inspector",
+                            language.text(Text::HideInspector),
+                            IconName::X,
+                            Command::Inspector,
+                            cx,
+                        )
+                        .bg(cx.theme().primary.opacity(0.1))
+                        .text_color(cx.theme().primary),
+                    ),
             )
             .child(tabs)
             .child(content)
+            .child(
+                div()
+                    .border_t_1()
+                    .border_color(cx.theme().border)
+                    .px_5()
+                    .py_3()
+                    .flex_none()
+                    .text_xs()
+                    .text_color(cx.theme().muted_foreground)
+                    .child(language.text(Text::SourceUnchanged)),
+            )
             .into_any_element()
     }
 
@@ -2825,11 +3154,7 @@ impl ReaderView {
         let language = self.language();
         self.visible.borrow_mut().clear();
         // These colors are document-background preferences, not UI chrome colors.
-        let background = match self.reader.settings.preferences.background {
-            Background::Black => gpui_kit::rgb(0x08090b),
-            Background::Gray => gpui_kit::rgb(0x303238),
-            Background::Paper => gpui_kit::rgb(0xeee8da),
-        };
+        let background = background_color(self.reader.settings.preferences.background);
         let content = if self.reader.book.is_none() {
             div()
                 .size_full()
@@ -2935,7 +3260,7 @@ impl ReaderView {
                 .sum::<f32>();
             let mut pages = div()
                 .flex()
-                .items_start()
+                .items_center()
                 .justify_center()
                 .w(px(content_width.max(f32::from(self.viewer_size.width))))
                 .min_h_full();
@@ -3154,6 +3479,8 @@ impl ReaderView {
                     .small()
                     .ghost()
                     .icon(IconName::Info)
+                    .w(px(CONTROL_HEIGHT))
+                    .h(px(CONTROL_HEIGHT))
                     .accessibility_label(language.text(Text::PageInformation))
                     .tooltip(language.text(Text::PageInformation))
                     .disabled(!opened),
@@ -3192,55 +3519,64 @@ impl ReaderView {
                 div()
                     .flex()
                     .items_center()
-                    .gap_2()
-                    .px_3()
-                    .py_1()
+                    .gap_3()
+                    .px_4()
+                    .h(px(STATUS_HEIGHT))
                     .child(message)
                     .child(
-                        self.icon_button(
-                            "previous",
-                            language.text(Text::PreviousPage),
-                            IconName::ChevronLeft,
-                            Command::Previous,
-                            cx,
-                        )
-                        .disabled(!opened || self.reader.current == 0),
-                    )
-                    .child(
-                        Input::new(&self.page_input)
-                            .id("page-input")
-                            .aria_label(language.text(Text::PageNumber))
-                            .small()
-                            .w_12()
-                            .disabled(!opened),
-                    )
-                    .child(format!("/ {count}"))
-                    .child(
-                        self.icon_button(
-                            "next",
-                            language.text(Text::NextPage),
-                            IconName::ChevronRight,
-                            Command::Next,
-                            cx,
-                        )
-                        .disabled(!opened || self.reader.current + 1 >= count),
-                    )
-                    .child(
-                        div().w_24().px_1().child(
-                            Slider::new(&self.page_slider)
-                                .disabled(!opened)
-                                .accessibility_label(language.text(Text::PagePosition)),
-                        ),
-                    )
-                    .child(
                         div()
-                            .id("reading-progress")
+                            .id("status-navigation")
                             .test_support()
-                            .aria_label(progress.clone())
-                            .text_xs()
-                            .child(progress),
+                            .flex()
+                            .flex_none()
+                            .items_center()
+                            .gap_2()
+                            .child(
+                                self.icon_button(
+                                    "previous",
+                                    language.text(Text::PreviousPage),
+                                    IconName::ChevronLeft,
+                                    Command::Previous,
+                                    cx,
+                                )
+                                .disabled(!opened || self.reader.current == 0),
+                            )
+                            .child(
+                                Input::new(&self.page_input)
+                                    .id("page-input")
+                                    .aria_label(language.text(Text::PageNumber))
+                                    .small()
+                                    .w_12()
+                                    .disabled(!opened),
+                            )
+                            .child(format!("/ {count}"))
+                            .child(
+                                self.icon_button(
+                                    "next",
+                                    language.text(Text::NextPage),
+                                    IconName::ChevronRight,
+                                    Command::Next,
+                                    cx,
+                                )
+                                .disabled(!opened || self.reader.current + 1 >= count),
+                            )
+                            .child(
+                                div().w(px(145.)).px_1().child(
+                                    Slider::new(&self.page_slider)
+                                        .disabled(!opened)
+                                        .accessibility_label(language.text(Text::PagePosition)),
+                                ),
+                            )
+                            .child(
+                                div()
+                                    .id("reading-progress")
+                                    .test_support()
+                                    .aria_label(progress.clone())
+                                    .text_xs()
+                                    .child(progress),
+                            ),
                     )
-                    .child(div().flex().flex_1().justify_end().child(info)),
+                    .child(div().flex().flex_1().min_w_0().justify_end().child(info)),
             )
             .when(self.message_error, |bar| {
                 bar.child(
@@ -3292,8 +3628,8 @@ impl Render for ReaderView {
             .flex_col()
             .bg(cx.theme().background)
             .text_color(cx.theme().foreground)
-            .text_sm()
-            .child(self.render_chrome(window.viewport_size().width < px(1000.), cx))
+            .text_size(px(13.))
+            .child(self.render_chrome(window.viewport_size().width < px(1200.), cx))
             .child(workspace)
             .child(self.render_status(cx))
             .when(
@@ -3379,6 +3715,25 @@ fn save_snapshot(
 
 pub fn init(cx: &mut App) {
     gpui_kit::init(cx);
+    Theme::update(cx, |theme| {
+        let accent = gpui_kit::rgb(0x376bc5).into();
+        theme.primary = accent;
+        theme.ring = accent;
+        theme.slider_bar = accent;
+        theme.slider_thumb = accent;
+        if !theme.is_dark() {
+            theme.background = gpui_kit::rgb(0xffffff).into();
+            theme.foreground = gpui_kit::rgb(0x344054).into();
+            theme.muted_foreground = gpui_kit::rgb(0x667085).into();
+            theme.sidebar = gpui_kit::rgb(0xfbfcfe).into();
+            theme.border = gpui_kit::rgb(0xe1e5eb).into();
+        }
+        #[cfg(target_os = "windows")]
+        {
+            // Use the installed Windows UI family. CJK uses the native fallback.
+            theme.font_family = "Segoe UI".into();
+        }
+    });
     bind_commands(cx);
 }
 
@@ -3513,7 +3868,7 @@ pub fn run() -> anyhow::Result<()> {
         Err(error) => (AppSettings::default(), Some(error)),
     };
     let (sender, launches) = mpsc::channel();
-    let application = gpui_kit::application().with_assets(gpui_kit::assets::Assets);
+    let application = gpui_kit::application().with_assets(ReaderAssets);
     application.on_open_urls(move |urls| {
         let paths = urls
             .into_iter()
