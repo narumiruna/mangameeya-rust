@@ -5,3 +5,5 @@ __pycache__/
 **/mutants.out*/
 /data/
 .DS_Store
+
+docs/ui-concepts/
