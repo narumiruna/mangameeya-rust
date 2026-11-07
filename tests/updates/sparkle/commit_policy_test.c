@@ -1,6 +1,10 @@
 // Executes the production policy. POSIX process tests are supplemental:
 // they do not replace authenticated Sparkle XPC or GPUI integration tests.
+#if defined(__APPLE__)
+#define _DARWIN_C_SOURCE 1
+#else
 #define _POSIX_C_SOURCE 200809L
+#endif
 #include "SPUInstallationCommitState.h"
 #include <assert.h>
 #include <fcntl.h>
