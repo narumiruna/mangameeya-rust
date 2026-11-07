@@ -1,3 +1,9 @@
+## 0.4.2
+
+### Patch Changes
+
+- Restore native release package uploads when no personal access token is configured.
+
 ## 0.4.1
 
 ### Patch Changes
