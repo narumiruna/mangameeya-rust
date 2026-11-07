@@ -115,3 +115,98 @@ All platforms run `cargo test --locked --test rendering` against the production 
 with the native text system. macOS also uses the Metal renderer and uploads
 `target/ui-smoke/*.png` as separate artifacts, including screenshots available after
 a failed test.
+
+The workflow also accepts `workflow_call` with an exact `revision`. Both the release
+checks and native matrix check out that commit. The Ubuntu release checks validate
+workflow syntax, pending notes, version/lockfile changes, and asset-upload recovery.
+They do not publish tags or Releases.
+
+## Release workflow
+
+`.github/workflows/release.yml` uses changenote v0.10.0, pinned to
+`f4423760122463bf03a8d161c6f0bc4173afb6e0`. Its package configuration reads the root
+`Cargo.toml`; normal changes do not edit the application version directly. Add a
+pending note as described in [the note guide](../.changenote/README.md).
+
+```mermaid
+flowchart TD
+    Push[Push to main] --> PR[Manage release PR from pending notes]
+    Push --> Select[Select an incomplete validated release batch]
+    Merge[Owner reviews and merges release PR] --> Push
+    Select --> CI[Check exact commit on Windows and both macOS architectures]
+    CI --> Publish[Publish guarded tag and GitHub Release]
+    Publish --> Upload[Upload the five native packages]
+```
+
+On an ordinary push to `main`, PR management and read-only selection run independently.
+PR management updates `Cargo.toml`, `Cargo.lock`, `CHANGELOG.md`, the saved release
+batch, and consumed notes on a managed branch. It never merges its PR. No saved batch,
+or a fully published batch, selects no work. Pending notes alone do not publish a
+release. Review and merge the generated PR to make its batch available for selection.
+
+Publication waits for all checks and native packages for the selected commit.
+Changenote verifies the generated release tree and receives that exact commit through
+`expected-release-commit`. If a newer batch replaces it before publication, the run
+fails rather than publishing another commit. Release text comes from the validated
+changelog. Tags and existing release text are not replaced. All required publication
+steps stay in this workflow because tags created with `GITHUB_TOKEN` do not trigger
+other workflows.
+
+The asset job downloads only the three native-package artifacts from the same run,
+not the UI captures. It verifies the tag's commit and all five nonempty files before
+uploading:
+
+- One Windows x64 NSIS installer.
+- A ZIP and DMG for macOS arm64.
+- A ZIP and DMG for macOS x86_64.
+
+Existing uploaded, nonempty assets are retained by name, not overwritten or compared
+byte-for-byte. An empty or unfinished existing upload stops the job before any more
+uploads; inspect and remove that failed asset manually before retrying. Only missing
+files are uploaded. Inspect an incorrect existing asset manually;
+automation does not replace it. API errors stop the job instead of being treated as
+missing Releases. These assets remain unsigned on Windows and ad-hoc signed, without
+notarization, on macOS. This workflow does not provide trusted signing credentials
+or bypass platform download warnings.
+
+### Required repository setting
+
+A repository administrator must enable **Settings > Actions > General > Workflow
+permissions > Allow GitHub Actions to create and approve pull requests**. The setting
+was disabled when this integration was prepared. Branch rules must also allow the
+managed release branch. The workflow gives only PR management `pull-requests: write`;
+selection and native builds use read access, while publication and asset upload need
+`contents: write`. No personal token is required by the configured flow.
+
+PRs created with the default `GITHUB_TOKEN` do not start PR workflows automatically.
+The release flow still runs exact-commit native checks before publication. If branch
+rules require checks on the managed PR before merge, run **Native checks and packages**
+manually on that PR branch, or have the repository owner configure an appropriate
+GitHub App token. This integration does not change branch rules or create secrets.
+
+### Manual operation and recovery
+
+Run **Release** from the Actions tab on `main`:
+
+1. `manage-pr` creates or updates the release PR. It cannot publish.
+2. `retry-publication` selects the latest saved batch, including a completed GitHub
+   Release, reruns its exact-commit checks, and retries publication and missing assets.
+   - Use it after a partial upload, failed build, cancellation, or network error.
+   - It does not require another version bump and does not run PR management.
+   - It cannot recover an older batch after a newer batch replaces it. Finish the
+     current release before merging the next release PR.
+
+Disabling the Release workflow stops automation; unmerged release PRs do not change
+`main`. Do not move tags or edit committed batch data for recovery. Inspect conflicts
+and repository state before another attempt.
+
+Local fixture tests use mocked GitHub commands and isolated Cargo files:
+
+```sh
+CHANGENOTE_BIN=changenote uv run --no-project python -m unittest discover -s tests/release -v
+```
+
+Install the pinned CLI and run `cargo fetch --locked` first to populate the offline
+Cargo cache. These checks do not create remote tags, Releases, or PRs. Hosted publication,
+Actions permissions, and download behavior are verified only by an authorized real
+release; enabling this integration does not itself prove them.

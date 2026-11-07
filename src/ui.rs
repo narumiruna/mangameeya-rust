@@ -949,7 +949,7 @@ impl ReaderView {
             About => window.open_dialog(cx, |dialog, _, _| {
                 dialog
                     .title("關於 MangaMeeya Rust")
-                    .child("MangaMeeya Rust 0.2.0")
+                    .child(concat!("MangaMeeya Rust ", env!("CARGO_PKG_VERSION")))
                     .child("Rust · GPUI Kit · Windows / macOS")
                     .child("離線閱讀圖片資料夾、ZIP/CBZ 與 RAR/CBR。原始漫畫不會被修改。")
                     .child("AGPL-3.0-only")

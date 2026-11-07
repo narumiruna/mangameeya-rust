@@ -131,6 +131,10 @@ Windows job 另以 silent install／uninstall 測試全部 11 個檔案關聯及
 請以實際 workflow 結果判定各平台的安裝測試狀態；本機 cross-check 不等於 Windows 執行或安裝驗證。
 完整驗證記錄與尚未執行的平台檢查見 [驗證記錄](docs/verification.md)。
 
+版本發布使用 [changenote](https://github.com/narumiruna/changenote) 與 `.github/workflows/release.yml`。
+合併變更前加入 [release note](.changenote/README.md)；合併產生的 Release PR 後，工作流程會驗證指定 commit、建立 GitHub Release，並附上三平台安裝套件。
+啟用前需允許 Actions 建立 PR；操作、重試及簽署限制見 [發布流程](packaging/README.md#release-workflow)。
+
 ## 結構
 
 - `src/book.rs`：圖片、資料夾、ZIP／RAR、目錄瀏覽與安全匯出。
