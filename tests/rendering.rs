@@ -292,8 +292,301 @@ fn capture_language_states(cx: &mut HeadlessAppContext, window: AnyWindowHandle)
     }
     // Retain the Traditional Chinese baseline for the existing workflow.
     cx.update_window(window, |_, window, cx| {
-        window.click("preferences", cx);
+        window.click("inspector-image", cx);
         assert_zoom_closed(window, "縮放設定，適合視窗，100%");
+    })
+    .unwrap();
+    settle(cx, window);
+}
+
+fn assert_desktop_geometry(window: &Window, language: Language) {
+    let viewport = Bounds::new(Default::default(), window.viewport_size());
+    let inside = |inner: Bounds<_>, outer: Bounds<_>| {
+        assert!(
+            inner.left() >= outer.left() - px(0.5)
+                && inner.top() >= outer.top() - px(0.5)
+                && inner.right() <= outer.right() + px(0.5)
+                && inner.bottom() <= outer.bottom() + px(0.5),
+            "desktop bounds must stay inside their owner: {inner:?}, {outer:?}"
+        );
+    };
+    let disjoint = |a: Bounds<_>, b: Bounds<_>| {
+        assert!(
+            a.right() <= b.left() + px(0.5)
+                || b.right() <= a.left() + px(0.5)
+                || a.bottom() <= b.top() + px(0.5)
+                || b.bottom() <= a.top() + px(0.5),
+            "desktop controls overlap: {a:?}, {b:?}"
+        );
+    };
+    let viewer = window.find("viewer").bounds();
+    assert!(
+        viewer.size.width >= px(280.),
+        "reader must keep 280 logical pixels: {viewer:?}"
+    );
+    inside(viewer, viewport);
+    for (owner, ids) in [
+        (
+            "reader-toolbar",
+            &[
+                "open",
+                "sidebar-toggle",
+                "mode-single",
+                "mode-spread",
+                "mode-continuous",
+                "zoom-trigger",
+                "direction",
+                "bookmark",
+                "inspector-toggle",
+                "fullscreen",
+                "preferences",
+            ][..],
+        ),
+        (
+            "reader-status",
+            &[
+                "previous",
+                "page-input",
+                "next",
+                "reading-progress",
+                "info-trigger",
+            ][..],
+        ),
+    ] {
+        let bounds = window.find(owner).bounds();
+        inside(bounds, viewport);
+        disjoint(bounds, viewer);
+        for (index, id) in ids.iter().enumerate() {
+            let button = window.find(*id);
+            assert!(button.visible(), "{id}");
+            inside(button.bounds(), bounds);
+            for other in &ids[index + 1..] {
+                disjoint(button.bounds(), window.find(*other).bounds());
+            }
+        }
+    }
+    if let Some(sidebar) = window.try_find("sidebar") {
+        inside(sidebar.bounds(), viewport);
+        disjoint(sidebar.bounds(), viewer);
+        assert_sidebar_tabs_in_bounds(window, language);
+    }
+    if let Some(inspector) = window.try_find("inspector") {
+        inside(inspector.bounds(), viewport);
+        disjoint(inspector.bounds(), viewer);
+        let tabs = ["inspector-image", "inspector-reading", "inspector-playback"];
+        for (index, id) in tabs.iter().enumerate() {
+            inside(window.find(*id).bounds(), inspector.bounds());
+            for other in &tabs[index + 1..] {
+                disjoint(window.find(*id).bounds(), window.find(*other).bounds());
+            }
+        }
+    }
+    for index in 0..7usize {
+        let menu = window.find(("menu", index)).bounds();
+        inside(menu, viewport);
+        for other in index + 1..7 {
+            disjoint(menu, window.find(("menu", other)).bounds());
+        }
+    }
+}
+
+fn assert_info_in_viewport(window: &Window) {
+    let panel = window.find("info-panel");
+    assert!(panel.visible());
+    let bounds = panel.bounds();
+    let viewport = window.viewport_size();
+    assert!(bounds.size.width > px(0.) && bounds.size.height > px(0.));
+    assert!(
+        bounds.left() >= px(0.)
+            && bounds.top() >= px(0.)
+            && bounds.right() <= viewport.width
+            && bounds.bottom() <= viewport.height
+    );
+    assert_eq!(window.find("info-name").label(), Some("1.png"));
+    assert_eq!(window.find("info-dimensions").label(), Some("320×480"));
+    assert!(window.find("info-size").label().unwrap().ends_with(" KiB"));
+}
+
+fn capture_desktop_states(
+    cx: &mut HeadlessAppContext,
+    window: AnyWindowHandle,
+    sender: &mpsc::Sender<Vec<PathBuf>>,
+    folder: &std::path::Path,
+) {
+    for (language, language_id) in [
+        (Language::English, "language-en"),
+        (Language::Japanese, "language-ja"),
+        (Language::TraditionalChinese, "language-zh-Hant"),
+    ] {
+        cx.update_window(window, |_, window, cx| {
+            window.click("preferences", cx);
+            window.click(language_id, cx);
+        })
+        .unwrap();
+        for (width, height, suffix) in [
+            (1280., 800., "1280x800"),
+            (960., 640., "960x640"),
+            (800., 540., "800x540"),
+        ] {
+            cx.update_window(window, |_, window, cx| {
+                window.resize(size(px(width), px(height)));
+                window.bounds_changed(cx);
+            })
+            .unwrap();
+            settle(cx, window);
+            for (id, name) in [
+                ("inspector-image", "image"),
+                ("inspector-reading", "reading"),
+                ("inspector-playback", "playback"),
+            ] {
+                cx.update_window(window, |_, window, cx| {
+                    window.click(id, cx);
+                    assert_desktop_geometry(window, language);
+                    for choice in ["inspector-image", "inspector-reading", "inspector-playback"] {
+                        assert_eq!(window.find(choice).checked(), Some(choice == id));
+                    }
+                    assert_eq!(window.try_find("reset-filters").is_some(), name == "image");
+                    assert_eq!(
+                        window.try_find("remember-position").is_some(),
+                        name == "reading"
+                    );
+                    assert_eq!(
+                        window.try_find("interval-input").is_some(),
+                        name == "playback"
+                    );
+                })
+                .unwrap();
+                settle(cx, window);
+                snapshot(
+                    cx,
+                    window,
+                    &format!("desktop-{}-{suffix}-{name}", language.code()),
+                );
+            }
+            for (toggle, absent, name) in [
+                ("sidebar-toggle", "sidebar", "sidebar-closed"),
+                ("inspector-toggle", "inspector", "both-closed"),
+                ("sidebar-toggle", "inspector", "inspector-closed"),
+            ] {
+                cx.update_window(window, |_, window, cx| {
+                    window.click(toggle, cx);
+                    assert!(window.try_find(absent).is_none());
+                    assert_desktop_geometry(window, language);
+                })
+                .unwrap();
+                settle(cx, window);
+                snapshot(
+                    cx,
+                    window,
+                    &format!("desktop-{}-{suffix}-{name}", language.code()),
+                );
+            }
+            cx.update_window(window, |_, window, cx| {
+                window.click("inspector-toggle", cx);
+                window.click("info-trigger", cx);
+                assert_info_in_viewport(window);
+                let before = window.find("zoom-trigger").label().unwrap().to_owned();
+                let panel = window.find("info-panel").bounds();
+                let viewer = window.find("viewer").bounds();
+                let overlap = Bounds::from_corners(
+                    point(
+                        panel.left().max(viewer.left()),
+                        panel.top().max(viewer.top()),
+                    ),
+                    point(
+                        panel.right().min(viewer.right()),
+                        panel.bottom().min(viewer.bottom()),
+                    ),
+                );
+                assert!(overlap.size.width > px(0.) && overlap.size.height > px(0.));
+                let position = overlap.center();
+                assert!(panel.contains(&position) && viewer.contains(&position));
+                window.dispatch_event(
+                    PlatformInput::Scroll(ScrollEvent {
+                        position,
+                        delta: ScrollDelta::Lines(point(0., 2.)),
+                        modifiers: Modifiers {
+                            control: true,
+                            ..Default::default()
+                        },
+                        ..Default::default()
+                    }),
+                    cx,
+                );
+                window.render_frame(cx);
+                assert_eq!(window.find("zoom-trigger").label(), Some(before.as_str()));
+                window.dispatch_event(
+                    PlatformInput::ModifiersChanged(gpui_kit::ModifiersChangedEvent::default()),
+                    cx,
+                );
+            })
+            .unwrap();
+            settle(cx, window);
+            snapshot(
+                cx,
+                window,
+                &format!("desktop-{}-{suffix}-information", language.code()),
+            );
+            cx.update_window(window, |_, window, cx| {
+                window.press("escape", cx);
+                assert!(window.try_find("info-panel").is_none());
+            })
+            .unwrap();
+            sender
+                .send(vec![folder.join("missing-desktop.cbz")])
+                .unwrap();
+            settle(cx, window);
+            cx.update_window(window, |_, window, _| {
+                let status = window.find("status-message");
+                assert!(status.visible());
+                assert!(status.label().unwrap().contains("missing-desktop.cbz"));
+                assert_eq!(window.find("page-input").value(), Some("1"));
+                assert_desktop_geometry(window, language);
+            })
+            .unwrap();
+            snapshot(
+                cx,
+                window,
+                &format!("desktop-{}-{suffix}-error", language.code()),
+            );
+            sender.send(vec![folder.to_path_buf()]).unwrap();
+            settle(cx, window);
+        }
+        cx.update_window(window, |_, window, cx| {
+            window.resize(size(px(1280.), px(800.)));
+            window.bounds_changed(cx);
+        })
+        .unwrap();
+        settle(cx, window);
+        for (left, delta) in [(true, 24.), (false, -24.), (true, -24.), (false, 24.)] {
+            cx.update_window(window, |_, window, cx| {
+                let viewer = window.find("viewer").bounds();
+                let x = if left { viewer.left() } else { viewer.right() };
+                window.drag(
+                    point(x, viewer.center().y),
+                    point(x + px(delta), viewer.center().y),
+                    cx,
+                );
+                assert_desktop_geometry(window, language);
+            })
+            .unwrap();
+            settle(cx, window);
+            snapshot(
+                cx,
+                window,
+                &format!(
+                    "desktop-{}-1280x800-drag-{}-{}",
+                    language.code(),
+                    if left { "sidebar" } else { "inspector" },
+                    if delta > 0. { "right" } else { "left" }
+                ),
+            );
+        }
+    }
+    cx.update_window(window, |_, window, cx| {
+        window.click("inspector-image", cx);
+        assert_zoom_closed(window, "縮放設定，適合視窗，100%");
+        assert_eq!(window.find("page-input").value(), Some("1"));
     })
     .unwrap();
     settle(cx, window);
@@ -390,7 +683,7 @@ fn main() {
         window.click("zoom-trigger", cx);
         assert!(window.try_find("zoom-panel").is_none());
         window.click("next", cx);
-        assert_eq!(window.find("page-input").value(), Some("1"));
+        assert_eq!(window.find("page-input").value(), Some("—"));
     })
     .unwrap();
     snapshot(&mut cx, window, "01-empty");
@@ -412,6 +705,7 @@ fn main() {
     }
     capture_zoom_states(&mut cx, window);
     capture_language_states(&mut cx, window);
+    capture_desktop_states(&mut cx, window, &sender, &folder);
 
     // Cover archive indexing, natural order, extraction, decoding, and Metal in
     // one workflow, with central-directory order different from reading order.
@@ -450,7 +744,7 @@ fn main() {
         window.press("shift-b", cx);
         assert_eq!(window.find("page-input").value(), Some("2"));
         window.press("home", cx);
-        window.click("spread", cx);
+        window.click("mode-spread", cx);
         window.press("space", cx);
         assert_eq!(window.find("page-input").value(), Some("3"));
         window.press("home", cx);
@@ -526,7 +820,7 @@ fn main() {
         );
         window.press("f", cx);
         window.press("home", cx);
-        window.click("continuous", cx);
+        window.click("mode-continuous", cx);
     })
     .unwrap();
     settle(&mut cx, window);
@@ -550,10 +844,28 @@ fn main() {
         assert!(window.find("remember-position").visible());
         window.click("remember-position", cx);
         window.click("remember-position", cx);
-        window.click("recursive-folder", cx);
-        window.click("recursive-folder", cx);
-        window.scroll("inspector", ScrollDelta::Lines(point(0., -100.)), cx);
+    })
+    .unwrap();
+    settle(&mut cx, window);
+    for _ in 0..2 {
+        cx.update_window(window, |_, window, cx| window.click(("menu", 0usize), cx))
+            .unwrap();
+        settle(&mut cx, window);
+        cx.update_window(window, |_, window, cx| {
+            let item = window
+                .within("popup-menu")
+                .find_by_label(Language::TraditionalChinese.text(Text::IncludeSubfolders));
+            let menu = window.find("popup-menu").bounds();
+            window.click_at("popup-menu", item.bounds().center() - menu.origin, cx);
+        })
+        .unwrap();
+        settle(&mut cx, window);
+    }
+    cx.update_window(window, |_, window, cx| {
+        assert!(window.try_find("recursive-folder").is_none());
+        window.scroll("inspector-content", ScrollDelta::Lines(point(0., 100.)), cx);
         window.click("紙色", cx);
+        window.click("inspector-playback", cx);
         window.click("interval-input", cx);
         window.press(
             if cfg!(target_os = "macos") {

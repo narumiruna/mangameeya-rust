@@ -71,25 +71,47 @@ cargo run --locked -- /path/to/book.cbz
 macOS 同時支援 `Command+O`、`Command+Shift+O`、`Command+S`、`Command+W`、`Command+Q`、`Command+,` 與 `Control+Command+F`。
 一般滾輪只捲動，不直接翻頁；按住 `Ctrl` 使用滾輪可縮放。單頁與雙頁可點擊閱讀區的左右邊緣翻頁。
 
-工具列的「縮放」控制項同時顯示目前模式與實際縮放比例。按下控制項可開啟 Popover，切換適合視窗、寬度、高度或原始尺寸，也可輸入百分比或使用 `−`／`+` 調整。
+### 工具列與面板
+
+工具列依開啟與左側面板、閱讀模式、縮放與閱讀方向、書籤與閱讀工具及全螢幕分組。單頁／雙頁／連續按鈕直接選擇指定模式；重複選取目前模式不會切換至其他模式。切換模式會保留目前的適應方式或自訂縮放；`S`、`C` 仍保留既有切換行為。
+全螢幕沿用既有命令與快捷鍵，不是新增的專注模式。介面沿用 GPUI Kit、ActiveTheme 與 Lucide icons，不新增主題切換或相依套件。
+
+左右面板可獨立收合，拖曳邊界可調整寬度；顯示狀態與偏好寬度會儲存，重新開啟後恢復。
+
+- 左側保留「檔案／縮圖／最近開啟」分頁。縮圖等比例顯示，頁碼與檔名分開，Tooltip 顯示完整檔名。
+- 右側「閱讀工具」分為三個分頁：
+  - **影像**：亮度、對比、灰階、旋轉與「重設濾鏡」。重設濾鏡只重設亮度、對比與灰階，不重設旋轉或閱讀偏好。
+  - **閱讀**：記住閱讀位置、閱讀方向與閱讀背景；「一般設定」群組包含語言及損壞設定的備份復原入口。
+  - **播放**：投影片播放／暫停及 1–120 秒間隔。
+
+切換右側工具分頁不會重設數值或未送出的輸入；目前分頁不跨次啟動儲存。
+從工具選單或平台原生 Preferences 入口開啟偏好設定時，會直接顯示右側「閱讀」分頁。
+「包含子資料夾」位於 **檔案 → 開啟選項**，沿用 `recursive_folder`；變更只影響下次開啟，不重新載入目前漫畫。
+
+### 縮放與頁碼
+
+工具列保留唯一的「縮放」控制項，同時顯示目前模式與實際縮放比例。按下控制項可開啟 Popover，切換適合視窗、寬度、高度或原始尺寸，也可輸入百分比或使用 `−`／`+` 調整。
 
 - 百分比以目前頁面為準；雙頁尺寸不同時，兩頁的比例可能不同。載圖尺寸尚未取得時顯示 `—`。
 - 手動輸入、放大／縮小或 `Ctrl`＋滾輪會切換為「自訂縮放」。放大／縮小與滾輪以目前實際比例計算，手動輸入則套用指定比例。手動縮放限 10%–800%；自動適應的比例不受此範圍限制。
 - 輸入百分比後按 `Enter` 套用並關閉 Popover。選擇適應方式也會關閉；`−`／`+` 可連續調整。按 `Escape` 或點擊外部可關閉而不套用未送出的輸入。
 
-頁碼在按下 `Enter` 後套用；投影片間隔在按下 `Enter` 或離開欄位後套用。
+頁碼導覽只放在底部，包含上一頁／頁碼／總頁數／下一頁；工具列不再重複放置上一頁與下一頁。底部另有閱讀進度與頁面資訊入口，並保留必要狀態與可見錯誤，不放縮放或面板開關。
+頁面資訊 Popover 顯示目前頁面的完整檔名、實際尺寸及可取得的來源檔案大小；資訊尚未取得時顯示「未取得」。換頁時更新資訊，關閉或替換漫畫時關閉浮層並清除舊資料。
+閱讀進度為目前頁碼除以總頁數後四捨五入的百分比；未開啟漫畫時顯示空狀態並停用頁碼導覽。
+
+頁碼只在按下 `Enter` 後套用；投影片間隔在按下 `Enter` 或離開欄位後套用。
 
 ## Language
 
-Open **Preferences → Language** and select **English**, **日本語**, or **正體中文**.
+Open **Preferences** from the **Tools** menu or the native Preferences entry.
+This opens **Reading tools → Reading**. Under **General settings → Language**, select
+**English**, **日本語**, or **正體中文**.
 The choice applies immediately and is saved in `settings.json` as `preferences.language`
 (`en`, `ja`, or `zh-Hant`). English is the default, including for older settings without this field.
 Menus, controls, tooltips, accessibility labels, and reader messages use the selected language.
 File names and technical error details are unchanged. Native file dialog controls use the OS language.
 GPUI component text uses the matching locale; component strings not supplied by GPUI, including Japanese text-editing menus, fall back to English.
-
-Before using an older build, back up `settings.json` and remove only `preferences.language`
-from the working copy. Older builds reject unknown preference fields; do not reset reading data to downgrade.
 
 ## 本機資料
 
@@ -98,9 +120,30 @@ from the working copy. Older builds reject unknown preference fields; do not res
 - Windows：`%APPDATA%\MangaMeeya\MangaMeeya Rust\config\settings.json`
 - macOS：`~/Library/Application Support/org.MangaMeeya.MangaMeeya-Rust/settings.json`
 
-實際路徑由 `directories::ProjectDirs` 決定。設定檔損壞時會保留原檔並顯示錯誤；可在偏好設定按「備份並重設設定」，先保留 `settings.json.corrupt-*` 再重設。
+實際路徑由 `directories::ProjectDirs` 決定。設定檔損壞時會保留原檔並顯示錯誤；可在「閱讀工具 → 閱讀 → 一般設定」按「備份並重設設定」，先保留 `settings.json.corrupt-*` 再重設。
 舊版 WebView local storage 不會被讀取、刪除或自動遷移。
 單一視窗的 lock 與經驗證的 loopback endpoint 也位於此目錄，關閉程式會移除 endpoint。
+
+### 面板設定與降版
+
+新增的面板偏好存於 `preferences.panel_layout`，寬度以整數 logical px 儲存：
+
+| 欄位 | 預設值 | 規則 |
+| --- | --- | --- |
+| `sidebar_width` | `224` | 限制至 216–320 logical px |
+| `inspector_width` | `256` | 限制至 240–360 logical px |
+| `inspector_visible` | `true` | 右側閱讀工具的顯示狀態 |
+
+左側顯示狀態仍使用既有 `preferences.sidebar`，不新增重複欄位。舊設定缺少 `panel_layout` 或部分子欄位時，使用預設值。
+只有完成拖曳且寬度確實變更時才儲存。窄視窗會先限制右側、再限制左側的實際寬度，中央至少保留 280 logical px；這不會覆寫偏好寬度，放大視窗後會恢復。
+
+舊版程式會拒絕新增欄位。降版時：
+
+1. 關閉程式，先備份 `settings.json`。
+2. 降版至本次桌面介面改版前、已支援三語系的基準版本時，只從降版用的工作副本移除 `preferences.panel_layout`；保留 `preferences.language` 及其他既有欄位。
+3. 只有降版至尚未支援三語系的更舊版本時，才另外移除 `preferences.language`。
+
+不要刪除最近開啟、閱讀位置、書籤或其他偏好，也不要為降版重設整份設定。
 
 ## 檢查
 

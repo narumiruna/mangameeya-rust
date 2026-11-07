@@ -16,6 +16,7 @@ use gpui_kit::component::{
     input::{Input, InputEvent, InputState},
     menu::{DropdownMenu, PopupMenu},
     popover::Popover,
+    resizable::{ResizableState, h_resizable, resizable_panel},
     scroll::{Scrollbar, ScrollbarMode},
     slider::{Slider, SliderEvent, SliderState},
 };
@@ -49,6 +50,11 @@ enum Command {
     Quit,
     Sidebar,
     Thumbnails,
+    Inspector,
+    ToggleRecursiveFolder,
+    Single,
+    SetSpread,
+    SetContinuous,
     Spread,
     Continuous,
     Direction,
@@ -80,6 +86,26 @@ enum Command {
     ClearHistory,
     Escape,
     OpenListedFolder,
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+enum InspectorTab {
+    #[default]
+    Image,
+    Reading,
+    Playback,
+}
+
+// Resize handles straddle panel boundaries. Reserve a band as well as the reader minimum.
+fn panel_widths(width: f32, left: Option<u32>, right: Option<u32>) -> (f32, f32) {
+    let mut left = left.map_or(0., |value| value.clamp(216, 320) as f32);
+    let mut right = right.map_or(0., |value| value.clamp(240, 360) as f32);
+    let mut excess = (left + right + 288. - width).max(0.);
+    let reduction = excess.min((right - 240.).max(0.));
+    right -= reduction;
+    excess -= reduction;
+    left -= excess.min((left - 216.).max(0.));
+    (left, right)
 }
 
 const PAGE_CACHE_BYTES: usize = 256 * 1024 * 1024;
@@ -252,8 +278,11 @@ pub struct ReaderView {
     interval_input: Entity<InputState>,
     page_slider: Entity<SliderState>,
     filter_sliders: [Entity<SliderState>; 3],
-    inspector: bool,
-    preferences_open: bool,
+    inspector_tab: InspectorTab,
+    info_open: bool,
+    panel_state: Entity<ResizableState>,
+    panel_layout_key: (u32, bool, bool),
+    panel_drag_start: Option<(bool, Pixels)>,
     message: String,
     message_translation: (Text, Vec<(&'static str, String)>),
     message_error: bool,
@@ -283,7 +312,7 @@ impl ReaderView {
         let language = settings.preferences.language;
         let focus = cx.focus_handle();
         focus.focus(window, cx);
-        let page_input = cx.new(|cx| InputState::new(window, cx).default_value("1"));
+        let page_input = cx.new(|cx| InputState::new(window, cx).default_value("—"));
         let zoom_input = cx.new(|cx| InputState::new(window, cx).placeholder("—"));
         let path_input =
             cx.new(|cx| InputState::new(window, cx).placeholder(language.text(Text::FolderPath)));
@@ -296,7 +325,8 @@ impl ReaderView {
             cx.new(|_| SliderState::new().min(50.).max(150.).default_value(100.)),
             cx.new(|_| SliderState::new().min(0.).max(100.).default_value(0.)),
         ];
-        let mut subscriptions = Vec::new();
+        let panel_state = cx.new(|_| ResizableState::default());
+        let mut subscriptions = vec![cx.observe(&panel_state, |_, _, cx| cx.notify())];
         subscriptions.push(cx.subscribe_in(
             &page_input,
             window,
@@ -341,26 +371,13 @@ impl ReaderView {
                 }
             },
         ));
-        subscriptions.push(cx.subscribe_in(
-            &interval_input,
-            window,
-            |this, input, event, _, cx| {
+        subscriptions.push(
+            cx.subscribe_in(&interval_input, window, |this, _, event, _, cx| {
                 if matches!(event, InputEvent::PressEnter { .. } | InputEvent::Blur) {
-                    match input.read(cx).value().trim().parse::<u64>() {
-                        Ok(seconds) => {
-                            this.reader.settings.preferences.interval = seconds.clamp(1, 120);
-                            this.next_slide =
-                                Instant::now() + Duration::from_secs(seconds.clamp(1, 120));
-                            this.dirty = true;
-                            cx.notify();
-                        }
-                        Err(_) => {
-                            this.set_localized_message(Text::InvalidInterval, vec![], true, cx)
-                        }
-                    }
+                    this.apply_interval(cx);
                 }
-            },
-        ));
+            }),
+        );
         subscriptions.push(
             cx.subscribe_in(&page_slider, window, |this, _, event, window, cx| {
                 if let SliderEvent::Change(value) = event {
@@ -447,8 +464,11 @@ impl ReaderView {
             interval_input,
             page_slider,
             filter_sliders,
-            inspector: true,
-            preferences_open: false,
+            inspector_tab: InspectorTab::Image,
+            info_open: false,
+            panel_state,
+            panel_layout_key: (0, false, false),
+            panel_drag_start: None,
             message: String::new(),
             message_translation: warning.clone().map_or((Text::Ready, vec![]), |error| {
                 (Text::SettingsError, vec![("error", error)])
@@ -538,7 +558,11 @@ impl ReaderView {
     }
 
     fn sync_controls(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let page = (self.reader.current + 1).to_string();
+        let page = if self.page_count() == 0 {
+            "—".to_owned()
+        } else {
+            (self.reader.current + 1).to_string()
+        };
         self.page_input
             .update(cx, |input, cx| input.set_value(page, window, cx));
         self.sync_zoom_input(false, window, cx);
@@ -546,7 +570,19 @@ impl ReaderView {
         let progress = self.reader.current as f32 / maximum as f32 * 100.;
         self.page_slider
             .update(cx, |slider, cx| slider.set_value(progress, window, cx));
-        self.thumbnails.scroll_to_reveal_item(self.reader.current);
+        if self
+            .thumbnails
+            .bounds_for_item(self.reader.current)
+            .is_none()
+        {
+            // Unmeasured virtual rows have no height to reveal against yet.
+            self.thumbnails.scroll_to(ListOffset {
+                item_ix: self.reader.current,
+                offset_in_item: px(0.),
+            });
+        } else {
+            self.thumbnails.scroll_to_reveal_item(self.reader.current);
+        }
         self.dirty = true;
         cx.notify();
     }
@@ -710,6 +746,7 @@ impl ReaderView {
     }
 
     fn open_path(&mut self, path: PathBuf, window: &mut Window, cx: &mut Context<Self>) {
+        self.info_open = false;
         self.zoom_open = false;
         self.focus.focus(window, cx);
         self.open_revision += 1;
@@ -743,6 +780,7 @@ impl ReaderView {
                 match result {
                     Ok(book) => {
                         view.zoom_open = false;
+                        view.info_open = false;
                         let explicit = explicit_image.then_some(book.initial_page);
                         view.reader.set_book(Arc::new(book), explicit);
                         view.book_revision += 1;
@@ -838,9 +876,35 @@ impl ReaderView {
         self.load_requested(cx);
     }
 
+    fn apply_interval(&mut self, cx: &mut Context<Self>) {
+        let value = self.interval_input.read(cx).value();
+        match value.trim().parse::<u64>() {
+            Ok(seconds) => {
+                let seconds = seconds.clamp(1, 120);
+                self.reader.settings.preferences.interval = seconds;
+                self.next_slide = Instant::now() + Duration::from_secs(seconds);
+                self.dirty = true;
+                cx.notify();
+            }
+            Err(_) => self.set_localized_message(Text::InvalidInterval, vec![], true, cx),
+        }
+    }
+
+    fn commit_focused_interval(&mut self, window: &Window, cx: &mut Context<Self>) {
+        if self.inspector_tab == InspectorTab::Playback
+            && self
+                .interval_input
+                .read(cx)
+                .focus_handle(cx)
+                .is_focused(window)
+        {
+            // Native menu actions can unmount the input before its deferred Blur.
+            self.apply_interval(cx);
+        }
+    }
+
     fn relayout(&mut self, cx: &mut Context<Self>) {
         self.continuous.remeasure();
-        self.dirty = true;
         cx.notify();
     }
 
@@ -921,12 +985,24 @@ impl ReaderView {
     fn perform(&mut self, command: Command, window: &mut Window, cx: &mut Context<Self>) {
         let language = self.language();
         use Command::*;
+        if self.info_open
+            && matches!(
+                command,
+                FitWindow | FitWidth | FitHeight | Original | ZoomIn | ZoomOut | ZoomReset
+            )
+        {
+            return;
+        }
+        if cx.has_active_drag() && matches!(command, Sidebar | Inspector | Thumbnails | Settings) {
+            return;
+        }
         match command {
             OpenFile => self.request_dialog(false, window, cx),
             OpenFolder => self.request_dialog(true, window, cx),
             SavePage => self.save_page(window, cx),
             Quit => cx.quit(),
             Close => {
+                self.info_open = false;
                 self.zoom_open = false;
                 self.focus.focus(window, cx);
                 self.open_revision += 1;
@@ -948,12 +1024,44 @@ impl ReaderView {
             Sidebar => {
                 self.reader.settings.preferences.sidebar =
                     !self.reader.settings.preferences.sidebar;
+                self.dirty = true;
                 self.relayout(cx);
             }
             Thumbnails => {
                 self.reader.settings.preferences.sidebar = true;
                 self.reader.settings.preferences.sidebar_mode = SidebarMode::Thumbnails;
+                self.dirty = true;
                 self.relayout(cx);
+            }
+            Inspector => {
+                self.commit_focused_interval(window, cx);
+                self.reader
+                    .settings
+                    .preferences
+                    .panel_layout
+                    .inspector_visible = !self
+                    .reader
+                    .settings
+                    .preferences
+                    .panel_layout
+                    .inspector_visible;
+                self.dirty = true;
+                self.focus.focus(window, cx);
+                self.relayout(cx);
+            }
+            ToggleRecursiveFolder => {
+                self.reader.settings.preferences.recursive_folder =
+                    !self.reader.settings.preferences.recursive_folder;
+                self.dirty = true;
+                cx.notify();
+            }
+            Single | SetSpread | SetContinuous => {
+                let mode = match command {
+                    SetSpread => ReadingMode::Spread,
+                    SetContinuous => ReadingMode::Continuous,
+                    _ => ReadingMode::Single,
+                };
+                self.set_reading_mode(mode, window, cx);
             }
             Spread => {
                 let mode = if self.reader.settings.preferences.mode == ReadingMode::Spread {
@@ -961,9 +1069,7 @@ impl ReaderView {
                 } else {
                     ReadingMode::Spread
                 };
-                self.reader.set_mode(mode);
-                self.relayout(cx);
-                self.after_navigation(window, cx);
+                self.set_reading_mode(mode, window, cx);
             }
             Continuous => {
                 let mode = if self.reader.settings.preferences.mode == ReadingMode::Continuous {
@@ -971,9 +1077,7 @@ impl ReaderView {
                 } else {
                     ReadingMode::Continuous
                 };
-                self.reader.set_mode(mode);
-                self.relayout(cx);
-                self.after_navigation(window, cx);
+                self.set_reading_mode(mode, window, cx);
             }
             Direction => {
                 self.reader.settings.preferences.rtl = !self.reader.settings.preferences.rtl;
@@ -982,6 +1086,12 @@ impl ReaderView {
             }
             Fullscreen => window.toggle_fullscreen(),
             Escape => {
+                if self.info_open {
+                    self.info_open = false;
+                    self.focus.focus(window, cx);
+                    cx.notify();
+                    return;
+                }
                 if window.is_fullscreen() {
                     window.toggle_fullscreen();
                 }
@@ -1086,9 +1196,21 @@ impl ReaderView {
                 self.relayout(cx);
             }
             Settings => {
-                self.preferences_open = !self.preferences_open;
-                self.inspector = true;
-                cx.notify();
+                self.commit_focused_interval(window, cx);
+                self.focus.focus(window, cx);
+                self.inspector_tab = InspectorTab::Reading;
+                self.dirty |= !self
+                    .reader
+                    .settings
+                    .preferences
+                    .panel_layout
+                    .inspector_visible;
+                self.reader
+                    .settings
+                    .preferences
+                    .panel_layout
+                    .inspector_visible = true;
+                self.relayout(cx);
             }
             About => window.open_dialog(cx, move |dialog, _, _| {
                 dialog
@@ -1411,6 +1533,32 @@ impl ReaderView {
         frame.into_any_element()
     }
 
+    fn icon_button(
+        &self,
+        id: &'static str,
+        label: &'static str,
+        icon: IconName,
+        command: Command,
+        cx: &mut Context<Self>,
+    ) -> Button {
+        self.button(id, label, command, cx)
+            .label("")
+            .icon(icon)
+            .tooltip(label)
+            .w(px(34.))
+            .h(px(34.))
+    }
+
+    fn set_reading_mode(&mut self, mode: ReadingMode, window: &mut Window, cx: &mut Context<Self>) {
+        if self.reader.settings.preferences.mode == mode {
+            return;
+        }
+        self.reader.set_mode(mode);
+        self.dirty = true;
+        self.relayout(cx);
+        self.after_navigation(window, cx);
+    }
+
     fn button(
         &self,
         id: &'static str,
@@ -1437,6 +1585,14 @@ impl ReaderView {
             0 => menu
                 .menu(language.text(Text::OpenComic), Box::new(OpenFile))
                 .menu(language.text(Text::OpenFolder), Box::new(OpenFolder))
+                .separator()
+                .label(language.text(Text::OpenOptions))
+                .menu_with_check(
+                    language.text(Text::IncludeSubfolders),
+                    self.reader.settings.preferences.recursive_folder,
+                    Box::new(ToggleRecursiveFolder),
+                )
+                .separator()
                 .menu_with_disabled(language.text(Text::SaveImage), Box::new(SavePage), !opened)
                 .separator()
                 .menu_with_disabled(language.text(Text::CloseComic), Box::new(Close), !opened)
@@ -1448,6 +1604,15 @@ impl ReaderView {
                     Box::new(Sidebar),
                 )
                 .menu(language.text(Text::Thumbnails), Box::new(Thumbnails))
+                .menu_with_check(
+                    language.text(Text::ShowInspector),
+                    self.reader
+                        .settings
+                        .preferences
+                        .panel_layout
+                        .inspector_visible,
+                    Box::new(Inspector),
+                )
                 .menu_with_check(
                     language.text(Text::Spread),
                     self.reader.settings.preferences.mode == ReadingMode::Spread,
@@ -1521,12 +1686,14 @@ impl ReaderView {
             .flex_none()
             .items_center()
             .gap_1()
-            .child(language.text(Text::Zoom))
             .child(
                 Popover::new("zoom-popover")
                     .open(self.zoom_open && self.reader.book.is_some())
                     .on_open_change(cx.listener(|this, open: &bool, window, cx| {
                         this.zoom_open = *open && this.reader.book.is_some();
+                        if this.zoom_open {
+                            this.info_open = false;
+                        }
                         this.sync_zoom_input(true, window, cx);
                         cx.notify();
                     }))
@@ -1697,7 +1864,152 @@ impl ReaderView {
             .into_any_element()
     }
 
-    fn render_chrome(&self, cx: &mut Context<Self>) -> gpui_kit::AnyElement {
+    fn render_workspace(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> gpui_kit::AnyElement {
+        let width = f32::from(window.viewport_size().width);
+        let prefs = &self.reader.settings.preferences;
+        let left_visible = prefs.sidebar;
+        let right_visible = prefs.panel_layout.inspector_visible;
+        let key = (width.round() as u32, left_visible, right_visible);
+        // Retain the entity and the document/input entities. Only reset the layout slots
+        // when their topology or viewport changes, never during an active handle drag.
+        if self.panel_layout_key != key && !cx.has_active_drag() {
+            self.panel_state.update(cx, |state, _| state.clear());
+            self.panel_layout_key = key;
+        }
+        let (left, right) = panel_widths(
+            width,
+            left_visible.then_some(prefs.panel_layout.sidebar_width),
+            right_visible.then_some(prefs.panel_layout.inspector_width),
+        );
+        let left_max = (width - 288. - right).clamp(216., 320.);
+        let right_max = (width - 288. - left).clamp(240., 360.);
+        let owner = cx.entity().downgrade();
+        let mut group = h_resizable("reader-panels")
+            .with_state(&self.panel_state)
+            .on_resize(move |state, _, cx| {
+                let sizes = state.read(cx).sizes().clone();
+                _ = owner.update(cx, |this, cx| {
+                    if let Some((is_left, before)) = this.panel_drag_start.take() {
+                        let size = if is_left { sizes.first() } else { sizes.last() };
+                        if let Some(size) = size {
+                            let (minimum, maximum) = if is_left {
+                                (216., left_max)
+                            } else {
+                                (240., right_max)
+                            };
+                            let visible = f32::from(*size).clamp(minimum, maximum);
+                            let before = f32::from(before).clamp(minimum, maximum);
+                            if visible.is_finite()
+                                && before.is_finite()
+                                && (visible - before).abs() >= 0.5
+                            {
+                                let layout = &mut this.reader.settings.preferences.panel_layout;
+                                let saved = if is_left {
+                                    &mut layout.sidebar_width
+                                } else {
+                                    &mut layout.inspector_width
+                                };
+                                let value = visible.round() as u32;
+                                if *saved != value {
+                                    *saved = value;
+                                    this.dirty = true;
+                                }
+                            }
+                        }
+                    }
+                    // The component can retain an overdrag's raw size while painting
+                    // its clamped size. Reconcile slots from preferences after release.
+                    this.panel_layout_key = (0, false, false);
+                    cx.notify();
+                });
+            });
+        if left_visible {
+            group = group.child(
+                resizable_panel()
+                    .size(px(left))
+                    .size_range(px(216.)..px(left_max))
+                    .fixed()
+                    .child(self.render_sidebar(cx)),
+            );
+        }
+        group = group.child(
+            resizable_panel()
+                .size_range(px(280.)..Pixels::MAX)
+                .child(self.render_viewer(cx)),
+        );
+        if right_visible {
+            group = group.child(
+                resizable_panel()
+                    .size(px(right))
+                    .size_range(px(240.)..px(right_max))
+                    .fixed()
+                    .child(self.render_inspector(cx)),
+            );
+        }
+        let capture_owner = cx.entity().downgrade();
+        div()
+            .id("reader-workspace")
+            .test_support()
+            .role(gpui_kit::Role::Group)
+            .relative()
+            .flex_1()
+            .min_h_0()
+            .min_w_0()
+            .child(group)
+            .child(
+                canvas(
+                    |_, _, _| (),
+                    move |bounds, _, window, _| {
+                        let owner = capture_owner.clone();
+                        // The resize handle has its own hitbox. Capture before it consumes
+                        // the pointer; do not use an occluded parent hitbox for this baseline.
+                        window.on_mouse_event(
+                            move |event: &gpui_kit::MouseDownEvent, phase, _, cx| {
+                                if phase != gpui_kit::DispatchPhase::Capture
+                                    || event.button != MouseButton::Left
+                                    || !bounds.contains(&event.position)
+                                {
+                                    return;
+                                }
+                                _ = owner.update(cx, |this, cx| {
+                                    let sizes = this.panel_state.read(cx).sizes();
+                                    this.panel_drag_start =
+                                        if this.reader.settings.preferences.sidebar
+                                            && (event.position.x - this.viewer_bounds.left()).abs()
+                                                <= px(8.)
+                                        {
+                                            sizes.first().copied().map(|size| (true, size))
+                                        } else if this
+                                            .reader
+                                            .settings
+                                            .preferences
+                                            .panel_layout
+                                            .inspector_visible
+                                            && (event.position.x - this.viewer_bounds.right()).abs()
+                                                <= px(8.)
+                                        {
+                                            sizes.last().copied().map(|size| (false, size))
+                                        } else {
+                                            None
+                                        };
+                                });
+                            },
+                        );
+                    },
+                )
+                .absolute()
+                .top_0()
+                .left_0()
+                .size_full(),
+            )
+            .into_any_element()
+    }
+
+    fn render_chrome(&self, compact: bool, cx: &mut Context<Self>) -> gpui_kit::AnyElement {
         let language = self.language();
         let mut menus = div()
             .flex()
@@ -1706,13 +2018,13 @@ impl ReaderView {
             .border_b_1()
             .border_color(cx.theme().border);
         for (group, label) in [
-            language.text(Text::File),
-            language.text(Text::View),
-            language.text(Text::Zoom),
-            language.text(Text::Navigate),
-            language.text(Text::Bookmarks),
-            language.text(Text::Tools),
-            language.text(Text::Help),
+            Text::File,
+            Text::View,
+            Text::Zoom,
+            Text::Navigate,
+            Text::Bookmarks,
+            Text::Tools,
+            Text::Help,
         ]
         .into_iter()
         .enumerate()
@@ -1722,7 +2034,7 @@ impl ReaderView {
                 Button::new(("menu", group))
                     .small()
                     .ghost()
-                    .label(label)
+                    .label(language.text(label))
                     .dropdown_menu(move |menu, _, cx| {
                         if let Some(view) = view.upgrade() {
                             view.read(cx).menu_items(group, menu)
@@ -1733,93 +2045,149 @@ impl ReaderView {
             );
         }
         let opened = self.reader.book.is_some();
-        let mode = self.reader.settings.preferences.mode;
+        let mut modes = div()
+            .id("reading-modes")
+            .test_support()
+            .role(gpui_kit::Role::TabList)
+            .aria_label(language.text(Text::ReadingMode))
+            .flex()
+            .gap_1()
+            .p_1()
+            .rounded_md()
+            .bg(cx.theme().muted);
+        for (id, mode, text, icon, command) in [
+            (
+                "mode-single",
+                ReadingMode::Single,
+                Text::SinglePage,
+                IconName::FileText,
+                Command::Single,
+            ),
+            (
+                "mode-spread",
+                ReadingMode::Spread,
+                Text::TwoPages,
+                IconName::Columns2,
+                Command::SetSpread,
+            ),
+            (
+                "mode-continuous",
+                ReadingMode::Continuous,
+                Text::Continuous,
+                IconName::Rows3,
+                Command::SetContinuous,
+            ),
+        ] {
+            let selected = self.reader.settings.preferences.mode == mode;
+            modes = modes.child(
+                self.button(id, language.text(text), command, cx)
+                    .icon(icon)
+                    .label(if compact { "" } else { language.text(text) })
+                    .role(gpui_kit::Role::Tab)
+                    .selected(selected)
+                    .toggled(selected)
+                    .tooltip(language.text(text))
+                    .h(px(34.)),
+            );
+        }
+        let direction = language.text(if self.reader.settings.preferences.rtl {
+            Text::RightToLeft
+        } else {
+            Text::LeftToRight
+        });
+        let marked = self.reader.book.as_ref().is_some_and(|book| {
+            self.reader.settings.bookmarks.get(&book.path) == Some(&self.reader.current)
+        });
         let toolbar = div()
+            .id("reader-toolbar")
+            .test_support()
+            .role(gpui_kit::Role::Group)
             .flex()
             .items_center()
-            .flex_wrap()
-            .gap_1()
+            .gap_2()
             .px_2()
-            .py_1()
-            .child(self.button("open", language.text(Text::Open), Command::OpenFile, cx))
+            .py_2()
+            .child(self.icon_button(
+                "open",
+                language.text(Text::Open),
+                IconName::FolderOpen,
+                Command::OpenFile,
+                cx,
+            ))
             .child(
-                self.button(
-                    "previous",
-                    language.text(Text::PreviousPage),
-                    Command::Previous,
+                self.icon_button(
+                    "sidebar-toggle",
+                    language.text(Text::Sidebar),
+                    IconName::PanelLeft,
+                    Command::Sidebar,
                     cx,
                 )
-                .disabled(!opened || self.reader.current == 0),
+                .selected(self.reader.settings.preferences.sidebar)
+                .toggled(self.reader.settings.preferences.sidebar),
             )
+            .child(modes)
+            .child(div().w(px(1.)).h_6().bg(cx.theme().border))
+            .child(self.render_zoom_control(cx))
             .child(
-                self.button("next", language.text(Text::NextPage), Command::Next, cx)
-                    .disabled(!opened || self.reader.current + 1 >= self.page_count()),
-            )
-            .child(
-                self.button("spread", language.text(Text::TwoPages), Command::Spread, cx)
-                    .selected(mode == ReadingMode::Spread),
-            )
-            .child(
-                self.button(
-                    "continuous",
-                    language.text(Text::Continuous),
-                    Command::Continuous,
-                    cx,
-                )
-                .selected(mode == ReadingMode::Continuous),
-            )
-            .child(
-                self.button(
+                self.icon_button(
                     "direction",
-                    if self.reader.settings.preferences.rtl {
-                        "R → L"
-                    } else {
-                        "L → R"
-                    },
+                    language.text(Text::ReadingDirection),
+                    IconName::ArrowLeftRight,
                     Command::Direction,
                     cx,
                 )
-                .accessibility_label(language.text(
-                    if self.reader.settings.preferences.rtl {
-                        Text::RightToLeft
-                    } else {
-                        Text::LeftToRight
-                    },
+                .tooltip(format!(
+                    "{}: {direction}",
+                    language.text(Text::ReadingDirection)
                 )),
             )
-            .child(self.render_zoom_control(cx))
+            .child(div().flex_1())
             .child(
-                self.button(
+                self.icon_button(
                     "bookmark",
                     language.text(Text::Bookmark),
+                    IconName::Bookmark,
                     Command::Bookmark,
                     cx,
                 )
+                .selected(marked)
+                .toggled(marked)
                 .disabled(!opened),
             )
             .child(
-                self.button(
-                    "slideshow",
-                    if self.reader.slideshow {
-                        language.text(Text::Stop)
-                    } else {
-                        language.text(Text::Slideshow)
-                    },
-                    Command::Slideshow,
+                self.icon_button(
+                    "inspector-toggle",
+                    language.text(Text::ReadingTools),
+                    IconName::SlidersHorizontal,
+                    Command::Inspector,
                     cx,
                 )
-                .selected(self.reader.slideshow)
-                .disabled(!opened),
+                .selected(
+                    self.reader
+                        .settings
+                        .preferences
+                        .panel_layout
+                        .inspector_visible,
+                )
+                .toggled(
+                    self.reader
+                        .settings
+                        .preferences
+                        .panel_layout
+                        .inspector_visible,
+                ),
             )
-            .child(self.button(
+            .child(self.icon_button(
                 "fullscreen",
                 language.text(Text::Fullscreen),
+                IconName::Maximize,
                 Command::Fullscreen,
                 cx,
             ))
-            .child(self.button(
+            .child(self.icon_button(
                 "preferences",
                 language.text(Text::Preferences),
+                IconName::Ellipsis,
                 Command::Settings,
                 cx,
             ));
@@ -1834,7 +2202,16 @@ impl ReaderView {
 
     fn render_sidebar(&self, cx: &mut Context<Self>) -> gpui_kit::AnyElement {
         let language = self.language();
-        let mut tabs = div().flex().flex_wrap().gap_1().p_2().flex_none();
+        let mut tabs = div()
+            .id("sidebar-tabs")
+            .test_support()
+            .role(gpui_kit::Role::TabList)
+            .aria_label(language.text(Text::Sidebar))
+            .flex()
+            .flex_wrap()
+            .gap_1()
+            .p_2()
+            .flex_none();
         for (mode, id, label) in [
             (SidebarMode::Files, "檔案", language.text(Text::File)),
             (
@@ -1849,7 +2226,9 @@ impl ReaderView {
                     .small()
                     .ghost()
                     .label(label)
+                    .role(gpui_kit::Role::Tab)
                     .selected(self.reader.settings.preferences.sidebar_mode == mode)
+                    .toggled(self.reader.settings.preferences.sidebar_mode == mode)
                     .on_click(cx.listener(move |this, _, _, cx| {
                         this.reader.settings.preferences.sidebar_mode = mode;
                         this.dirty = true;
@@ -1931,7 +2310,7 @@ impl ReaderView {
             .aria_label(language.text(Text::Sidebar))
             .flex()
             .flex_col()
-            .w_64()
+            .w_full()
             .min_w_0()
             .h_full()
             .flex_none()
@@ -1956,23 +2335,24 @@ impl ReaderView {
         let picture = match self.thumbs.get(&index) {
             Some(page) => img(page.tiles[0].image.clone())
                 .id("thumbnail-bitmap")
-                .w_32()
-                .h_32()
+                .w(px(110.))
+                .h(px(156.))
                 .object_fit(ObjectFit::Contain)
                 .into_any_element(),
             None => div()
-                .w_32()
-                .h_32()
+                .w(px(110.))
+                .h(px(156.))
                 .flex()
                 .items_center()
                 .justify_center()
                 .child(if self.errors.contains_key(&(index, true)) {
-                    language.text(Text::ReadFailed).to_string()
+                    language.text(Text::ReadFailed).to_owned()
                 } else {
                     (index + 1).to_string()
                 })
                 .into_any_element(),
         };
+        let selected = index == self.reader.current;
         div()
             .p_2()
             .child(
@@ -1983,20 +2363,58 @@ impl ReaderView {
                 )))
                 .ghost()
                 .w_full()
-                .h_auto()
-                .selected(index == self.reader.current)
+                .h(px(180.))
+                .selected(selected)
+                .toggled(selected)
+                .tooltip(page.name.clone())
                 .child(
                     div()
                         .flex()
-                        .flex_col()
                         .items_center()
-                        .gap_1()
-                        .child(picture)
-                        .child(div().w_full().truncate().text_xs().child(format!(
-                            "{}. {}",
-                            index + 1,
-                            page.name
-                        ))),
+                        .gap_2()
+                        .w_full()
+                        .min_w_0()
+                        .border_l_2()
+                        .border_color(if selected {
+                            cx.theme().primary
+                        } else {
+                            gpui_kit::hsla(0., 0., 0., 0.)
+                        })
+                        .pl_1()
+                        .child(
+                            div()
+                                .id("thumbnail-container")
+                                .test_support()
+                                .w(px(110.))
+                                .h(px(156.))
+                                .flex_none()
+                                .child(picture),
+                        )
+                        .child(
+                            div()
+                                .flex()
+                                .flex_col()
+                                .gap_2()
+                                .flex_1()
+                                .min_w_0()
+                                .child(
+                                    div()
+                                        .id(("thumbnail-page", index))
+                                        .test_support()
+                                        .aria_label((index + 1).to_string())
+                                        .child((index + 1).to_string()),
+                                )
+                                .child(
+                                    div()
+                                        .id(("thumbnail-name", index))
+                                        .test_support()
+                                        .aria_label(page.name.clone())
+                                        .w_full()
+                                        .truncate()
+                                        .text_xs()
+                                        .child(page.name.clone()),
+                                ),
+                        ),
                 )
                 .on_click(cx.listener(move |this, _, window, cx| this.navigate(index, window, cx))),
             )
@@ -2119,162 +2537,192 @@ impl ReaderView {
 
     fn render_inspector(&self, cx: &mut Context<Self>) -> gpui_kit::AnyElement {
         let language = self.language();
-        let mut panel = div()
-            .id("inspector")
-            .test_support()
-            .role(gpui_kit::Role::Group)
-            .aria_label(language.text(Text::ImageAndPreferences))
-            .w(gpui_kit::rems(13.))
-            .flex_none()
-            .h_full()
-            .p_3()
-            .gap_3()
+        let mut tabs = div()
             .flex()
-            .flex_col()
-            .border_l_1()
-            .border_color(cx.theme().border)
-            .overflow_y_scroll()
-            .child(
-                div()
-                    .flex()
-                    .items_center()
-                    .justify_between()
-                    .child(language.text(Text::ImageAdjustments))
-                    .child(
-                        Button::new("hide-inspector")
-                            .small()
-                            .ghost()
-                            .label("×")
-                            .accessibility_label(language.text(Text::HideImageAdjustments))
-                            .on_click(cx.listener(|this, _, _, cx| {
-                                this.inspector = false;
-                                cx.notify();
-                            })),
-                    ),
-            );
-        for (index, label, value) in [
+            .flex_wrap()
+            .gap_1()
+            .p_2()
+            .flex_none()
+            .id("inspector-tabs")
+            .test_support()
+            .role(gpui_kit::Role::TabList)
+            .aria_label(language.text(Text::ReadingTools));
+        for (id, tab, text) in [
+            ("inspector-image", InspectorTab::Image, Text::ImageTab),
+            ("inspector-reading", InspectorTab::Reading, Text::ReadingTab),
             (
-                0,
-                language.text(Text::Brightness),
-                self.reader.filters.brightness,
-            ),
-            (
-                1,
-                language.text(Text::Contrast),
-                self.reader.filters.contrast,
-            ),
-            (
-                2,
-                language.text(Text::Grayscale),
-                self.reader.filters.grayscale,
+                "inspector-playback",
+                InspectorTab::Playback,
+                Text::PlaybackTab,
             ),
         ] {
-            panel = panel.child(
-                div()
-                    .flex()
-                    .flex_col()
-                    .gap_3()
-                    .child(format!("{label}  {value:.0}%"))
-                    .child(Slider::new(&self.filter_sliders[index]).accessibility_label(label)),
+            let selected = self.inspector_tab == tab;
+            tabs = tabs.child(
+                Button::new(id)
+                    .small()
+                    .ghost()
+                    .label(language.text(text))
+                    .role(gpui_kit::Role::Tab)
+                    .selected(selected)
+                    .toggled(selected)
+                    .on_click(cx.listener(move |this, _, window, cx| {
+                        this.commit_focused_interval(window, cx);
+                        this.inspector_tab = tab;
+                        this.focus.focus(window, cx);
+                        cx.notify();
+                    })),
             );
         }
-        panel = panel.child(
-            div()
-                .flex()
-                .gap_1()
-                .child(
-                    self.button("rotate-left", "↶", Command::RotateLeft, cx)
-                        .accessibility_label(language.text(Text::RotateLeft))
-                        .tooltip(language.text(Text::RotateLeftTip)),
-                )
-                .child(
-                    self.button("rotate-right", "↷", Command::RotateRight, cx)
-                        .accessibility_label(language.text(Text::RotateRight))
-                        .tooltip(language.text(Text::RotateRightTip)),
-                )
-                .child(self.button(
-                    "reset-filters",
-                    language.text(Text::Reset),
-                    Command::ResetFilters,
-                    cx,
-                )),
-        );
-        if self.preferences_open {
-            let prefs = &self.reader.settings.preferences;
-            panel = panel.child(
-                div()
-                    .border_t_1()
-                    .border_color(cx.theme().border)
-                    .pt_3()
-                    .child(language.text(Text::Preferences)),
-            );
-            panel = panel.child(language.text(Text::Language));
-            for choice in Language::ALL {
-                panel = panel.child(
-                    Button::new(SharedString::from(format!("language-{}", choice.code())))
-                        .small()
-                        .ghost()
-                        .label(choice.native_name())
-                        .accessibility_label(choice.native_name())
-                        .selected(language == choice)
-                        .toggled(language == choice)
-                        .on_click(cx.listener(move |this, _, window, cx| {
-                            this.set_language(choice, window, cx);
-                        })),
-                );
+        let prefs = &self.reader.settings.preferences;
+        let mut content = div()
+            .id("inspector-content")
+            .test_support()
+            .role(gpui_kit::Role::Group)
+            .flex()
+            .flex_col()
+            .gap_4()
+            .p_3()
+            .flex_1()
+            .min_h_0()
+            .overflow_y_scroll();
+        match self.inspector_tab {
+            InspectorTab::Image => {
+                for (index, text, value) in [
+                    (0, Text::Brightness, self.reader.filters.brightness),
+                    (1, Text::Contrast, self.reader.filters.contrast),
+                    (2, Text::Grayscale, self.reader.filters.grayscale),
+                ] {
+                    content = content.child(
+                        div()
+                            .flex()
+                            .flex_col()
+                            .gap_3()
+                            .child(
+                                div()
+                                    .flex()
+                                    .justify_between()
+                                    .child(language.text(text))
+                                    .child(format!("{value:.0}%")),
+                            )
+                            .child(
+                                Slider::new(&self.filter_sliders[index])
+                                    .accessibility_label(language.text(text)),
+                            ),
+                    );
+                }
+                content = content
+                    .child(
+                        div()
+                            .flex()
+                            .gap_1()
+                            .child(
+                                self.icon_button(
+                                    "rotate-left",
+                                    language.text(Text::RotateLeft),
+                                    IconName::RotateCcw,
+                                    Command::RotateLeft,
+                                    cx,
+                                )
+                                .tooltip(language.text(Text::RotateLeftTip)),
+                            )
+                            .child(
+                                self.icon_button(
+                                    "rotate-right",
+                                    language.text(Text::RotateRight),
+                                    IconName::RotateCw,
+                                    Command::RotateRight,
+                                    cx,
+                                )
+                                .tooltip(language.text(Text::RotateRightTip)),
+                            ),
+                    )
+                    .child(
+                        self.button(
+                            "reset-filters",
+                            language.text(Text::ResetFilters),
+                            Command::ResetFilters,
+                            cx,
+                        )
+                        .outline()
+                        .w_full(),
+                    );
             }
-            panel = panel
-                .child(
-                    Checkbox::new("remember-position")
-                        .label(language.text(Text::RememberPosition))
-                        .checked(prefs.remember_position)
-                        .on_change(cx.listener(|this, value, _, cx| {
-                            this.reader.settings.preferences.remember_position = *value;
-                            this.dirty = true;
-                            cx.notify();
+            InspectorTab::Reading => {
+                content = content
+                    .child(
+                        Checkbox::new("remember-position")
+                            .label(language.text(Text::RememberPosition))
+                            .checked(prefs.remember_position)
+                            .on_change(cx.listener(|this, value, _, cx| {
+                                this.reader.settings.preferences.remember_position = *value;
+                                this.dirty = true;
+                                cx.notify();
+                            })),
+                    )
+                    .child(
+                        self.button(
+                            "reading-direction",
+                            language.text(Text::ReadingDirection),
+                            Command::Direction,
+                            cx,
+                        )
+                        .tooltip(language.text(if prefs.rtl {
+                            Text::RightToLeft
+                        } else {
+                            Text::LeftToRight
                         })),
-                )
-                .child(
-                    Checkbox::new("recursive-folder")
-                        .label(language.text(Text::IncludeSubfolders))
-                        .checked(prefs.recursive_folder)
-                        .on_change(cx.listener(|this, value, _, cx| {
-                            this.reader.settings.preferences.recursive_folder = *value;
-                            this.dirty = true;
-                            cx.notify();
-                        })),
-                )
-                .child(div().text_xs().child(language.text(Text::SubfoldersTip)))
-                .child(language.text(Text::IntervalLabel))
-                .child(
-                    Input::new(&self.interval_input)
-                        .id("interval-input")
-                        .aria_label(language.text(Text::SlideshowInterval))
-                        .small(),
-                )
-                .child(language.text(Text::ReadingBackground));
-            for (background, id, label) in [
-                (Background::Black, "黑色", language.text(Text::Black)),
-                (Background::Gray, "深灰", language.text(Text::Gray)),
-                (Background::Paper, "紙色", language.text(Text::Paper)),
-            ] {
-                panel = panel.child(
-                    Button::new(id)
-                        .small()
-                        .ghost()
-                        .label(label)
-                        .selected(prefs.background == background)
-                        .on_click(cx.listener(move |this, _, _, cx| {
-                            this.reader.settings.preferences.background = background;
-                            this.dirty = true;
-                            cx.notify();
-                        })),
-                );
-            }
-            panel = panel.child(div().text_xs().child(language.text(Text::SettingsTip)));
-            if let Some(error) = &self.save_error {
-                panel =
-                    panel
+                    )
+                    .child(language.text(Text::ReadingBackground));
+                let mut backgrounds = div().flex().flex_wrap().gap_1();
+                for (background, id, text) in [
+                    (Background::Black, "黑色", Text::Black),
+                    (Background::Gray, "深灰", Text::Gray),
+                    (Background::Paper, "紙色", Text::Paper),
+                ] {
+                    backgrounds = backgrounds.child(
+                        Button::new(id)
+                            .small()
+                            .ghost()
+                            .label(language.text(text))
+                            .selected(prefs.background == background)
+                            .toggled(prefs.background == background)
+                            .on_click(cx.listener(move |this, _, _, cx| {
+                                this.reader.settings.preferences.background = background;
+                                this.dirty = true;
+                                cx.notify();
+                            })),
+                    );
+                }
+                content = content
+                    .child(backgrounds)
+                    .child(
+                        div()
+                            .border_t_1()
+                            .border_color(cx.theme().border)
+                            .pt_3()
+                            .child(language.text(Text::GeneralSettings)),
+                    )
+                    .child(language.text(Text::Language));
+                let mut languages = div().flex().flex_wrap().gap_1();
+                for choice in Language::ALL {
+                    languages = languages.child(
+                        Button::new(SharedString::from(format!("language-{}", choice.code())))
+                            .small()
+                            .ghost()
+                            .label(choice.native_name())
+                            .accessibility_label(choice.native_name())
+                            .selected(language == choice)
+                            .toggled(language == choice)
+                            .on_click(cx.listener(move |this, _, window, cx| {
+                                this.set_language(choice, window, cx)
+                            })),
+                    );
+                }
+                content = content
+                    .child(languages)
+                    .child(div().text_xs().child(language.text(Text::SettingsTip)));
+                if let Some(error) = &self.save_error {
+                    content = content
                         .child(div().text_xs().text_color(cx.theme().danger).child(
                             language.format(Text::SettingsError, &[("error", error.clone())]),
                         ))
@@ -2283,37 +2731,94 @@ impl ReaderView {
                                 .small()
                                 .label(language.text(Text::BackupReset))
                                 .on_click(cx.listener(|this, _, window, cx| {
-                                    this.save_epoch.fetch_add(1, Ordering::SeqCst);
-                                    let lock = this.save_lock.clone();
-                                    let result = lock
-                                        .lock()
-                                        .map_err(|_| "Settings writer lock failed".to_string())
-                                        .and_then(|_guard| {
-                                            AppSettings::reset_corrupt_at(&this.settings_path)
-                                        });
-                                    match result {
-                                        Ok(backup) => {
-                                            this.reader.settings = AppSettings::default();
-                                            this.update_language(window, cx);
-                                            this.save_error = None;
-                                            this.interval_input.update(cx, |input, cx| {
-                                                input.set_value("5", window, cx)
-                                            });
-                                            this.sync_controls(window, cx);
-                                            this.set_localized_message(
-                                                Text::SettingsReset,
-                                                vec![("path", backup.display().to_string())],
-                                                false,
-                                                cx,
-                                            );
-                                        }
-                                        Err(error) => this.set_error(error, cx),
-                                    }
+                                    this.reset_corrupt_settings(window, cx)
                                 })),
                         );
+                }
+            }
+            InspectorTab::Playback => {
+                content = content
+                    .child(
+                        self.button(
+                            "slideshow",
+                            language.text(if self.reader.slideshow {
+                                Text::Stop
+                            } else {
+                                Text::Slideshow
+                            }),
+                            Command::Slideshow,
+                            cx,
+                        )
+                        .selected(self.reader.slideshow)
+                        .toggled(self.reader.slideshow)
+                        .disabled(self.reader.book.is_none()),
+                    )
+                    .child(language.text(Text::IntervalLabel))
+                    .child(
+                        Input::new(&self.interval_input)
+                            .id("interval-input")
+                            .aria_label(language.text(Text::SlideshowInterval))
+                            .small(),
+                    );
             }
         }
-        panel.into_any_element()
+        div()
+            .id("inspector")
+            .test_support()
+            .role(gpui_kit::Role::Group)
+            .aria_label(language.text(Text::ReadingTools))
+            .size_full()
+            .flex()
+            .flex_col()
+            .bg(cx.theme().background)
+            .border_l_1()
+            .border_color(cx.theme().border)
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .justify_between()
+                    .p_3()
+                    .flex_none()
+                    .child(language.text(Text::ReadingTools))
+                    .child(self.icon_button(
+                        "hide-inspector",
+                        language.text(Text::HideInspector),
+                        IconName::X,
+                        Command::Inspector,
+                        cx,
+                    )),
+            )
+            .child(tabs)
+            .child(content)
+            .into_any_element()
+    }
+
+    fn reset_corrupt_settings(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.save_epoch.fetch_add(1, Ordering::SeqCst);
+        let lock = self.save_lock.clone();
+        let result = lock
+            .lock()
+            .map_err(|_| "Settings writer lock failed".to_string())
+            .and_then(|_guard| AppSettings::reset_corrupt_at(&self.settings_path));
+        match result {
+            Ok(backup) => {
+                self.reader.settings = AppSettings::default();
+                self.panel_layout_key = (0, false, false);
+                self.update_language(window, cx);
+                self.save_error = None;
+                self.interval_input
+                    .update(cx, |input, cx| input.set_value("5", window, cx));
+                self.sync_controls(window, cx);
+                self.set_localized_message(
+                    Text::SettingsReset,
+                    vec![("path", backup.display().to_string())],
+                    false,
+                    cx,
+                );
+            }
+            Err(error) => self.set_error(error, cx),
+        }
     }
 
     fn render_viewer(&self, cx: &mut Context<Self>) -> gpui_kit::AnyElement {
@@ -2526,6 +3031,7 @@ impl ReaderView {
                                         let delta = event.delta.pixel_delta(px(16.)).y;
                                         // A panel over the viewer must not pass wheel zoom through.
                                         if this.zoom_open
+                                            || this.info_open
                                             || delta == px(0.)
                                             || !f32::from(delta).is_finite()
                                         {
@@ -2551,29 +3057,132 @@ impl ReaderView {
             .into_any_element()
     }
 
-    fn render_status(&self, cx: &mut Context<Self>) -> gpui_kit::AnyElement {
+    fn render_page_information(&self) -> gpui_kit::AnyElement {
         let language = self.language();
         let current = self.reader.current;
         let name = self
             .reader
-            .book
-            .as_ref()
-            .and_then(|book| book.pages.get(current))
-            .map(|page| page.name.clone())
-            .unwrap_or_else(|| language.text(Text::NoBook).into());
-        let detail = self
+            .current_name()
+            .unwrap_or(language.text(Text::NoBook));
+        let unavailable = language.text(Text::NotAvailable);
+        let dimensions = self
             .pages
             .get(&current)
-            .map(|page| {
-                format!(
-                    "{}×{} · {:.1} KiB",
-                    page.width,
-                    page.height,
-                    page.source_bytes as f32 / 1024.
-                )
-            })
-            .unwrap_or_default();
+            .map(|page| format!("{}×{}", page.width, page.height))
+            .unwrap_or_else(|| unavailable.to_owned());
+        let bytes = self
+            .pages
+            .get(&current)
+            .map(|page| format!("{:.1} KiB", page.source_bytes as f64 / 1024.))
+            .unwrap_or_else(|| unavailable.to_owned());
         div()
+            .id("info-panel")
+            .test_support()
+            .role(gpui_kit::Role::Group)
+            .aria_label(language.text(Text::PageInformation))
+            .w_80()
+            .flex()
+            .flex_col()
+            .gap_3()
+            .child(language.text(Text::PageInformation))
+            .child(
+                div()
+                    .id("info-name")
+                    .test_support()
+                    .aria_label(name.to_owned())
+                    .w_full()
+                    .overflow_x_scroll()
+                    .child(name.to_owned()),
+            )
+            .child(
+                div()
+                    .flex()
+                    .justify_between()
+                    .gap_2()
+                    .child(language.text(Text::Dimensions))
+                    .child(
+                        div()
+                            .id("info-dimensions")
+                            .test_support()
+                            .aria_label(dimensions.clone())
+                            .child(dimensions),
+                    ),
+            )
+            .child(
+                div()
+                    .flex()
+                    .justify_between()
+                    .gap_2()
+                    .child(language.text(Text::FileSize))
+                    .child(
+                        div()
+                            .id("info-size")
+                            .test_support()
+                            .aria_label(bytes.clone())
+                            .child(bytes),
+                    ),
+            )
+            .into_any_element()
+    }
+
+    fn render_status(&self, cx: &mut Context<Self>) -> gpui_kit::AnyElement {
+        let language = self.language();
+        let count = self.page_count();
+        let opened = count > 0;
+        let percent = if opened {
+            ((self.reader.current + 1) as f64 / count as f64 * 100.).round() as u32
+        } else {
+            0
+        };
+        let progress = if opened {
+            language.format(Text::ReadProgress, &[("percent", percent.to_string())])
+        } else {
+            "—".to_owned()
+        };
+        let owner = cx.entity().downgrade();
+        let info = Popover::new("info-popover")
+            .open(self.info_open && opened)
+            .on_open_change(cx.listener(|this, open: &bool, _, cx| {
+                this.info_open = *open && this.reader.book.is_some();
+                if this.info_open {
+                    this.zoom_open = false;
+                }
+                cx.notify();
+            }))
+            .trigger(
+                Button::new("info-trigger")
+                    .small()
+                    .ghost()
+                    .icon(IconName::Info)
+                    .accessibility_label(language.text(Text::PageInformation))
+                    .tooltip(language.text(Text::PageInformation))
+                    .disabled(!opened),
+            )
+            .content(move |_, _, cx| {
+                owner.upgrade().map_or_else(
+                    || div().into_any_element(),
+                    |view| view.read(cx).render_page_information(),
+                )
+            });
+        let message = div()
+            .id("status-message")
+            .test_support()
+            .role(gpui_kit::Role::Status)
+            .aria_label(self.message.clone())
+            .flex_1()
+            .min_w_0()
+            .truncate()
+            .text_xs()
+            .text_color(if self.message_error {
+                cx.theme().danger
+            } else {
+                cx.theme().muted_foreground
+            })
+            .child(self.message.clone());
+        div()
+            .id("reader-status")
+            .test_support()
+            .role(gpui_kit::Role::Group)
             .flex()
             .flex_col()
             .flex_none()
@@ -2584,61 +3193,68 @@ impl ReaderView {
                     .flex()
                     .items_center()
                     .gap_2()
-                    .px_2()
+                    .px_3()
                     .py_1()
-                    .child(div().flex_1().min_w_0().truncate().text_xs().child(name))
-                    .child(language.text(Text::PageNumber))
+                    .child(message)
+                    .child(
+                        self.icon_button(
+                            "previous",
+                            language.text(Text::PreviousPage),
+                            IconName::ChevronLeft,
+                            Command::Previous,
+                            cx,
+                        )
+                        .disabled(!opened || self.reader.current == 0),
+                    )
                     .child(
                         Input::new(&self.page_input)
                             .id("page-input")
                             .aria_label(language.text(Text::PageNumber))
                             .small()
-                            .w_16()
-                            .disabled(self.reader.book.is_none()),
+                            .w_12()
+                            .disabled(!opened),
                     )
-                    .child(format!("/ {}", self.page_count()))
+                    .child(format!("/ {count}"))
                     .child(
-                        div().w_40().px_2().child(
+                        self.icon_button(
+                            "next",
+                            language.text(Text::NextPage),
+                            IconName::ChevronRight,
+                            Command::Next,
+                            cx,
+                        )
+                        .disabled(!opened || self.reader.current + 1 >= count),
+                    )
+                    .child(
+                        div().w_24().px_1().child(
                             Slider::new(&self.page_slider)
-                                .disabled(self.reader.book.is_none())
+                                .disabled(!opened)
                                 .accessibility_label(language.text(Text::PagePosition)),
                         ),
                     )
-                    .child(div().text_xs().child(detail))
-                    .child(self.button(
-                        "sidebar-toggle",
-                        language.text(Text::Sidebar),
-                        Command::Sidebar,
-                        cx,
-                    ))
                     .child(
-                        Button::new("inspector-toggle")
-                            .small()
-                            .ghost()
-                            .label(language.text(Text::ImageAdjustments))
-                            .on_click(cx.listener(|this, _, _, cx| {
-                                this.inspector = !this.inspector;
-                                cx.notify();
-                            })),
-                    ),
+                        div()
+                            .id("reading-progress")
+                            .test_support()
+                            .aria_label(progress.clone())
+                            .text_xs()
+                            .child(progress),
+                    )
+                    .child(div().flex().flex_1().justify_end().child(info)),
             )
-            .child(
-                div()
-                    .id("status-message")
-                    .test_support()
-                    .role(gpui_kit::Role::Status)
-                    .aria_label(self.message.clone())
-                    .px_3()
-                    .pb_1()
-                    .text_xs()
-                    .truncate()
-                    .text_color(if self.message_error {
-                        cx.theme().danger
-                    } else {
-                        cx.theme().muted_foreground
-                    })
-                    .child(self.message.clone()),
-            )
+            .when(self.message_error, |bar| {
+                bar.child(
+                    div()
+                        .id("status-error-detail")
+                        .text_xs()
+                        .px_3()
+                        .pb_2()
+                        .text_color(cx.theme().danger)
+                        .w_full()
+                        .overflow_x_scroll()
+                        .child(self.message.clone()),
+                )
+            })
             .into_any_element()
     }
 }
@@ -2648,19 +3264,7 @@ impl Render for ReaderView {
         let language = self.language();
         self.sync_zoom_input(false, window, cx);
         self.visible_thumbnails.borrow_mut().clear();
-        let workspace = div()
-            .flex()
-            .items_stretch()
-            .flex_1()
-            .min_h_0()
-            .min_w_0()
-            .when(self.reader.settings.preferences.sidebar, |workspace| {
-                workspace.child(self.render_sidebar(cx))
-            })
-            .child(self.render_viewer(cx))
-            .when(self.inspector, |workspace| {
-                workspace.child(self.render_inspector(cx))
-            });
+        let workspace = self.render_workspace(window, cx);
         let drop_view = cx.entity().downgrade();
         div()
             .id("reader-window")
@@ -2689,7 +3293,7 @@ impl Render for ReaderView {
             .bg(cx.theme().background)
             .text_color(cx.theme().foreground)
             .text_sm()
-            .child(self.render_chrome(cx))
+            .child(self.render_chrome(window.viewport_size().width < px(1000.), cx))
             .child(workspace)
             .child(self.render_status(cx))
             .when(
@@ -2856,11 +3460,17 @@ fn set_native_menus(language: Language, cx: &mut App) {
         Menu::new(language.text(Text::File)).items([
             MenuItem::action(language.text(Text::OpenComic), OpenFile),
             MenuItem::action(language.text(Text::OpenFolder), OpenFolder),
+            MenuItem::action(
+                language.text(Text::IncludeSubfolders),
+                ToggleRecursiveFolder,
+            ),
             MenuItem::action(language.text(Text::SaveImage), SavePage),
             MenuItem::action(language.text(Text::CloseComic), Close),
         ]),
         Menu::new(language.text(Text::View)).items([
             MenuItem::action(language.text(Text::Sidebar), Sidebar),
+            MenuItem::action(language.text(Text::ShowInspector), Inspector),
+            MenuItem::action(language.text(Text::SinglePage), Single),
             MenuItem::action(language.text(Text::Spread), Spread),
             MenuItem::action(language.text(Text::ContinuousPages), Continuous),
             MenuItem::action(language.text(Text::ReadingDirection), Direction),

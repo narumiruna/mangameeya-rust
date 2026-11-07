@@ -1,6 +1,6 @@
 use super::*;
 
-const FIT_CHOICES: [(&str, FitMode); 4] = [
+pub(super) const FIT_CHOICES: [(&str, FitMode); 4] = [
     ("zoom-fit-window", FitMode::Window),
     ("zoom-fit-width", FitMode::Width),
     ("zoom-fit-height", FitMode::Height),
@@ -50,7 +50,7 @@ fn replace_draft(window: &mut Window, draft: &str, cx: &mut App) {
     assert_eq!(window.find("zoom-input").value(), Some(draft));
 }
 
-fn submit_draft(fixture: &Fixture, draft: &str, cx: &mut TestAppContext) {
+pub(super) fn submit_draft(fixture: &Fixture, draft: &str, cx: &mut TestAppContext) {
     cx.update_window(fixture.window, |_, window, cx| {
         replace_draft(window, draft, cx);
         window.press("enter", cx);
@@ -693,7 +693,8 @@ fn focused_draft_survives_resize_panels_navigation_rotation_and_async_geometry(
             fixture.view.update(cx, |view, cx| match change {
                 0 => view.perform(Command::Sidebar, window, cx),
                 1 => {
-                    view.inspector = !view.inspector;
+                    let layout = &mut view.reader.settings.preferences.panel_layout;
+                    layout.inspector_visible = !layout.inspector_visible;
                     cx.notify();
                 }
                 2 => view.navigate(1, window, cx),
@@ -850,6 +851,57 @@ fn pending_geometry_disables_only_manual_controls_and_book_lifecycle_closes_pane
             second.canonicalize().unwrap()
         );
     });
+}
+
+#[gpui_kit::test]
+fn native_panel_drags_remeasure_fitted_percentage_without_replacing_zoom_entities(
+    cx: &mut TestAppContext,
+) {
+    let fixture = loaded(cx, &[(120, 200), (240, 120)]);
+    let entity = fixture
+        .view
+        .read_with(cx, |view, _| view.zoom_input.entity_id());
+    cx.update_window(fixture.window, |_, window, cx| {
+        window.click("zoom-trigger", cx);
+        window.click("zoom-fit-width", cx);
+    })
+    .unwrap();
+    for (left, delta) in [(true, 40.), (false, -32.)] {
+        cx.update_window(fixture.window, |_, window, cx| {
+            window.click("zoom-trigger", cx);
+            replace_draft(window, "137.25%", cx);
+            let viewer = window.find("viewer").bounds();
+            let x = if left { viewer.left() } else { viewer.right() };
+            window.drag(
+                point(x, viewer.center().y),
+                point(x + px(delta), viewer.center().y),
+                cx,
+            );
+        })
+        .unwrap();
+        pump(&fixture, cx);
+        cx.update_window(fixture.window, |_, window, cx| {
+            window.render_frame(cx);
+            let view = fixture.view.read(cx);
+            assert_eq!(view.reader.current, 0);
+            assert_eq!(view.reader.settings.preferences.fit, FitMode::Width);
+            assert_eq!(
+                view.reader.zoom, 1.,
+                "an outside drag must not apply the draft"
+            );
+            assert!(
+                !view.zoom_open,
+                "an outside drag keeps the existing cancel rule"
+            );
+            assert!(window.try_find("zoom-panel").is_none());
+            assert_eq!(view.zoom_input.entity_id(), entity);
+            let expected = (f32::from(view.viewer_size.width) - 24.) / 120.;
+            close_enough(view.effective_scale().unwrap(), expected);
+            trigger(window, FitMode::Width, &format!("{:.0}%", expected * 100.));
+            assert!((rendered_scale(window, view, 0, 120) - expected).abs() < 0.01);
+        })
+        .unwrap();
+    }
 }
 
 #[gpui_kit::test]
