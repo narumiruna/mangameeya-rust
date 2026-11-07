@@ -283,7 +283,12 @@ fn language_changes_preserve_reader_state_history_and_input_drafts(cx: &mut Test
                 grayscale: 30.,
             };
             view.reader.set_bookmark();
-            view.preferences_open = true;
+            view.inspector_tab = InspectorTab::Reading;
+            view.reader
+                .settings
+                .preferences
+                .panel_layout
+                .inspector_visible = true;
             view.zoom_open = true;
             view.controls_pending = false;
             view.path_pending = false;
@@ -315,7 +320,15 @@ fn language_changes_preserve_reader_state_history_and_input_drafts(cx: &mut Test
                     revision
                 );
                 assert!(view.dirty);
-                assert!(view.preferences_open && view.zoom_open);
+                assert_eq!(view.inspector_tab, InspectorTab::Reading);
+                assert!(
+                    view.reader
+                        .settings
+                        .preferences
+                        .panel_layout
+                        .inspector_visible
+                );
+                assert!(view.zoom_open);
                 assert!(!view.controls_pending && !view.path_pending);
                 for (input, draft) in [
                     (&view.page_input, "004"),

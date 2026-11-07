@@ -149,6 +149,111 @@ Local checks on 2026-11-07, macOS arm64:
 
 The transient lock was simulated deterministically in regression tests; it did not occur during the successful local package build. No release workflow was dispatched, no package was published, and the unrelated rust-i18n migration plan was not changed.
 
+## Desktop efficiency workspace verification
+
+Implementation work started on 2026-11-07 from `d41f28b` on Windows x64.
+The approved plan is `docs/plans/2026-11-07_desktop-efficiency-plan.md`.
+The branch is `narumi/feat/desktop-efficiency-ui`.
+**This work is not fully verified. PR #13 is open; required platform checks still need CI evidence.**
+
+The change uses GPUI Kit 0.9.0 without new dependencies. It adds a grouped toolbar, explicit reading modes, resizable side panels, three reading-tool tabs, and a page-information Popover. Reading, decoding, archive, IPC, and export implementations are unchanged.
+
+### Initial implementation evidence
+
+These results describe the original implementation before the main-branch merge. Merge checks are recorded below.
+Rust is 1.99.1. Cargo commands used the native Windows MSVC toolchain.
+The shell is WSL; the Cargo process and test executables are Windows programs, not Linux builds.
+The native Rust bin directory was added only to the child process PATH so Cargo could find rustfmt and Clippy.
+
+| Check | Result |
+| --- | --- |
+| Baseline `d41f28b` fmt and all-target/all-feature Clippy | Passed in a temporary detached worktree; the worktree was removed |
+| Baseline full Rust suite | 139 passed, 3 failed: two IPC ConnectionReset failures and one settings AccessDenied failure |
+| Baseline settings backup test, isolated rerun | Passed |
+| Baseline production rendering | Passed native Windows events and geometry |
+| `cargo fmt --all -- --check` | Passed |
+| `cargo clippy --locked --all-targets --all-features -- -D warnings` | Passed |
+| `cargo test --locked --all-features ui::tests::` | 60 passed; no failures or ignored tests |
+| Settings tests | 24 passed; no failures or ignored tests |
+| `cargo test --locked --test rendering` | Passed native Windows events and geometry, including the desktop matrix |
+| Full Rust suite, default parallelism | **Failed:** 166 passed, 2 failed in unchanged IPC tests |
+| Full Rust suite, `-- --test-threads=1` | **Passed:** 168 passed; no failures or ignored tests |
+| Pinned changenote 0.10.0 `status` | Passed; pending notes select a minor release; no product version files were changed |
+| Release/DMG mock tests on WSL Linux | 20 passed; the native changenote integration test was skipped here and run separately below |
+| Native changenote version integration on Windows | 1 passed, with `PYTHONUTF8=1` and the pinned CLI; changes were limited to temporary fixtures |
+
+The complete full-suite failures are retained, not suppressed:
+
+- The final default run failed `instance::tests::queue_is_bounded_and_rejects_overflow` and `instance::tests::rejects_oversized_payloads_and_path_counts` with ConnectionReset. An earlier parallel run also failed `instance::tests::forwards_paths_and_empty_focus_requests` with an unexpected queued path.
+- An earlier serial run failed the queue test. The final serial run passed all 168 tests, including the IPC concurrency tests; no test was ignored or removed.
+- The queue failure was also reproduced before implementation. Its cause is not established. No IPC code or test was changed to hide it.
+- Normal parallel CI results are still required to assess this baseline instability. The serial pass is not reported as a parallel pass.
+
+The shell mock tests require a POSIX shell and jq. A first attempt under Windows Python selected WSL bash and failed on Windows paths. The shell cases were rerun successfully on Linux. The separate native CLI integration needed UTF-8 mode for subprocess output. These environment corrections did not change test assertions or release scripts.
+
+Local logs are under `target/`: `desktop-baseline.log`, `desktop-baseline-lint.log`, `desktop-baseline-rendering.log`, `desktop-ui-final.log`, `desktop-settings.log`, `desktop-clippy-final.log`, `desktop-rendering-final.log`, `desktop-tests-final.log`, `desktop-tests-serial-final.log`, `desktop-linux-release-tests.log`, and `desktop-version-test2.log`.
+These are local outputs, not tracked source assets.
+
+### Regression coverage and review fixes
+
+The desktop tests use real pointer, keyboard, wheel, menu, and input events. They cover three locales at 1280×800, 960×640, and 800×540; explicit mode selection; both panel states and width persistence; page and progress boundaries; image/read/playback separation; field drafts; reset scope; recursion on the next open; information lifecycle; and shortcut isolation.
+
+Review added targeted protection for:
+
+- Two consecutive sidebar drags in a constrained viewport without overwriting the untouched inspector preference.
+- A no-op constrained inspector overdrag. The callback compares visible, clamped widths and leaves the stored preference and file bytes unchanged.
+- A right-panel overdrag followed by a sidebar drag. Completed drags reconcile GPUI's raw slot sizes with visible width limits.
+- Pointer-move remeasurement without settings writes; only a changed, completed handle drag commits a width.
+- A jump to an unmeasured virtual thumbnail. It uses an explicit item anchor when no measured bounds exist.
+- Fit and zoom keys inside Information Popover, without changing the existing Zoom Popover shortcut rules.
+- Native Preferences while the playback input is focused. It commits the existing Blur value and moves focus before the input is removed.
+
+The production rendering test defines 84 additional `desktop-*` scenarios. On macOS, captures go under `target/ui-smoke/`.
+Windows runs the interaction and geometry checks but the existing test does not create GPU pixel captures. HTML concept images are not native verification evidence.
+
+### Settings compatibility
+
+`preferences.panel_layout` stores integer logical-pixel widths and inspector visibility. Missing fields use defaults. Invalid types, unknown fields, duplicate fields, and non-object layouts are rejected without overwriting the original file. Existing reading data and native path formats are retained.
+
+Older builds reject the new key. Before a downgrade, back up `settings.json` and remove only `preferences.panel_layout` from a working copy. Builds that also predate language support require the documented removal of `preferences.language`. Do not reset reading data to downgrade.
+
+### Merge-conflict resolution
+
+On 2026-11-07, the branch was updated with `main` at `986512f`.
+Upstream split the README into English, Traditional Chinese, and Japanese and released version 0.3.0.
+The merge keeps that document structure and release metadata.
+The desktop UI controls, panel settings, and safe downgrade instructions are present in all three README files.
+
+No Rust source, test, dependency resolution, build script, asset, or workflow was changed by this conflict resolution.
+The completed upstream release notes stay removed. The desktop feature note remains pending.
+The pinned changenote CLI reports the next minor version as 0.4.0; this check did not change product version files.
+
+Checks on the combined tree:
+
+| Check | Result |
+| --- | --- |
+| Formatting and all-target/all-feature Clippy | Passed on Windows MSVC |
+| Full Rust suite, default parallelism | 167 passed, 1 failed in the existing IPC queue test with ConnectionReset |
+| Full Rust suite, serial execution | 168 passed; no failures or ignored tests |
+| Production rendering | Passed native Windows events and geometry |
+| Pinned changenote status and native version integration | Passed; version integration used temporary fixtures |
+| Release/DMG mock checks | 20 passed on Linux; the skipped native CLI case passed separately on Windows |
+| Multilingual README checks | Upstream sections, local links, settings fields, code fences, and conflict-marker checks passed |
+
+The new logs are `target/desktop-merge-clippy.log`, `desktop-merge-tests.log`, `desktop-merge-tests-serial.log`, `desktop-merge-rendering.log`, `desktop-merge-changenote.json`, and `desktop-merge-version-test.log`.
+This merge does not establish macOS or parallel CI success. The existing IPC failure is not hidden or removed.
+No PR was merged, package published, version tag created, or release workflow dispatched by this conflict resolution.
+
+### Remaining required evidence
+
+- Normal parallel CI confirmation for this implementation revision. The full serial Windows suite passed; the local parallel baseline IPC failures remain unresolved.
+- macOS arm64 tests, Clippy, Metal rendering, and actual before/after captures.
+- Intel macOS all-target compile/Clippy evidence.
+- Normal CI results from [PR #13](https://github.com/narumiruna/mangameeya-rust/pull/13). WSL GitHub CLI authentication is available; the initial Windows CLI login blocker is resolved. No release workflow was dispatched for this work.
+
+Physical DPI, IME, Intel desktop interaction, and subjective reading comfort remain extra platform review paths. No package was published and no version tag was created.
+
+
 ## External platform and release checks
 
 These checks are not represented as local passes:

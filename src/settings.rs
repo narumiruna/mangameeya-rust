@@ -50,6 +50,33 @@ pub enum Background {
     Paper,
 }
 
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct PanelLayoutPreferences {
+    /// Preferred sidebar width in logical pixels, limited to 216 through 320.
+    pub sidebar_width: u32,
+    /// Preferred inspector width in logical pixels, limited to 240 through 360.
+    pub inspector_width: u32,
+    pub inspector_visible: bool,
+}
+
+impl Default for PanelLayoutPreferences {
+    fn default() -> Self {
+        Self {
+            sidebar_width: 224,
+            inspector_width: 256,
+            inspector_visible: true,
+        }
+    }
+}
+
+impl PanelLayoutPreferences {
+    pub fn validate(&mut self) {
+        self.sidebar_width = self.sidebar_width.clamp(216, 320);
+        self.inspector_width = self.inspector_width.clamp(240, 360);
+    }
+}
+
 /// Zoom, rotation, and image filters are runtime state, not preferences.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(default, deny_unknown_fields)]
@@ -60,6 +87,7 @@ pub struct Preferences {
     pub fit: FitMode,
     pub sidebar: bool,
     pub sidebar_mode: SidebarMode,
+    pub panel_layout: PanelLayoutPreferences,
     pub background: Background,
     pub recursive_folder: bool,
     pub remember_position: bool,
@@ -76,6 +104,7 @@ impl Default for Preferences {
             fit: FitMode::Window,
             sidebar: true,
             sidebar_mode: SidebarMode::Thumbnails,
+            panel_layout: PanelLayoutPreferences::default(),
             background: Background::Black,
             recursive_folder: true,
             remember_position: true,
@@ -87,6 +116,7 @@ impl Default for Preferences {
 impl Preferences {
     pub fn validate(&mut self) {
         self.interval = self.interval.clamp(1, 120);
+        self.panel_layout.validate();
     }
 }
 
@@ -336,12 +366,15 @@ impl AppSettings {
         let value: serde_json::Value =
             serde_json::from_slice(&bytes).map_err(|error| invalid(error.to_string()))?;
         if !value.is_object()
-            || value
-                .get("preferences")
-                .is_some_and(|preferences| !preferences.is_object())
+            || value.get("preferences").is_some_and(|preferences| {
+                !preferences.is_object()
+                    || preferences
+                        .get("panel_layout")
+                        .is_some_and(|layout| !layout.is_object())
+            })
         {
             return Err(invalid(
-                "Settings and preferences must be JSON objects".to_owned(),
+                "Settings, preferences, and panel layout must be JSON objects".to_owned(),
             ));
         }
         let mut settings: Self =
@@ -495,10 +528,256 @@ mod tests {
         assert_eq!(preferences.fit, FitMode::Window);
         assert!(preferences.sidebar);
         assert_eq!(preferences.sidebar_mode, SidebarMode::Thumbnails);
+        assert_eq!(
+            preferences.panel_layout,
+            PanelLayoutPreferences {
+                sidebar_width: 224,
+                inspector_width: 256,
+                inspector_visible: true,
+            }
+        );
         assert_eq!(preferences.background, Background::Black);
         assert!(preferences.recursive_folder);
         assert!(preferences.remember_position);
         assert_eq!(preferences.interval, 5);
+    }
+
+    #[test]
+    fn panel_layout_defaults_apply_to_missing_and_partial_settings() {
+        assert_eq!(
+            serde_json::from_str::<PanelLayoutPreferences>("{}").unwrap(),
+            PanelLayoutPreferences::default()
+        );
+        assert_eq!(
+            serde_json::from_str::<AppSettings>("{}").unwrap(),
+            AppSettings::default()
+        );
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("settings.json");
+        let book = PathBuf::from("books/日本語.cbz");
+        for (preferences, sidebar_width, inspector_width, inspector_visible, sidebar) in [
+            (r#"{}"#, 224, 256, true, true),
+            (r#"{"sidebar":false}"#, 224, 256, true, false),
+            (r#"{"panel_layout":{}}"#, 224, 256, true, true),
+            (
+                r#"{"panel_layout":{"sidebar_width":280}}"#,
+                280,
+                256,
+                true,
+                true,
+            ),
+            (
+                r#"{"panel_layout":{"inspector_width":300}}"#,
+                224,
+                300,
+                true,
+                true,
+            ),
+            (
+                r#"{"panel_layout":{"inspector_visible":false}}"#,
+                224,
+                256,
+                false,
+                true,
+            ),
+            (
+                r#"{"sidebar":false,"panel_layout":{"sidebar_width":320,"inspector_width":360,"inspector_visible":true}}"#,
+                320,
+                360,
+                true,
+                false,
+            ),
+            (
+                r#"{"sidebar":true,"panel_layout":{"sidebar_width":216,"inspector_width":240,"inspector_visible":false}}"#,
+                216,
+                240,
+                false,
+                true,
+            ),
+        ] {
+            let source = serde_json::to_vec(&serde_json::json!({
+                "preferences": serde_json::from_str::<serde_json::Value>(preferences).unwrap(),
+                "recent": ["books/日本語.cbz"],
+                "positions": {"books/日本語.cbz": 12},
+                "bookmarks": {"books/日本語.cbz": 8}
+            }))
+            .unwrap();
+            fs::write(&path, &source).unwrap();
+            let expected = AppSettings {
+                preferences: Preferences {
+                    sidebar,
+                    panel_layout: PanelLayoutPreferences {
+                        sidebar_width,
+                        inspector_width,
+                        inspector_visible,
+                    },
+                    ..Preferences::default()
+                },
+                recent: vec![book.clone()],
+                positions: HashMap::from([(book.clone(), 12)]),
+                bookmarks: HashMap::from([(book.clone(), 8)]),
+            };
+            assert_eq!(AppSettings::load_from(&path).unwrap(), expected);
+            assert_eq!(fs::read(&path).unwrap(), source);
+            expected.save_to(&path).unwrap();
+            assert_eq!(AppSettings::load_from(&path).unwrap(), expected);
+            let saved: serde_json::Value =
+                serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+            assert_eq!(
+                saved["preferences"]["panel_layout"],
+                serde_json::json!({
+                    "sidebar_width": sidebar_width,
+                    "inspector_width": inspector_width,
+                    "inspector_visible": inspector_visible
+                })
+            );
+            assert_eq!(saved["preferences"]["sidebar"], sidebar);
+        }
+        assert_eq!(fs::read_dir(directory.path()).unwrap().count(), 1);
+    }
+
+    #[test]
+    fn panel_layout_widths_are_clamped_on_load_and_save() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("settings.json");
+        let book = PathBuf::from("books/日本語.cbz");
+        for (sidebar_width, inspector_width, expected_sidebar, expected_inspector) in [
+            (0, 0, 216, 240),
+            (215, 239, 216, 240),
+            (216, 240, 216, 240),
+            (217, 241, 217, 241),
+            (224, 256, 224, 256),
+            (319, 359, 319, 359),
+            (320, 360, 320, 360),
+            (321, 361, 320, 360),
+            (u32::MAX, u32::MAX, 320, 360),
+            (0, u32::MAX, 216, 360),
+            (u32::MAX, 0, 320, 240),
+        ] {
+            let settings = AppSettings {
+                preferences: Preferences {
+                    sidebar: false,
+                    panel_layout: PanelLayoutPreferences {
+                        sidebar_width,
+                        inspector_width,
+                        inspector_visible: false,
+                    },
+                    ..Preferences::default()
+                },
+                recent: vec![book.clone()],
+                positions: HashMap::from([(book.clone(), 12)]),
+                bookmarks: HashMap::from([(book.clone(), 8)]),
+            };
+            let mut expected = settings.clone();
+            expected.preferences.panel_layout.sidebar_width = expected_sidebar;
+            expected.preferences.panel_layout.inspector_width = expected_inspector;
+            let mut validated = settings.clone();
+            validated.validate();
+            assert_eq!(validated, expected);
+
+            let source = serde_json::to_vec(&settings).unwrap();
+            fs::write(&path, &source).unwrap();
+            assert_eq!(AppSettings::load_from(&path).unwrap(), expected);
+            assert_eq!(fs::read(&path).unwrap(), source);
+            settings.save_to(&path).unwrap();
+            assert_eq!(AppSettings::load_from(&path).unwrap(), expected);
+            // Read without validation to check that saving stored clamped values.
+            let saved: AppSettings = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+            assert_eq!(saved, expected);
+            // Saving validation must not change the caller's preferences or reading data.
+            assert_eq!(serde_json::to_vec(&settings).unwrap(), source);
+        }
+        assert_eq!(fs::read_dir(directory.path()).unwrap().count(), 1);
+    }
+
+    fn assert_invalid_panel_layout_is_preserved(path: &Path, layout: &str) {
+        let source = format!(
+            r#"{{"preferences":{{"panel_layout":{layout}}},"recent":["book.cbz"],"positions":{{"book.cbz":12}},"bookmarks":{{"book.cbz":8}}}}"#
+        );
+        fs::write(path, &source).unwrap();
+        let error = AppSettings::load_from(path).unwrap_err();
+        assert!(error.contains("Invalid settings"), "{source}: {error}");
+        assert!(
+            error.contains("The file was not changed"),
+            "{source}: {error}"
+        );
+        assert!(AppSettings::default().save_to(path).is_err(), "{source}");
+        assert_eq!(fs::read(path).unwrap(), source.as_bytes());
+    }
+
+    #[test]
+    fn invalid_panel_width_types_preserve_the_original_file() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("settings.json");
+        for field in ["sidebar_width", "inspector_width"] {
+            for value in [
+                "-1",
+                "4294967296",
+                "18446744073709551615",
+                "0.0",
+                "224.0",
+                "1.5",
+                "2.24e2",
+                r#""224""#,
+                "null",
+                "true",
+                "false",
+                "[]",
+                "{}",
+            ] {
+                let layout = format!(r#"{{"{field}":{value}}}"#);
+                assert_invalid_panel_layout_is_preserved(&path, &layout);
+            }
+        }
+        assert_eq!(fs::read_dir(directory.path()).unwrap().count(), 1);
+    }
+
+    #[test]
+    fn invalid_panel_visibility_types_preserve_the_original_file() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("settings.json");
+        for value in ["null", "0", "1", "-1", "1.0", r#""true""#, "[]", "{}"] {
+            let layout = format!(r#"{{"inspector_visible":{value}}}"#);
+            assert_invalid_panel_layout_is_preserved(&path, &layout);
+        }
+        assert_eq!(fs::read_dir(directory.path()).unwrap().count(), 1);
+    }
+
+    #[test]
+    fn non_object_panel_layout_preserves_the_original_file() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("settings.json");
+        for layout in [
+            "null",
+            "true",
+            "false",
+            "224",
+            "224.0",
+            r#""layout""#,
+            "[]",
+            "[224]",
+            "[224,256,true]",
+        ] {
+            assert_invalid_panel_layout_is_preserved(&path, layout);
+        }
+        assert_eq!(fs::read_dir(directory.path()).unwrap().count(), 1);
+    }
+
+    #[test]
+    fn unknown_and_duplicate_panel_fields_preserve_the_original_file() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("settings.json");
+        for layout in [
+            r#"{"future_width":300}"#,
+            r#"{"sidebar":false}"#,
+            r#"{"sidebar_width":280,"inspector_width":300,"inspector_visible":false,"future_option":{"preserve":true}}"#,
+            r#"{"sidebar_width":224,"sidebar_width":280}"#,
+            r#"{"inspector_width":256,"inspector_width":300}"#,
+            r#"{"inspector_visible":true,"inspector_visible":false}"#,
+        ] {
+            assert_invalid_panel_layout_is_preserved(&path, layout);
+        }
+        assert_eq!(fs::read_dir(directory.path()).unwrap().count(), 1);
     }
 
     #[test]
@@ -549,12 +828,20 @@ mod tests {
         let mut settings = AppSettings::default();
         settings.preferences.mode = ReadingMode::Continuous;
         settings.preferences.background = Background::Paper;
+        settings.preferences.sidebar = false;
+        settings.preferences.panel_layout = PanelLayoutPreferences {
+            sidebar_width: 288,
+            inspector_width: 312,
+            inspector_visible: true,
+        };
         settings.add_recent(&book);
         settings.positions.insert(book.clone(), 12);
         settings.bookmarks.insert(book, 8);
         settings.save_to(&path).unwrap();
         assert_eq!(AppSettings::load_from(&path).unwrap(), settings);
         settings.preferences.mode = ReadingMode::Spread;
+        settings.preferences.sidebar = true;
+        settings.preferences.panel_layout.inspector_visible = false;
         settings.save_to(&path).unwrap();
         assert_eq!(AppSettings::load_from(&path).unwrap(), settings);
         assert_eq!(fs::read_dir(path.parent().unwrap()).unwrap().count(), 1);
@@ -593,6 +880,11 @@ mod tests {
         let saved: serde_json::Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
         let mut expected = legacy;
         expected["preferences"]["language"] = serde_json::json!("en");
+        expected["preferences"]["panel_layout"] = serde_json::json!({
+            "sidebar_width": 224,
+            "inspector_width": 256,
+            "inspector_visible": true
+        });
         assert_eq!(saved, expected);
         assert_eq!(AppSettings::load_from(&path).unwrap(), settings);
     }
@@ -670,6 +962,7 @@ mod tests {
             b"[]".as_slice(),
             br#"{"preferences":[]}"#.as_slice(),
             br#"{"preferences":{},"preferences":{}}"#.as_slice(),
+            br#"{"preferences":{"panel_layout":{},"panel_layout":{}}}"#.as_slice(),
             br#"{"unknown_user_data":"preserve"}"#.as_slice(),
             br#"{"preferences":{"future_option":true}}"#.as_slice(),
             br#"{"preferences":{"fit":"unknown"}}"#.as_slice(),
@@ -773,6 +1066,11 @@ mod tests {
                 fit: FitMode::Width,
                 sidebar: false,
                 sidebar_mode: SidebarMode::Recent,
+                panel_layout: PanelLayoutPreferences {
+                    sidebar_width: 280,
+                    inspector_width: 300,
+                    inspector_visible: false,
+                },
                 background: Background::Paper,
                 recursive_folder: false,
                 remember_position: true,

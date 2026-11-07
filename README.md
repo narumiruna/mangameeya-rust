@@ -73,25 +73,57 @@ cargo run --locked -- /path/to/book.cbz
 macOS also supports `Command+O`, `Command+Shift+O`, `Command+S`, `Command+W`, `Command+Q`, `Command+,`, and `Control+Command+F`.
 The mouse wheel scrolls without directly turning pages. Hold `Ctrl` while using the wheel to zoom. In single-page and two-page layouts, click the left or right edge of the reading area to turn pages.
 
-The toolbar's **Zoom** control shows both the current mode and the actual zoom percentage. Click it to open a popover. You can fit to the window, width, or height, select original size, enter a percentage, or adjust with `−` / `+`.
+### Toolbar and panels
+
+The toolbar groups file commands, panels, reading modes, zoom, reading direction, bookmarks, reading tools, and fullscreen.
+The **Single page / Two pages / Continuous** buttons select a mode directly. Selecting the current mode again does not change it.
+Mode changes keep the current fit mode or custom zoom. `S` and `C` keep their existing toggle behavior.
+Fullscreen uses the existing commands and shortcuts. This update does not add a focus mode, theme switch, or dependency.
+The interface continues to use GPUI Kit, ActiveTheme, and Lucide icons.
+
+You can hide each side panel independently and drag its edge to change its width. Panel visibility and preferred widths are saved and restored.
+
+- The left panel keeps the **File / Thumbnails / Recent** tabs. Thumbnails keep their aspect ratio. Page numbers and file names are separate; tooltips show full file names.
+- The right **Reading tools** panel has three tabs:
+  - **Image**: brightness, contrast, grayscale, rotation, and **Reset filters**. Reset filters changes only brightness, contrast, and grayscale, not rotation or reading preferences.
+  - **Reading**: reading-position memory, reading direction, and background. **General settings** contains language selection and corrupt-settings recovery.
+  - **Playback**: slideshow playback and a 1–120 second interval.
+
+Changing tool tabs does not reset values or unsubmitted input. The selected tool tab is not saved between launches.
+The **Tools → Preferences** menu and the native Preferences entry open the **Reading** tab.
+**File → Open options** contains **Include subfolders**, using the existing `recursive_folder` preference.
+Changes apply the next time you open a comic; they do not reload the current book.
+
+### Zoom and page navigation
+
+The toolbar keeps one **Zoom** control for the current mode and actual percentage. Click it to open a popover.
+Select fit to window, width, height, or original size; enter a percentage; or adjust with `−` / `+`.
 
 - The percentage refers to the current page. Pages of different sizes in a spread can have different percentages. The control shows `—` until image dimensions are available.
 - Manual input, zoom in/out, and `Ctrl`+wheel switch to **Custom zoom**. Zoom in/out and the wheel use the current actual percentage; manual input applies the specified percentage. Manual zoom is limited to 10%–800%; automatic fit modes are not limited to this range.
 - After you enter a percentage, press `Enter` to apply it and close the popover. Selecting a fit mode also closes it; `−` / `+` allow repeated adjustments. Press `Escape` or click outside to close it without applying unsubmitted input.
 
-Page numbers apply when you press `Enter`. The slideshow interval applies when you press `Enter` or leave the field.
+Page navigation appears only at the bottom: previous page, page number, total pages, and next page.
+The toolbar does not repeat these controls. The bottom bar also shows reading progress, page information, necessary status, and visible errors.
+Zoom and panel switches remain in the toolbar.
+
+The page-information popover shows the current page's full file name, dimensions, and available source size.
+Missing information shows **Not available**. Page changes update the information; closing or replacing the book closes the popover and clears old data.
+Reading progress is the current page number divided by the total, rounded to a percentage.
+Without an open comic, progress shows an empty state and page navigation is disabled.
+
+Page numbers apply only when you press `Enter`. The slideshow interval applies when you press `Enter` or leave the field.
 
 ## Language
 
-Open **Preferences → Language** and select **English**, **日本語**, or **正體中文**.
+Open **Preferences** from the **Tools** menu or the native Preferences entry.
+This opens **Reading tools → Reading**. Under **General settings → Language**, select
+**English**, **日本語**, or **正體中文**.
 The choice applies immediately and is saved in `settings.json` as `preferences.language`
 (`en`, `ja`, or `zh-Hant`). English is the default, including for older settings without this field.
 Menus, controls, tooltips, accessibility labels, and reader messages use the selected language.
 File names and technical error details are unchanged. Native file dialog controls use the OS language.
 GPUI component text uses the matching locale; component strings not supplied by GPUI, including Japanese text-editing menus, fall back to English.
-
-Before using an older build, back up `settings.json` and remove only `preferences.language`
-from the working copy. Older builds reject unknown preference fields; do not reset reading data to downgrade.
 
 ## Local data
 
@@ -100,9 +132,35 @@ Preferences, reading positions, recent files, and bookmarks are stored in the us
 - Windows: `%APPDATA%\MangaMeeya\MangaMeeya Rust\config\settings.json`
 - macOS: `~/Library/Application Support/org.MangaMeeya.MangaMeeya-Rust/settings.json`
 
-`directories::ProjectDirs` determines the actual path. If the settings file is corrupt, the application keeps the original and shows an error. In Preferences, select **Back up and reset settings** to save a `settings.json.corrupt-*` backup before resetting.
+`directories::ProjectDirs` determines the actual path.
+If the settings file is corrupt, the application keeps the original and shows an error.
+Under **Reading tools → Reading → General settings**, select **Back up and reset settings** to save a `settings.json.corrupt-*` backup before resetting.
 Local storage from the older WebView version is not read, deleted, or migrated automatically.
 The single-window lock and authenticated loopback endpoint are also in this directory. The endpoint is removed when the application closes.
+
+### Panel settings and downgrade
+
+Panel preferences are stored in `preferences.panel_layout`. Widths use integer logical pixels:
+
+| Field | Default | Rule |
+| --- | --- | --- |
+| `sidebar_width` | `224` | Limited to 216–320 logical px |
+| `inspector_width` | `256` | Limited to 240–360 logical px |
+| `inspector_visible` | `true` | Right reading-tools panel visibility |
+
+Left-panel visibility still uses `preferences.sidebar`; there is no duplicate field.
+Missing `panel_layout` or child fields in older settings use defaults.
+A completed drag saves a width only if the visible width changes.
+Narrow windows limit the right panel first, then the left panel, and keep at least 280 logical px for reading.
+These limits do not overwrite preferred widths. Enlarging the window restores them.
+
+Older builds reject the new fields. To downgrade:
+
+1. Close the application and back up `settings.json`.
+2. For builds with language support but without panel-layout support, remove only `preferences.panel_layout` from a working copy. Keep `preferences.language` and other fields.
+3. Only for builds that also predate language support, remove `preferences.language` as well.
+
+Keep recent files, reading positions, bookmarks, and other preferences. Do not reset reading data to downgrade.
 
 ## Checks
 

@@ -3,6 +3,7 @@ use crate::i18n::Language;
 use gpui_kit::{AnyWindowHandle, TestAppContext, test::TestWindowExt};
 use tempfile::TempDir;
 
+mod desktop;
 mod i18n;
 mod zoom;
 
@@ -471,11 +472,12 @@ fn corrupt_settings_reset_is_explicit_and_preserves_original_bytes(cx: &mut Test
     std::fs::write(&path, b"{broken").unwrap();
     fixture.view.update(cx, |view, cx| {
         view.save_error = Some("Invalid settings".into());
-        view.preferences_open = true;
         cx.notify();
     });
     cx.update_window(fixture.window, |_, window, cx| {
         window.render_frame(cx);
+        window.click("preferences", cx);
+        assert_eq!(fixture.view.read(cx).inspector_tab, InspectorTab::Reading);
         window.scroll(
             "inspector",
             gpui_kit::ScrollDelta::Lines(point(0., -100.)),
@@ -858,6 +860,7 @@ fn file_browser_history_fullscreen_and_slideshow_commands_work(cx: &mut TestAppC
         assert!(window.is_fullscreen());
         window.press("escape", cx);
         assert!(!window.is_fullscreen());
+        window.click("inspector-playback", cx);
         window.click("slideshow", cx);
     })
     .unwrap();
