@@ -2,11 +2,12 @@
 //! Run explicitly with `cargo test --test rendering`.
 
 use gpui_kit::{
-    AnyWindowHandle, AppContext, Bounds, Entity, HeadlessAppContext, Modifiers, PlatformInput,
-    ScrollDelta, ScrollEvent, Window, WindowBounds, WindowOptions, point, px, size,
+    AnyWindowHandle, AppContext, Bounds, Entity, HeadlessAppContext, Modifiers, OwnedMenuItem,
+    PlatformInput, ScrollDelta, ScrollEvent, Window, WindowBounds, WindowOptions, point, px, size,
     test::TestWindowExt,
 };
 use mangameeya_rust::{
+    i18n::{Language, Text},
     settings::AppSettings,
     ui::{self, ReaderView},
 };
@@ -170,6 +171,134 @@ fn capture_zoom_states(cx: &mut HeadlessAppContext, window: AnyWindowHandle) {
     .unwrap();
 }
 
+fn assert_sidebar_tabs_in_bounds(window: &Window, language: Language) {
+    let sidebar = window.find("sidebar");
+    assert_eq!(sidebar.label(), Some(language.text(Text::Sidebar)));
+    let bounds = sidebar.bounds();
+    for (id, text) in [
+        ("檔案", Text::File),
+        ("縮圖", Text::Thumbnails),
+        ("最近開啟", Text::Recent),
+    ] {
+        let tab = window.find(id);
+        assert_eq!(tab.label(), Some(language.text(text)));
+        assert!(tab.visible());
+        let tab_bounds = tab.bounds();
+        assert!(
+            tab_bounds.left() >= bounds.left()
+                && tab_bounds.top() >= bounds.top()
+                && tab_bounds.right() <= bounds.right()
+                && tab_bounds.bottom() <= bounds.bottom(),
+            "translated sidebar tab must stay inside the sidebar: {language:?}, {id}, {tab_bounds:?}, sidebar: {bounds:?}"
+        );
+    }
+}
+
+fn capture_language_states(cx: &mut HeadlessAppContext, window: AnyWindowHandle) {
+    const LANGUAGES: [(Language, &str, &str, &str); 3] = [
+        (Language::English, "language-en", "English", "en"),
+        (Language::Japanese, "language-ja", "日本語", "ja"),
+        (
+            Language::TraditionalChinese,
+            "language-zh-Hant",
+            "正體中文",
+            "zh-TW",
+        ),
+    ];
+    cx.update_window(window, |_, window, cx| window.click("preferences", cx))
+        .unwrap();
+    for (language, id, _, component_locale) in LANGUAGES {
+        cx.update_window(window, |_, window, cx| {
+            window.click(id, cx);
+            assert_eq!(&*gpui_kit::component::locale(), component_locale);
+            for (choice, choice_id, label, _) in LANGUAGES {
+                assert_eq!(window.find(choice_id).label(), Some(label));
+                assert_eq!(window.find(choice_id).checked(), Some(choice == language));
+            }
+            assert_eq!(
+                window.find("preferences").label(),
+                Some(language.text(Text::Preferences))
+            );
+            assert_eq!(
+                window.find("page-input").label(),
+                Some(language.text(Text::PageNumber))
+            );
+            assert_eq!(window.find("page-input").value(), Some("1"));
+            assert_sidebar_tabs_in_bounds(window, language);
+            let trigger = window.find("zoom-trigger");
+            let label = trigger.label().unwrap();
+            assert!(label.starts_with(language.text(Text::ZoomSettings)), "{label}");
+            assert!(label.contains(language.text(Text::FitWindow)), "{label}");
+            assert!(label.contains("100%"), "{label}");
+            if let Some(menus) = cx.get_menus() {
+                for text in [Text::Preferences, Text::FitWindow] {
+                    assert!(menus.iter().flat_map(|menu| &menu.items).any(|item| {
+                        matches!(item, OwnedMenuItem::Action { name, .. } if name == language.text(text))
+                    }));
+                }
+            }
+            // Also check the accessible reader menu on every platform.
+            window.click(("menu", 2usize), cx);
+        })
+        .unwrap();
+        settle(cx, window);
+        cx.update_window(window, |_, window, cx| {
+            assert!(
+                window
+                    .within("popup-menu")
+                    .find_by_label(language.text(Text::FitWindow))
+                    .visible()
+            );
+            window.press("escape", cx);
+        })
+        .unwrap();
+        settle(cx, window);
+        cx.update_window(window, |_, window, cx| {
+            window.click("zoom-trigger", cx);
+            assert_zoom_panel_in_viewport(window);
+            assert_eq!(
+                window.find("zoom-panel").label(),
+                Some(language.text(Text::ZoomSettings))
+            );
+            assert_eq!(
+                window.find("zoom-fit-window").label(),
+                Some(language.text(Text::FitWindow))
+            );
+        })
+        .unwrap();
+        settle(cx, window);
+        snapshot(cx, window, &format!("i18n-{}", language.code()));
+        for (width, height, suffix) in [(960., 640., "960x640"), (800., 540., "800x540")] {
+            cx.update_window(window, |_, window, cx| {
+                window.resize(size(px(width), px(height)));
+                window.bounds_changed(cx);
+            })
+            .unwrap();
+            settle(cx, window);
+            cx.update_window(window, |_, window, _| {
+                assert_sidebar_tabs_in_bounds(window, language);
+                assert_zoom_panel_in_viewport(window);
+            })
+            .unwrap();
+            snapshot(cx, window, &format!("i18n-{}-{suffix}", language.code()));
+        }
+        cx.update_window(window, |_, window, cx| {
+            window.resize(size(px(1280.), px(800.)));
+            window.bounds_changed(cx);
+            window.press("escape", cx);
+        })
+        .unwrap();
+        settle(cx, window);
+    }
+    // Retain the Traditional Chinese baseline for the existing workflow.
+    cx.update_window(window, |_, window, cx| {
+        window.click("preferences", cx);
+        assert_zoom_closed(window, "縮放設定，適合視窗，100%");
+    })
+    .unwrap();
+    settle(cx, window);
+}
+
 fn open_reader(
     cx: &mut HeadlessAppContext,
     settings_path: PathBuf,
@@ -190,7 +319,11 @@ fn open_reader(
             |window, cx| {
                 cx.new(|cx| {
                     ReaderView::new(
-                        AppSettings::default(),
+                        {
+                            let mut settings = AppSettings::default();
+                            settings.preferences.language = Language::TraditionalChinese;
+                            settings
+                        },
                         settings_path,
                         None,
                         None,
@@ -278,6 +411,7 @@ fn main() {
         );
     }
     capture_zoom_states(&mut cx, window);
+    capture_language_states(&mut cx, window);
 
     // Cover archive indexing, natural order, extraction, decoding, and Metal in
     // one workflow, with central-directory order different from reading order.
@@ -418,6 +552,7 @@ fn main() {
         window.click("remember-position", cx);
         window.click("recursive-folder", cx);
         window.click("recursive-folder", cx);
+        window.scroll("inspector", ScrollDelta::Lines(point(0., -100.)), cx);
         window.click("紙色", cx);
         window.click("interval-input", cx);
         window.press(
@@ -599,6 +734,6 @@ fn main() {
     settle(&mut cx, window);
     drop(view);
     println!(
-        "Native reader UI checks passed: launch, decoded pixels, navigation, spread, bookmarks, input focus, zoom, wheel, continuous pages, rotation, preferences, persistence, errors, and close."
+        "Native reader UI checks passed: launch, decoded pixels, navigation, spread, bookmarks, input focus, zoom, wheel, continuous pages, rotation, preferences, language switching, translated labels and menus, persistence, errors, and close."
     );
 }

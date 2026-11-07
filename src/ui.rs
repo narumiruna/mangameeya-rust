@@ -2,6 +2,7 @@
 
 use crate::{
     book::{self, Book, DirectoryListing, EntryKind},
+    i18n::{Language, Text},
     imaging::{self, Filters},
     instance::{self, Instance, PrimaryInstance},
     reader::Reader,
@@ -88,14 +89,14 @@ const MAX_PAGE_REQUESTS: usize = 2;
 const MAX_THUMB_REQUESTS: usize = 2;
 const TICK: Duration = Duration::from_millis(80);
 
-fn fit_label(fit: FitMode) -> &'static str {
-    match fit {
-        FitMode::Window => "適合視窗",
-        FitMode::Width => "適合寬度",
-        FitMode::Height => "適合高度",
-        FitMode::Original => "原始尺寸",
-        FitMode::Custom => "自訂縮放",
-    }
+fn fit_label(language: Language, fit: FitMode) -> &'static str {
+    language.text(match fit {
+        FitMode::Window => Text::FitWindow,
+        FitMode::Width => Text::FitWidth,
+        FitMode::Height => Text::FitHeight,
+        FitMode::Original => Text::OriginalSize,
+        FitMode::Custom => Text::CustomZoom,
+    })
 }
 
 fn zoom_percentage(scale: Option<f32>) -> String {
@@ -254,6 +255,7 @@ pub struct ReaderView {
     inspector: bool,
     preferences_open: bool,
     message: String,
+    message_translation: (Text, Vec<(&'static str, String)>),
     message_error: bool,
     dirty: bool,
     saving: bool,
@@ -278,11 +280,13 @@ impl ReaderView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
+        let language = settings.preferences.language;
         let focus = cx.focus_handle();
         focus.focus(window, cx);
         let page_input = cx.new(|cx| InputState::new(window, cx).default_value("1"));
         let zoom_input = cx.new(|cx| InputState::new(window, cx).placeholder("—"));
-        let path_input = cx.new(|cx| InputState::new(window, cx).placeholder("資料夾路徑"));
+        let path_input =
+            cx.new(|cx| InputState::new(window, cx).placeholder(language.text(Text::FolderPath)));
         let interval_input = cx.new(|cx| {
             InputState::new(window, cx).default_value(settings.preferences.interval.to_string())
         });
@@ -300,7 +304,7 @@ impl ReaderView {
                 if matches!(event, InputEvent::PressEnter { .. }) {
                     match input.read(cx).value().trim().parse::<usize>() {
                         Ok(page) => this.navigate(page.saturating_sub(1), window, cx),
-                        Err(_) => this.set_message("頁碼必須是正整數。", true, cx),
+                        Err(_) => this.set_localized_message(Text::InvalidPage, vec![], true, cx),
                     }
                     this.focus.focus(window, cx);
                 }
@@ -320,9 +324,9 @@ impl ReaderView {
                         Ok(percent) if percent.is_finite() => {
                             this.apply_zoom(percent / 100., window, cx);
                             this.zoom_open = false;
-                            this.set_message("已套用縮放比例。", false, cx);
+                            this.set_localized_message(Text::ZoomApplied, vec![], false, cx);
                         }
-                        _ => this.set_message("縮放必須是 10–800%。", true, cx),
+                        _ => this.set_localized_message(Text::InvalidZoom, vec![], true, cx),
                     }
                 }
             },
@@ -350,7 +354,9 @@ impl ReaderView {
                             this.dirty = true;
                             cx.notify();
                         }
-                        Err(_) => this.set_message("投影片間隔必須是 1–120 秒。", true, cx),
+                        Err(_) => {
+                            this.set_localized_message(Text::InvalidInterval, vec![], true, cx)
+                        }
                     }
                 }
             },
@@ -443,7 +449,10 @@ impl ReaderView {
             filter_sliders,
             inspector: true,
             preferences_open: false,
-            message: warning.clone().unwrap_or_else(|| "就緒".into()),
+            message: String::new(),
+            message_translation: warning.clone().map_or((Text::Ready, vec![]), |error| {
+                (Text::SettingsError, vec![("error", error)])
+            }),
             message_error: warning.is_some(),
             dirty: false,
             saving: false,
@@ -457,6 +466,7 @@ impl ReaderView {
             pending_drop: None,
             _subscriptions: subscriptions,
         };
+        view.update_language(window, cx);
         let home = directories::BaseDirs::new()
             .map(|dirs| dirs.home_dir().to_path_buf())
             .unwrap_or_else(|| PathBuf::from("."));
@@ -486,10 +496,45 @@ impl ReaderView {
         self.reader.book.as_ref().map_or(0, |book| book.pages.len())
     }
 
-    fn set_message(&mut self, message: impl Into<String>, error: bool, cx: &mut Context<Self>) {
-        self.message = message.into();
+    fn set_error(&mut self, error: impl Into<String>, cx: &mut Context<Self>) {
+        self.set_localized_message(Text::ErrorDetails, vec![("error", error.into())], true, cx);
+    }
+
+    fn language(&self) -> Language {
+        self.reader.settings.preferences.language
+    }
+
+    fn set_localized_message(
+        &mut self,
+        text: Text,
+        args: Vec<(&'static str, String)>,
+        error: bool,
+        cx: &mut Context<Self>,
+    ) {
+        self.message = self.language().format(text, &args);
+        self.message_translation = (text, args);
         self.message_error = error;
         cx.notify();
+    }
+
+    fn set_language(&mut self, language: Language, window: &mut Window, cx: &mut Context<Self>) {
+        if self.language() == language {
+            return;
+        }
+        self.reader.settings.preferences.language = language;
+        self.update_language(window, cx);
+        self.dirty = true;
+        cx.notify();
+    }
+
+    fn update_language(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let language = self.language();
+        gpui_kit::component::set_locale(language.component_locale());
+        set_native_menus(language, cx);
+        self.path_input.update(cx, |input, cx| {
+            input.set_placeholder(language.text(Text::FolderPath), window, cx);
+        });
+        self.message = language.format(self.message_translation.0, &self.message_translation.1);
     }
 
     fn sync_controls(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -605,7 +650,7 @@ impl ReaderView {
                     Instant::now() + Duration::from_secs(self.reader.settings.preferences.interval);
             } else {
                 self.reader.slideshow = false;
-                self.set_message("投影片已結束。", false, cx);
+                self.set_localized_message(Text::SlideshowEnded, vec![], false, cx);
             }
         }
         if self.reader.settings.preferences.mode == ReadingMode::Continuous
@@ -646,7 +691,12 @@ impl ReaderView {
                     if let Err(error) = result {
                         if view.save_error.as_deref() != Some(&error) {
                             view.save_error = Some(error.clone());
-                            view.set_message(error, true, cx);
+                            view.set_localized_message(
+                                Text::SettingsError,
+                                vec![("error", error)],
+                                true,
+                                cx,
+                            );
                         }
                     } else if view.save_error.take().is_some() {
                         cx.notify();
@@ -676,7 +726,12 @@ impl ReaderView {
             );
         self.opening = true;
         self.reader.slideshow = false;
-        self.set_message(format!("正在開啟 {}…", path.display()), false, cx);
+        self.set_localized_message(
+            Text::BookOpening,
+            vec![("path", path.display().to_string())],
+            false,
+            cx,
+        );
         let task = cx.background_spawn(async move { Book::open(&path, recursive) });
         cx.spawn(async move |view, cx| {
             let result = task.await;
@@ -710,19 +765,22 @@ impl ReaderView {
                         view.paged_scroll.set_offset(point(px(0.), px(0.)));
                         view.dirty = true;
                         view.controls_pending = true;
-                        view.message = format!(
-                            "已開啟 {}（{} 頁）",
-                            view.reader.book.as_ref().unwrap().title,
-                            count
+                        view.set_localized_message(
+                            Text::BookOpened,
+                            vec![
+                                ("title", view.reader.book.as_ref().unwrap().title.clone()),
+                                ("count", count.to_string()),
+                            ],
+                            false,
+                            cx,
                         );
-                        view.message_error = false;
                         let current = view.reader.current;
                         for index in current.saturating_sub(1)..(current + 3).min(count) {
                             view.wanted.borrow_mut().insert((index, false));
                         }
                         cx.notify();
                     }
-                    Err(error) => view.set_message(error, true, cx),
+                    Err(error) => view.set_error(error, cx),
                 }
             });
         })
@@ -787,15 +845,16 @@ impl ReaderView {
     }
 
     fn request_dialog(&mut self, directory: bool, window: &mut Window, cx: &mut Context<Self>) {
+        let language = self.language();
         let choice = cx.prompt_for_paths(gpui_kit::PathPromptOptions {
             files: !directory,
             directories: directory,
             multiple: false,
             prompt: Some(
                 if directory {
-                    "開啟圖片資料夾"
+                    language.text(Text::OpenImageFolder)
                 } else {
-                    "開啟漫畫或圖片"
+                    language.text(Text::OpenComicOrImage)
                 }
                 .into(),
             ),
@@ -809,7 +868,12 @@ impl ReaderView {
             Ok(Ok(None)) => {}
             error => {
                 _ = view.update_in(cx, |view, _, cx| {
-                    view.set_message(format!("無法開啟選擇視窗：{error:?}"), true, cx)
+                    view.set_localized_message(
+                        Text::OpenDialogFailed,
+                        vec![("error", format!("{error:?}"))],
+                        true,
+                        cx,
+                    )
                 });
             }
         })
@@ -834,7 +898,12 @@ impl ReaderView {
                 Ok(Ok(None)) => return,
                 error => {
                     _ = view.update_in(cx, |view, _, cx| {
-                        view.set_message(format!("無法選擇儲存位置：{error:?}"), true, cx)
+                        view.set_localized_message(
+                            Text::SaveDialogFailed,
+                            vec![("error", format!("{error:?}"))],
+                            true,
+                            cx,
+                        )
                     });
                     return;
                 }
@@ -842,14 +911,15 @@ impl ReaderView {
             let task = cx.background_spawn(async move { book.save_page(index, &destination) });
             let result = task.await;
             _ = view.update_in(cx, |view, _, cx| match result {
-                Ok(()) => view.set_message("已儲存原始圖片。", false, cx),
-                Err(error) => view.set_message(error, true, cx),
+                Ok(()) => view.set_localized_message(Text::ImageSaved, vec![], false, cx),
+                Err(error) => view.set_error(error, cx),
             });
         })
         .detach();
     }
 
     fn perform(&mut self, command: Command, window: &mut Window, cx: &mut Context<Self>) {
+        let language = self.language();
         use Command::*;
         match command {
             OpenFile => self.request_dialog(false, window, cx),
@@ -873,7 +943,7 @@ impl ReaderView {
                 self.opening = false;
                 self.sync_controls(window, cx);
                 window.set_window_title("MangaMeeya Rust");
-                self.set_message("已關閉漫畫。", false, cx);
+                self.set_localized_message(Text::BookClosed, vec![], false, cx);
             }
             Sidebar => {
                 self.reader.settings.preferences.sidebar =
@@ -978,19 +1048,20 @@ impl ReaderView {
                                 .settings
                                 .bookmarks
                                 .insert(path, self.reader.current);
-                            self.set_message(
-                                format!("書籤：第 {} 頁", self.reader.current + 1),
+                            self.set_localized_message(
+                                Text::BookmarkSet,
+                                vec![("page", (self.reader.current + 1).to_string())],
                                 false,
                                 cx,
                             );
                         }
                         Resume => match self.reader.settings.bookmarks.get(&path).copied() {
                             Some(page) => self.navigate(page, window, cx),
-                            None => self.set_message("本書尚無書籤。", true, cx),
+                            None => self.set_localized_message(Text::NoBookmark, vec![], true, cx),
                         },
                         _ => {
                             self.reader.settings.bookmarks.remove(&path);
-                            self.set_message("已刪除本書書籤。", false, cx);
+                            self.set_localized_message(Text::BookmarkDeleted, vec![], false, cx);
                         }
                     }
                     self.dirty = true;
@@ -1019,12 +1090,12 @@ impl ReaderView {
                 self.inspector = true;
                 cx.notify();
             }
-            About => window.open_dialog(cx, |dialog, _, _| {
+            About => window.open_dialog(cx, move |dialog, _, _| {
                 dialog
-                    .title("關於 MangaMeeya Rust")
+                    .title(language.text(Text::AboutTitle))
                     .child(concat!("MangaMeeya Rust ", env!("CARGO_PKG_VERSION")))
                     .child("Rust · GPUI Kit · Windows / macOS")
-                    .child("離線閱讀圖片資料夾、ZIP/CBZ 與 RAR/CBR。原始漫畫不會被修改。")
+                    .child(language.text(Text::AboutDescription))
                     .child("AGPL-3.0-only")
             }),
             ClearHistory => {
@@ -1254,6 +1325,7 @@ impl ReaderView {
         count: usize,
         cx: &mut Context<Self>,
     ) -> gpui_kit::AnyElement {
+        let language = self.language();
         self.visible.borrow_mut().insert(index);
         self.wanted.borrow_mut().insert((index, false));
         let Some(book) = &self.reader.book else {
@@ -1271,7 +1343,7 @@ impl ReaderView {
             )))
             .test_support()
             .role(gpui_kit::Role::Image)
-            .aria_label(format!("第 {} 頁", index + 1))
+            .aria_label(language.format(Text::PageLabel, &[("page", (index + 1).to_string())]))
             .flex_none()
             .flex()
             .flex_col()
@@ -1286,11 +1358,14 @@ impl ReaderView {
                 .p_4()
                 .bg(cx.theme().background)
                 .text_color(cx.theme().foreground)
-                .child(format!("第 {} 頁：{}", index + 1, name))
-                .child(error.clone())
+                .child(language.format(
+                    Text::PageTitle,
+                    &[("page", (index + 1).to_string()), ("name", name.into())],
+                ))
+                .child(language.format(Text::PageError, &[("error", error.clone())]))
                 .child(
                     Button::new(("retry", index))
-                        .label("重試")
+                        .label(language.text(Text::Retry))
                         .on_click(cx.listener(move |this, _, _, cx| {
                             this.errors.remove(&(index, false));
                             this.wanted.borrow_mut().insert((index, false));
@@ -1322,7 +1397,7 @@ impl ReaderView {
                 .w(px(width + 8.))
                 .h(px(height + 8.))
                 .text_color(cx.theme().muted_foreground)
-                .child(format!("正在讀取第 {} 頁…", index + 1));
+                .child(language.format(Text::PageLoading, &[("page", (index + 1).to_string())]));
         } else {
             frame = frame
                 .w(px((f32::from(self.viewer_size.width)
@@ -1331,7 +1406,7 @@ impl ReaderView {
                     .max(1.)))
                 .h(self.viewer_size.height - px(16.))
                 .text_color(cx.theme().muted_foreground)
-                .child(format!("正在讀取第 {} 頁…", index + 1));
+                .child(language.format(Text::PageLoading, &[("page", (index + 1).to_string())]));
         }
         frame.into_any_element()
     }
@@ -1355,75 +1430,89 @@ impl ReaderView {
     }
 
     fn menu_items(&self, group: usize, menu: PopupMenu) -> PopupMenu {
+        let language = self.language();
         use Command::*;
         let opened = self.reader.book.is_some();
         match group {
             0 => menu
-                .menu("開啟漫畫…", Box::new(OpenFile))
-                .menu("開啟資料夾…", Box::new(OpenFolder))
-                .menu_with_disabled("另存原始圖片…", Box::new(SavePage), !opened)
+                .menu(language.text(Text::OpenComic), Box::new(OpenFile))
+                .menu(language.text(Text::OpenFolder), Box::new(OpenFolder))
+                .menu_with_disabled(language.text(Text::SaveImage), Box::new(SavePage), !opened)
                 .separator()
-                .menu_with_disabled("關閉漫畫", Box::new(Close), !opened)
-                .menu("結束", Box::new(Quit)),
+                .menu_with_disabled(language.text(Text::CloseComic), Box::new(Close), !opened)
+                .menu(language.text(Text::Quit), Box::new(Quit)),
             1 => menu
                 .menu_with_check(
-                    "顯示側欄",
+                    language.text(Text::ShowSidebar),
                     self.reader.settings.preferences.sidebar,
                     Box::new(Sidebar),
                 )
-                .menu("縮圖", Box::new(Thumbnails))
+                .menu(language.text(Text::Thumbnails), Box::new(Thumbnails))
                 .menu_with_check(
-                    "雙頁跨頁",
+                    language.text(Text::Spread),
                     self.reader.settings.preferences.mode == ReadingMode::Spread,
                     Box::new(Spread),
                 )
                 .menu_with_check(
-                    "連續頁面",
+                    language.text(Text::ContinuousPages),
                     self.reader.settings.preferences.mode == ReadingMode::Continuous,
                     Box::new(Continuous),
                 )
                 .menu_with_check(
-                    "右向左閱讀",
+                    language.text(Text::RightToLeft),
                     self.reader.settings.preferences.rtl,
                     Box::new(Direction),
                 )
                 .separator()
-                .menu("全螢幕", Box::new(Fullscreen)),
+                .menu(language.text(Text::Fullscreen), Box::new(Fullscreen)),
             2 => menu
-                .menu("適合視窗", Box::new(FitWindow))
-                .menu("適合寬度", Box::new(FitWidth))
-                .menu("適合高度", Box::new(FitHeight))
-                .menu("原始尺寸", Box::new(Original))
+                .menu(language.text(Text::FitWindow), Box::new(FitWindow))
+                .menu(language.text(Text::FitWidth), Box::new(FitWidth))
+                .menu(language.text(Text::FitHeight), Box::new(FitHeight))
+                .menu(language.text(Text::OriginalSize), Box::new(Original))
                 .separator()
-                .menu("放大", Box::new(ZoomIn))
-                .menu("縮小", Box::new(ZoomOut))
+                .menu(language.text(Text::ZoomIn), Box::new(ZoomIn))
+                .menu(language.text(Text::ZoomOut), Box::new(ZoomOut))
                 .menu("100%", Box::new(ZoomReset)),
             3 => menu
-                .menu("第一頁", Box::new(First))
-                .menu("上一頁", Box::new(Previous))
-                .menu("下一頁", Box::new(Next))
-                .menu("最後一頁", Box::new(Last))
+                .menu(language.text(Text::FirstPage), Box::new(First))
+                .menu(language.text(Text::PreviousPage), Box::new(Previous))
+                .menu(language.text(Text::NextPage), Box::new(Next))
+                .menu(language.text(Text::LastPage), Box::new(Last))
                 .separator()
-                .menu_with_check("投影片", self.reader.slideshow, Box::new(Slideshow)),
+                .menu_with_check(
+                    language.text(Text::Slideshow),
+                    self.reader.slideshow,
+                    Box::new(Slideshow),
+                ),
             4 => menu
-                .menu_with_disabled("加入／更新書籤", Box::new(Bookmark), !opened)
-                .menu_with_disabled("跳至書籤", Box::new(Resume), !opened)
-                .menu_with_disabled("刪除本書書籤", Box::new(ClearBookmark), !opened),
+                .menu_with_disabled(
+                    language.text(Text::SetBookmark),
+                    Box::new(Bookmark),
+                    !opened,
+                )
+                .menu_with_disabled(language.text(Text::GoToBookmark), Box::new(Resume), !opened)
+                .menu_with_disabled(
+                    language.text(Text::DeleteBookmark),
+                    Box::new(ClearBookmark),
+                    !opened,
+                ),
             5 => menu
-                .menu("向左旋轉", Box::new(RotateLeft))
-                .menu("向右旋轉", Box::new(RotateRight))
-                .menu("重設濾鏡", Box::new(ResetFilters))
+                .menu(language.text(Text::RotateLeft), Box::new(RotateLeft))
+                .menu(language.text(Text::RotateRight), Box::new(RotateRight))
+                .menu(language.text(Text::ResetFilters), Box::new(ResetFilters))
                 .separator()
-                .menu("偏好設定", Box::new(Settings)),
-            _ => menu.menu("關於 MangaMeeya Rust…", Box::new(About)),
+                .menu(language.text(Text::Preferences), Box::new(Settings)),
+            _ => menu.menu(language.text(Text::AboutMenu), Box::new(About)),
         }
     }
 
     fn render_zoom_control(&self, cx: &mut Context<Self>) -> gpui_kit::AnyElement {
+        let language = self.language();
         let scale = self.effective_scale();
         let percent = zoom_percentage(scale);
         let fit = self.reader.settings.preferences.fit;
-        let mode = fit_label(fit);
+        let mode = fit_label(language, fit);
         let enabled = scale.is_some();
         let input = self.zoom_input.clone();
         let owner = cx.entity().downgrade();
@@ -1432,7 +1521,7 @@ impl ReaderView {
             .flex_none()
             .items_center()
             .gap_1()
-            .child("縮放")
+            .child(language.text(Text::Zoom))
             .child(
                 Popover::new("zoom-popover")
                     .open(self.zoom_open && self.reader.book.is_some())
@@ -1448,12 +1537,19 @@ impl ReaderView {
                             .icon(IconName::FileText)
                             .label(format!("{mode}  |  {percent}"))
                             .child(Icon::new(IconName::ChevronDown).small())
-                            .accessibility_label(format!("縮放設定，{mode}，{percent}"))
+                            .accessibility_label(language.format(
+                                Text::ZoomSummary,
+                                &[("mode", mode.into()), ("percent", percent.clone())],
+                            ))
                             .disabled(self.reader.book.is_none())
-                            .tooltip("選擇適應方式或輸入縮放比例。雙頁時，百分比以目前頁面為準。"),
+                            .tooltip(language.text(Text::ZoomTip)),
                     )
                     .content(move |_, _, cx| {
-                        let mut stepper = div().flex().items_center().gap_2().child("縮放比例");
+                        let mut stepper = div()
+                            .flex()
+                            .items_center()
+                            .gap_2()
+                            .child(language.text(Text::ZoomLevel));
                         for (id, label, command) in [
                             ("zoom-out", "−", Command::ZoomOut),
                             ("zoom-in", "+", Command::ZoomIn),
@@ -1463,7 +1559,7 @@ impl ReaderView {
                                     .child(
                                         Input::new(&input)
                                             .id("zoom-input")
-                                            .aria_label("縮放百分比")
+                                            .aria_label(language.text(Text::ZoomPercentage))
                                             .small()
                                             .w_16()
                                             .disabled(!enabled),
@@ -1477,9 +1573,9 @@ impl ReaderView {
                                     .outline()
                                     .label(label)
                                     .accessibility_label(if command == Command::ZoomIn {
-                                        "放大"
+                                        language.text(Text::ZoomIn)
                                     } else {
-                                        "縮小"
+                                        language.text(Text::ZoomOut)
                                     })
                                     .disabled(!enabled)
                                     .on_click(move |_, window, cx| {
@@ -1500,35 +1596,35 @@ impl ReaderView {
                                 div()
                                     .text_xs()
                                     .text_color(cx.theme().muted_foreground)
-                                    .child("適應方式"),
+                                    .child(language.text(Text::FitMode)),
                             );
                         for (id, value, shortcut, description, command) in [
                             (
                                 "zoom-fit-window",
                                 FitMode::Window,
                                 "F",
-                                "完整顯示整頁",
+                                language.text(Text::FitWindowDescription),
                                 Command::FitWindow,
                             ),
                             (
                                 "zoom-fit-width",
                                 FitMode::Width,
                                 "W",
-                                "依閱讀區寬度縮放",
+                                language.text(Text::FitWidthDescription),
                                 Command::FitWidth,
                             ),
                             (
                                 "zoom-fit-height",
                                 FitMode::Height,
                                 "H",
-                                "依閱讀區高度縮放",
+                                language.text(Text::FitHeightDescription),
                                 Command::FitHeight,
                             ),
                             (
                                 "zoom-original",
                                 FitMode::Original,
                                 "1",
-                                "依圖片原尺寸顯示",
+                                language.text(Text::OriginalDescription),
                                 Command::Original,
                             ),
                         ] {
@@ -1543,7 +1639,7 @@ impl ReaderView {
                                     .py_2()
                                     .selected(selected)
                                     .toggled(selected)
-                                    .accessibility_label(fit_label(value))
+                                    .accessibility_label(fit_label(language, value))
                                     .child(
                                         div()
                                             .flex()
@@ -1559,7 +1655,11 @@ impl ReaderView {
                                                     .flex_col()
                                                     .items_start()
                                                     .flex_1()
-                                                    .child(div().text_sm().child(fit_label(value)))
+                                                    .child(
+                                                        div()
+                                                            .text_sm()
+                                                            .child(fit_label(language, value)),
+                                                    )
                                                     .child(
                                                         div()
                                                             .text_xs()
@@ -1585,7 +1685,7 @@ impl ReaderView {
                             .id("zoom-panel")
                             .test_support()
                             .role(gpui_kit::Role::Group)
-                            .aria_label("縮放設定")
+                            .aria_label(language.text(Text::ZoomSettings))
                             .flex()
                             .flex_col()
                             .w_80()
@@ -1598,15 +1698,24 @@ impl ReaderView {
     }
 
     fn render_chrome(&self, cx: &mut Context<Self>) -> gpui_kit::AnyElement {
+        let language = self.language();
         let mut menus = div()
             .flex()
             .gap_1()
             .px_2()
             .border_b_1()
             .border_color(cx.theme().border);
-        for (group, label) in ["檔案", "檢視", "縮放", "移動", "書籤", "工具", "說明"]
-            .into_iter()
-            .enumerate()
+        for (group, label) in [
+            language.text(Text::File),
+            language.text(Text::View),
+            language.text(Text::Zoom),
+            language.text(Text::Navigate),
+            language.text(Text::Bookmarks),
+            language.text(Text::Tools),
+            language.text(Text::Help),
+        ]
+        .into_iter()
+        .enumerate()
         {
             let view = cx.entity().downgrade();
             menus = menus.child(
@@ -1632,45 +1741,69 @@ impl ReaderView {
             .gap_1()
             .px_2()
             .py_1()
-            .child(self.button("open", "開啟…", Command::OpenFile, cx))
+            .child(self.button("open", language.text(Text::Open), Command::OpenFile, cx))
             .child(
-                self.button("previous", "上一頁", Command::Previous, cx)
-                    .disabled(!opened || self.reader.current == 0),
+                self.button(
+                    "previous",
+                    language.text(Text::PreviousPage),
+                    Command::Previous,
+                    cx,
+                )
+                .disabled(!opened || self.reader.current == 0),
             )
             .child(
-                self.button("next", "下一頁", Command::Next, cx)
+                self.button("next", language.text(Text::NextPage), Command::Next, cx)
                     .disabled(!opened || self.reader.current + 1 >= self.page_count()),
             )
             .child(
-                self.button("spread", "雙頁", Command::Spread, cx)
+                self.button("spread", language.text(Text::TwoPages), Command::Spread, cx)
                     .selected(mode == ReadingMode::Spread),
             )
             .child(
-                self.button("continuous", "連續", Command::Continuous, cx)
-                    .selected(mode == ReadingMode::Continuous),
+                self.button(
+                    "continuous",
+                    language.text(Text::Continuous),
+                    Command::Continuous,
+                    cx,
+                )
+                .selected(mode == ReadingMode::Continuous),
             )
-            .child(self.button(
-                "direction",
-                if self.reader.settings.preferences.rtl {
-                    "R → L"
-                } else {
-                    "L → R"
-                },
-                Command::Direction,
-                cx,
-            ))
+            .child(
+                self.button(
+                    "direction",
+                    if self.reader.settings.preferences.rtl {
+                        "R → L"
+                    } else {
+                        "L → R"
+                    },
+                    Command::Direction,
+                    cx,
+                )
+                .accessibility_label(language.text(
+                    if self.reader.settings.preferences.rtl {
+                        Text::RightToLeft
+                    } else {
+                        Text::LeftToRight
+                    },
+                )),
+            )
             .child(self.render_zoom_control(cx))
             .child(
-                self.button("bookmark", "書籤", Command::Bookmark, cx)
-                    .disabled(!opened),
+                self.button(
+                    "bookmark",
+                    language.text(Text::Bookmark),
+                    Command::Bookmark,
+                    cx,
+                )
+                .disabled(!opened),
             )
             .child(
                 self.button(
                     "slideshow",
                     if self.reader.slideshow {
-                        "停止"
+                        language.text(Text::Stop)
                     } else {
-                        "投影片"
+                        language.text(Text::Slideshow)
                     },
                     Command::Slideshow,
                     cx,
@@ -1678,8 +1811,18 @@ impl ReaderView {
                 .selected(self.reader.slideshow)
                 .disabled(!opened),
             )
-            .child(self.button("fullscreen", "全螢幕", Command::Fullscreen, cx))
-            .child(self.button("preferences", "偏好設定", Command::Settings, cx));
+            .child(self.button(
+                "fullscreen",
+                language.text(Text::Fullscreen),
+                Command::Fullscreen,
+                cx,
+            ))
+            .child(self.button(
+                "preferences",
+                language.text(Text::Preferences),
+                Command::Settings,
+                cx,
+            ));
         div()
             .flex()
             .flex_col()
@@ -1690,14 +1833,19 @@ impl ReaderView {
     }
 
     fn render_sidebar(&self, cx: &mut Context<Self>) -> gpui_kit::AnyElement {
-        let mut tabs = div().flex().gap_1().p_2().flex_none();
-        for (mode, label) in [
-            (SidebarMode::Files, "檔案"),
-            (SidebarMode::Thumbnails, "縮圖"),
-            (SidebarMode::Recent, "最近開啟"),
+        let language = self.language();
+        let mut tabs = div().flex().flex_wrap().gap_1().p_2().flex_none();
+        for (mode, id, label) in [
+            (SidebarMode::Files, "檔案", language.text(Text::File)),
+            (
+                SidebarMode::Thumbnails,
+                "縮圖",
+                language.text(Text::Thumbnails),
+            ),
+            (SidebarMode::Recent, "最近開啟", language.text(Text::Recent)),
         ] {
             tabs = tabs.child(
-                Button::new(label)
+                Button::new(id)
                     .small()
                     .ghost()
                     .label(label)
@@ -1712,7 +1860,10 @@ impl ReaderView {
         let content = match self.reader.settings.preferences.sidebar_mode {
             SidebarMode::Thumbnails => {
                 if self.reader.book.is_none() {
-                    div().p_4().child("尚未開啟漫畫").into_any_element()
+                    div()
+                        .p_4()
+                        .child(language.text(Text::NoBook))
+                        .into_any_element()
                 } else {
                     let view = cx.entity().downgrade();
                     div()
@@ -1742,7 +1893,7 @@ impl ReaderView {
                     .p_2()
                     .overflow_y_scroll();
                 if self.reader.settings.recent.is_empty() {
-                    recent = recent.child("尚無開啟歷史");
+                    recent = recent.child(language.text(Text::NoHistory));
                 }
                 for path in &self.reader.settings.recent {
                     let target = path.clone();
@@ -1765,7 +1916,7 @@ impl ReaderView {
                 if !self.reader.settings.recent.is_empty() {
                     recent = recent.child(self.button(
                         "clear-history",
-                        "清除歷史",
+                        language.text(Text::ClearHistory),
                         Command::ClearHistory,
                         cx,
                     ));
@@ -1774,6 +1925,10 @@ impl ReaderView {
             }
         };
         div()
+            .id("sidebar")
+            .test_support()
+            .role(gpui_kit::Role::Group)
+            .aria_label(language.text(Text::Sidebar))
             .flex()
             .flex_col()
             .w_64()
@@ -1789,6 +1944,7 @@ impl ReaderView {
     }
 
     fn thumbnail(&self, index: usize, cx: &mut Context<Self>) -> gpui_kit::AnyElement {
+        let language = self.language();
         let Some(book) = &self.reader.book else {
             return div().into_any_element();
         };
@@ -1811,7 +1967,7 @@ impl ReaderView {
                 .items_center()
                 .justify_center()
                 .child(if self.errors.contains_key(&(index, true)) {
-                    "無法讀取".to_string()
+                    language.text(Text::ReadFailed).to_string()
                 } else {
                     (index + 1).to_string()
                 })
@@ -1848,6 +2004,7 @@ impl ReaderView {
     }
 
     fn render_files(&self, cx: &mut Context<Self>) -> gpui_kit::AnyElement {
+        let language = self.language();
         let mut body = div().flex().flex_col().flex_1().min_h_0();
         if let Some(listing) = &self.listing {
             let parent = listing.parent.clone();
@@ -1865,7 +2022,7 @@ impl ReaderView {
                             .child(
                                 Button::new("parent-folder")
                                     .small()
-                                    .label("上層")
+                                    .label(language.text(Text::ParentFolder))
                                     .disabled(parent.is_none())
                                     .on_click(cx.listener(move |this, _, window, cx| {
                                         if let Some(parent) = &parent {
@@ -1875,7 +2032,7 @@ impl ReaderView {
                             )
                             .child(self.button(
                                 "open-current-folder",
-                                "開啟此資料夾",
+                                language.text(Text::OpenCurrentFolder),
                                 Command::OpenListedFolder,
                                 cx,
                             )),
@@ -1883,7 +2040,7 @@ impl ReaderView {
                     .child(
                         Input::new(&self.path_input)
                             .id("path-input")
-                            .aria_label("資料夾路徑")
+                            .aria_label(language.text(Text::FolderPath))
                             .small(),
                     )
                     .child(
@@ -1909,14 +2066,14 @@ impl ReaderView {
                     .child(Scrollbar::vertical(&self.files).mode(ScrollbarMode::Always)),
             );
         } else {
-            body = body.child(div().p_4().child("正在讀取資料夾…"));
+            body = body.child(div().p_4().child(language.text(Text::FolderLoading)));
         }
         if let Some(error) = &self.listing_error {
             body = body.child(
                 div()
                     .p_3()
                     .text_color(cx.theme().danger)
-                    .child(error.clone()),
+                    .child(language.format(Text::FolderError, &[("error", error.clone())])),
             );
         }
         body.into_any_element()
@@ -1961,11 +2118,12 @@ impl ReaderView {
     }
 
     fn render_inspector(&self, cx: &mut Context<Self>) -> gpui_kit::AnyElement {
+        let language = self.language();
         let mut panel = div()
             .id("inspector")
             .test_support()
             .role(gpui_kit::Role::Group)
-            .aria_label("影像與偏好設定")
+            .aria_label(language.text(Text::ImageAndPreferences))
             .w(gpui_kit::rems(13.))
             .flex_none()
             .h_full()
@@ -1981,13 +2139,13 @@ impl ReaderView {
                     .flex()
                     .items_center()
                     .justify_between()
-                    .child("影像調整")
+                    .child(language.text(Text::ImageAdjustments))
                     .child(
                         Button::new("hide-inspector")
                             .small()
                             .ghost()
                             .label("×")
-                            .accessibility_label("隱藏影像調整")
+                            .accessibility_label(language.text(Text::HideImageAdjustments))
                             .on_click(cx.listener(|this, _, _, cx| {
                                 this.inspector = false;
                                 cx.notify();
@@ -1995,9 +2153,21 @@ impl ReaderView {
                     ),
             );
         for (index, label, value) in [
-            (0, "亮度", self.reader.filters.brightness),
-            (1, "對比", self.reader.filters.contrast),
-            (2, "灰階", self.reader.filters.grayscale),
+            (
+                0,
+                language.text(Text::Brightness),
+                self.reader.filters.brightness,
+            ),
+            (
+                1,
+                language.text(Text::Contrast),
+                self.reader.filters.contrast,
+            ),
+            (
+                2,
+                language.text(Text::Grayscale),
+                self.reader.filters.grayscale,
+            ),
         ] {
             panel = panel.child(
                 div()
@@ -2014,27 +2184,49 @@ impl ReaderView {
                 .gap_1()
                 .child(
                     self.button("rotate-left", "↶", Command::RotateLeft, cx)
-                        .tooltip("向左旋轉（[）"),
+                        .accessibility_label(language.text(Text::RotateLeft))
+                        .tooltip(language.text(Text::RotateLeftTip)),
                 )
                 .child(
                     self.button("rotate-right", "↷", Command::RotateRight, cx)
-                        .tooltip("向右旋轉（]）"),
+                        .accessibility_label(language.text(Text::RotateRight))
+                        .tooltip(language.text(Text::RotateRightTip)),
                 )
-                .child(self.button("reset-filters", "重設", Command::ResetFilters, cx)),
+                .child(self.button(
+                    "reset-filters",
+                    language.text(Text::Reset),
+                    Command::ResetFilters,
+                    cx,
+                )),
         );
         if self.preferences_open {
             let prefs = &self.reader.settings.preferences;
+            panel = panel.child(
+                div()
+                    .border_t_1()
+                    .border_color(cx.theme().border)
+                    .pt_3()
+                    .child(language.text(Text::Preferences)),
+            );
+            panel = panel.child(language.text(Text::Language));
+            for choice in Language::ALL {
+                panel = panel.child(
+                    Button::new(SharedString::from(format!("language-{}", choice.code())))
+                        .small()
+                        .ghost()
+                        .label(choice.native_name())
+                        .accessibility_label(choice.native_name())
+                        .selected(language == choice)
+                        .toggled(language == choice)
+                        .on_click(cx.listener(move |this, _, window, cx| {
+                            this.set_language(choice, window, cx);
+                        })),
+                );
+            }
             panel = panel
                 .child(
-                    div()
-                        .border_t_1()
-                        .border_color(cx.theme().border)
-                        .pt_3()
-                        .child("偏好設定"),
-                )
-                .child(
                     Checkbox::new("remember-position")
-                        .label("記住閱讀位置")
+                        .label(language.text(Text::RememberPosition))
                         .checked(prefs.remember_position)
                         .on_change(cx.listener(|this, value, _, cx| {
                             this.reader.settings.preferences.remember_position = *value;
@@ -2044,7 +2236,7 @@ impl ReaderView {
                 )
                 .child(
                     Checkbox::new("recursive-folder")
-                        .label("包含子資料夾")
+                        .label(language.text(Text::IncludeSubfolders))
                         .checked(prefs.recursive_folder)
                         .on_change(cx.listener(|this, value, _, cx| {
                             this.reader.settings.preferences.recursive_folder = *value;
@@ -2052,26 +2244,22 @@ impl ReaderView {
                             cx.notify();
                         })),
                 )
-                .child(
-                    div()
-                        .text_xs()
-                        .child("包含子資料夾的變更在下次開啟時生效。"),
-                )
-                .child("投影片間隔（1–120 秒）")
+                .child(div().text_xs().child(language.text(Text::SubfoldersTip)))
+                .child(language.text(Text::IntervalLabel))
                 .child(
                     Input::new(&self.interval_input)
                         .id("interval-input")
-                        .aria_label("投影片間隔")
+                        .aria_label(language.text(Text::SlideshowInterval))
                         .small(),
                 )
-                .child("閱讀背景");
-            for (background, label) in [
-                (Background::Black, "黑色"),
-                (Background::Gray, "深灰"),
-                (Background::Paper, "紙色"),
+                .child(language.text(Text::ReadingBackground));
+            for (background, id, label) in [
+                (Background::Black, "黑色", language.text(Text::Black)),
+                (Background::Gray, "深灰", language.text(Text::Gray)),
+                (Background::Paper, "紙色", language.text(Text::Paper)),
             ] {
                 panel = panel.child(
-                    Button::new(label)
+                    Button::new(id)
                         .small()
                         .ghost()
                         .label(label)
@@ -2083,56 +2271,53 @@ impl ReaderView {
                         })),
                 );
             }
-            panel = panel.child(
-                div()
-                    .text_xs()
-                    .child("滾輪捲動；Ctrl＋滾輪縮放。所有設定自動儲存。"),
-            );
+            panel = panel.child(div().text_xs().child(language.text(Text::SettingsTip)));
             if let Some(error) = &self.save_error {
-                panel = panel
-                    .child(
-                        div()
-                            .text_xs()
-                            .text_color(cx.theme().danger)
-                            .child(error.clone()),
-                    )
-                    .child(
-                        Button::new("reset-corrupt-settings")
-                            .small()
-                            .label("備份並重設設定")
-                            .on_click(cx.listener(|this, _, window, cx| {
-                                this.save_epoch.fetch_add(1, Ordering::SeqCst);
-                                let lock = this.save_lock.clone();
-                                let result = lock
-                                    .lock()
-                                    .map_err(|_| "Settings writer lock failed".to_string())
-                                    .and_then(|_guard| {
-                                        AppSettings::reset_corrupt_at(&this.settings_path)
-                                    });
-                                match result {
-                                    Ok(backup) => {
-                                        this.reader.settings = AppSettings::default();
-                                        this.save_error = None;
-                                        this.interval_input.update(cx, |input, cx| {
-                                            input.set_value("5", window, cx)
+                panel =
+                    panel
+                        .child(div().text_xs().text_color(cx.theme().danger).child(
+                            language.format(Text::SettingsError, &[("error", error.clone())]),
+                        ))
+                        .child(
+                            Button::new("reset-corrupt-settings")
+                                .small()
+                                .label(language.text(Text::BackupReset))
+                                .on_click(cx.listener(|this, _, window, cx| {
+                                    this.save_epoch.fetch_add(1, Ordering::SeqCst);
+                                    let lock = this.save_lock.clone();
+                                    let result = lock
+                                        .lock()
+                                        .map_err(|_| "Settings writer lock failed".to_string())
+                                        .and_then(|_guard| {
+                                            AppSettings::reset_corrupt_at(&this.settings_path)
                                         });
-                                        this.sync_controls(window, cx);
-                                        this.set_message(
-                                            format!("設定已重設；原始檔備份：{}", backup.display()),
-                                            false,
-                                            cx,
-                                        );
+                                    match result {
+                                        Ok(backup) => {
+                                            this.reader.settings = AppSettings::default();
+                                            this.update_language(window, cx);
+                                            this.save_error = None;
+                                            this.interval_input.update(cx, |input, cx| {
+                                                input.set_value("5", window, cx)
+                                            });
+                                            this.sync_controls(window, cx);
+                                            this.set_localized_message(
+                                                Text::SettingsReset,
+                                                vec![("path", backup.display().to_string())],
+                                                false,
+                                                cx,
+                                            );
+                                        }
+                                        Err(error) => this.set_error(error, cx),
                                     }
-                                    Err(error) => this.set_message(error, true, cx),
-                                }
-                            })),
-                    );
+                                })),
+                        );
             }
         }
         panel.into_any_element()
     }
 
     fn render_viewer(&self, cx: &mut Context<Self>) -> gpui_kit::AnyElement {
+        let language = self.language();
         self.visible.borrow_mut().clear();
         // These colors are document-background preferences, not UI chrome colors.
         let background = match self.reader.settings.preferences.background {
@@ -2151,13 +2336,23 @@ impl ReaderView {
                 .bg(cx.theme().background)
                 .text_color(cx.theme().muted_foreground)
                 .child(div().text_2xl().child("MangaMeeya Rust"))
-                .child("拖放漫畫，或開啟圖片資料夾與封存檔")
+                .child(language.text(Text::EmptyHint))
                 .child(
                     div()
                         .flex()
                         .gap_2()
-                        .child(self.button("empty-open", "開啟漫畫…", Command::OpenFile, cx))
-                        .child(self.button("empty-folder", "開啟資料夾…", Command::OpenFolder, cx)),
+                        .child(self.button(
+                            "empty-open",
+                            language.text(Text::OpenComic),
+                            Command::OpenFile,
+                            cx,
+                        ))
+                        .child(self.button(
+                            "empty-folder",
+                            language.text(Text::OpenFolder),
+                            Command::OpenFolder,
+                            cx,
+                        )),
                 )
                 .child(
                     div()
@@ -2269,7 +2464,7 @@ impl ReaderView {
             .id("viewer")
             .test_support()
             .role(gpui_kit::Role::Group)
-            .aria_label("漫畫閱讀區")
+            .aria_label(language.text(Text::ReadingArea))
             .relative()
             .flex_1()
             .min_w_0()
@@ -2357,6 +2552,7 @@ impl ReaderView {
     }
 
     fn render_status(&self, cx: &mut Context<Self>) -> gpui_kit::AnyElement {
+        let language = self.language();
         let current = self.reader.current;
         let name = self
             .reader
@@ -2364,7 +2560,7 @@ impl ReaderView {
             .as_ref()
             .and_then(|book| book.pages.get(current))
             .map(|page| page.name.clone())
-            .unwrap_or_else(|| "尚未開啟漫畫".into());
+            .unwrap_or_else(|| language.text(Text::NoBook).into());
         let detail = self
             .pages
             .get(&current)
@@ -2391,11 +2587,11 @@ impl ReaderView {
                     .px_2()
                     .py_1()
                     .child(div().flex_1().min_w_0().truncate().text_xs().child(name))
-                    .child("頁碼")
+                    .child(language.text(Text::PageNumber))
                     .child(
                         Input::new(&self.page_input)
                             .id("page-input")
-                            .aria_label("頁碼")
+                            .aria_label(language.text(Text::PageNumber))
                             .small()
                             .w_16()
                             .disabled(self.reader.book.is_none()),
@@ -2405,16 +2601,21 @@ impl ReaderView {
                         div().w_40().px_2().child(
                             Slider::new(&self.page_slider)
                                 .disabled(self.reader.book.is_none())
-                                .accessibility_label("頁面位置"),
+                                .accessibility_label(language.text(Text::PagePosition)),
                         ),
                     )
                     .child(div().text_xs().child(detail))
-                    .child(self.button("sidebar-toggle", "側欄", Command::Sidebar, cx))
+                    .child(self.button(
+                        "sidebar-toggle",
+                        language.text(Text::Sidebar),
+                        Command::Sidebar,
+                        cx,
+                    ))
                     .child(
                         Button::new("inspector-toggle")
                             .small()
                             .ghost()
-                            .label("影像調整")
+                            .label(language.text(Text::ImageAdjustments))
                             .on_click(cx.listener(|this, _, _, cx| {
                                 this.inspector = !this.inspector;
                                 cx.notify();
@@ -2444,6 +2645,7 @@ impl ReaderView {
 
 impl Render for ReaderView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let language = self.language();
         self.sync_zoom_input(false, window, cx);
         self.visible_thumbnails.borrow_mut().clear();
         let workspace = div()
@@ -2505,7 +2707,7 @@ impl Render for ReaderView {
                             .bg(cx.theme().primary.opacity(0.9))
                             .text_color(cx.theme().primary_foreground)
                             .text_lg()
-                            .child("放開以開啟漫畫"),
+                            .child(language.text(Text::DropHint)),
                     )
                 },
             )
@@ -2639,41 +2841,46 @@ fn bind_commands(cx: &mut App) {
     }
     #[cfg(target_os = "windows")]
     cx.bind_keys([KeyBinding::new("alt-f4", Quit, Some(reader))]);
+    set_native_menus(Language::default(), cx);
+}
+
+fn set_native_menus(language: Language, cx: &mut App) {
+    use Command::*;
     cx.set_menus([
         Menu::new("MangaMeeya Rust").items([
-            MenuItem::action("About MangaMeeya Rust…", About),
-            MenuItem::action("Settings", Settings),
+            MenuItem::action(language.text(Text::AboutMenu), About),
+            MenuItem::action(language.text(Text::Preferences), Settings),
             MenuItem::separator(),
-            MenuItem::action("Quit", Quit),
+            MenuItem::action(language.text(Text::Quit), Quit),
         ]),
-        Menu::new("File").items([
-            MenuItem::action("Open comic…", OpenFile),
-            MenuItem::action("Open folder…", OpenFolder),
-            MenuItem::action("Save original image…", SavePage),
-            MenuItem::action("Close comic", Close),
+        Menu::new(language.text(Text::File)).items([
+            MenuItem::action(language.text(Text::OpenComic), OpenFile),
+            MenuItem::action(language.text(Text::OpenFolder), OpenFolder),
+            MenuItem::action(language.text(Text::SaveImage), SavePage),
+            MenuItem::action(language.text(Text::CloseComic), Close),
         ]),
-        Menu::new("View").items([
-            MenuItem::action("Sidebar", Sidebar),
-            MenuItem::action("Spread", Spread),
-            MenuItem::action("Continuous", Continuous),
-            MenuItem::action("Reading direction", Direction),
-            MenuItem::action("Fit window", FitWindow),
-            MenuItem::action("Fit width", FitWidth),
-            MenuItem::action("Fit height", FitHeight),
-            MenuItem::action("Original size", Original),
-            MenuItem::action("Fullscreen", Fullscreen),
+        Menu::new(language.text(Text::View)).items([
+            MenuItem::action(language.text(Text::Sidebar), Sidebar),
+            MenuItem::action(language.text(Text::Spread), Spread),
+            MenuItem::action(language.text(Text::ContinuousPages), Continuous),
+            MenuItem::action(language.text(Text::ReadingDirection), Direction),
+            MenuItem::action(language.text(Text::FitWindow), FitWindow),
+            MenuItem::action(language.text(Text::FitWidth), FitWidth),
+            MenuItem::action(language.text(Text::FitHeight), FitHeight),
+            MenuItem::action(language.text(Text::OriginalSize), Original),
+            MenuItem::action(language.text(Text::Fullscreen), Fullscreen),
         ]),
-        Menu::new("Navigate").items([
-            MenuItem::action("First page", First),
-            MenuItem::action("Previous page", Previous),
-            MenuItem::action("Next page", Next),
-            MenuItem::action("Last page", Last),
-            MenuItem::action("Slideshow", Slideshow),
+        Menu::new(language.text(Text::Navigate)).items([
+            MenuItem::action(language.text(Text::FirstPage), First),
+            MenuItem::action(language.text(Text::PreviousPage), Previous),
+            MenuItem::action(language.text(Text::NextPage), Next),
+            MenuItem::action(language.text(Text::LastPage), Last),
+            MenuItem::action(language.text(Text::Slideshow), Slideshow),
         ]),
-        Menu::new("Bookmarks").items([
-            MenuItem::action("Set bookmark", Bookmark),
-            MenuItem::action("Go to bookmark", Resume),
-            MenuItem::action("Delete bookmark", ClearBookmark),
+        Menu::new(language.text(Text::Bookmarks)).items([
+            MenuItem::action(language.text(Text::SetBookmark), Bookmark),
+            MenuItem::action(language.text(Text::GoToBookmark), Resume),
+            MenuItem::action(language.text(Text::DeleteBookmark), ClearBookmark),
         ]),
     ]);
 }

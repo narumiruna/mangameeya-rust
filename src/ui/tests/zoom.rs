@@ -29,7 +29,10 @@ fn close_enough(actual: f32, expected: f32) {
 
 fn trigger(window: &Window, mode: FitMode, percentage: &str) {
     assert_eq!(window.find_all("zoom-trigger").len(), 1);
-    let expected = format!("縮放設定，{}，{percentage}", fit_label(mode));
+    let expected = format!(
+        "縮放設定，{}，{percentage}",
+        fit_label(Language::TraditionalChinese, mode)
+    );
     assert_eq!(window.find("zoom-trigger").label(), Some(expected.as_str()));
 }
 

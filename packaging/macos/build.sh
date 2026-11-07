@@ -70,5 +70,5 @@ mkdir -p "$work_dir/dmg"
 ditto "$app" "$work_dir/dmg/MangaMeeya Rust.app"
 ln -s /Applications "$work_dir/dmg/Applications"
 hdiutil create -quiet -volname 'MangaMeeya Rust' -srcfolder "$work_dir/dmg" -ov -format UDZO "$dmg" </dev/null
-hdiutil verify "$dmg" </dev/null
+bash packaging/macos/verify-dmg.sh "$dmg"
 printf 'Created %s\nCreated %s\n' "$zip" "$dmg"

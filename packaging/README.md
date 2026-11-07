@@ -63,8 +63,10 @@ The app includes native document associations for the same 11 extensions, with
 
 Packages have only a local ad-hoc signature. They have no Developer ID signature or
 notarization. Gatekeeper can block downloaded packages. The packaging script verifies
-bundle metadata, architecture, signature integrity, and the DMG image. It does not
-start the packaged application.
+bundle metadata, architecture, signature integrity, and the DMG image. DMG verification
+retries only `Resource temporarily unavailable`, with at most three attempts and two
+seconds between attempts. Other errors fail immediately; verification is never skipped.
+The script does not start the packaged application.
 
 ## Cross-check Windows code from macOS
 
