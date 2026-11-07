@@ -1,0 +1,124 @@
+name: Release
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      operation:
+        description: Manage the release PR or retry the latest release and assets
+        type: choice
+        default: manage-pr
+        options: [manage-pr, retry-publication]
+
+permissions:
+  contents: read
+
+env:
+  CHANGENOTE_RUST_TOOLCHAIN: '1.99.1'
+
+jobs:
+  manage-pr:
+    if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || inputs.operation == 'manage-pr')
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    concurrency:
+      group: changenote-release-pr-main
+      cancel-in-progress: false
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      - uses: narumiruna/changenote/release@f4423760122463bf03a8d161c6f0bc4173afb6e0 # v0.10.0
+        with:
+          operation: manage-pr
+          base-branch: main
+          rust-toolchain: ${{ env.CHANGENOTE_RUST_TOOLCHAIN }}
+          commit-message: 'chore(release): version MangaMeeya Rust'
+          pr-title: 'chore(release): version MangaMeeya Rust'
+
+  select:
+    if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || inputs.operation == 'retry-publication')
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    outputs:
+      release-commit: ${{ steps.select.outputs.release-commit }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      - uses: narumiruna/changenote/release@f4423760122463bf03a8d161c6f0bc4173afb6e0 # v0.10.0
+        id: select
+        with:
+          operation: select
+          base-branch: main
+          retry: ${{ github.event_name == 'workflow_dispatch' && inputs.operation == 'retry-publication' }}
+          rust-toolchain: ${{ env.CHANGENOTE_RUST_TOOLCHAIN }}
+
+  validate:
+    needs: select
+    if: needs.select.outputs.release-commit != ''
+    permissions:
+      contents: read
+    uses: ./.github/workflows/windows.yml
+    with:
+      revision: ${{ needs.select.outputs.release-commit }}
+
+  publish:
+    needs: [select, validate]
+    if: ${{ !cancelled() && needs.validate.result == 'success' && needs.select.outputs.release-commit != '' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    concurrency:
+      group: changenote-publication-main
+      cancel-in-progress: false
+    permissions:
+      contents: write
+    outputs:
+      release-commit: ${{ steps.publish.outputs.release-commit }}
+      releases: ${{ steps.publish.outputs.releases }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ needs.select.outputs.release-commit }}
+          persist-credentials: false
+      - uses: narumiruna/changenote/release@f4423760122463bf03a8d161c6f0bc4173afb6e0 # v0.10.0
+        id: publish
+        with:
+          operation: publish
+          base-branch: main
+          expected-release-commit: ${{ needs.select.outputs.release-commit }}
+          rust-toolchain: ${{ env.CHANGENOTE_RUST_TOOLCHAIN }}
+
+  assets:
+    needs: publish
+    if: ${{ !cancelled() && needs.publish.result == 'success' && needs.publish.outputs.release-commit != '' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    concurrency:
+      group: changenote-assets-main
+      cancel-in-progress: false
+    permissions:
+      contents: write
+      actions: read
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ needs.publish.outputs.release-commit }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/download-artifact@v5
+        with:
+          pattern: mangameeya-rust-{windows,macos-arm64,macos-x86_64}
+          merge-multiple: true
+          path: release-assets
+      - name: Upload missing native release packages
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_COMMIT: ${{ needs.publish.outputs.release-commit }}
+          RELEASES: ${{ needs.publish.outputs.releases }}
+        run: bash packaging/upload-release.sh release-assets

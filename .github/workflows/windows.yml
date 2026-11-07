@@ -5,11 +5,47 @@ on:
     branches: [main]
   pull_request:
   workflow_dispatch:
+  workflow_call:
+    inputs:
+      revision:
+        description: Exact release commit to check and package
+        required: true
+        type: string
 
 permissions:
   contents: read
 
 jobs:
+  release-checks:
+    name: Release configuration and recovery tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ inputs.revision || github.sha }}
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: '1.99.1'
+      - uses: astral-sh/setup-uv@v7
+      - name: Check GitHub workflows
+        uses: docker://rhysd/actionlint:1.7.12
+      - name: Check release upload script
+        run: |
+          bash -n packaging/upload-release.sh
+          shellcheck packaging/upload-release.sh
+      - name: Install pinned changenote CLI
+        run: cargo install --git https://github.com/narumiruna/changenote --rev f4423760122463bf03a8d161c6f0bc4173afb6e0 --locked
+      - name: Prepare offline Cargo version updates
+        run: cargo fetch --locked
+      - name: Validate pending release notes
+        run: changenote status
+      - name: Test version updates and release asset recovery
+        env:
+          CHANGENOTE_BIN: changenote
+        run: uv run --no-project python -m unittest discover -s tests/release -v
+
   test-and-package:
     name: ${{ matrix.target }}
     runs-on: ${{ matrix.runner }}
@@ -37,6 +73,9 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@v5
+        with:
+          ref: ${{ inputs.revision || github.sha }}
+          persist-credentials: false
 
       - name: Select full Xcode and check Metal compiler
         if: runner.os == 'macOS'
