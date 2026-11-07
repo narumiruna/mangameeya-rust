@@ -7,20 +7,22 @@ use crate::{
     reader::Reader,
     settings::{AppSettings, Background, FitMode, ReadingMode, SidebarMode},
 };
+use gpui_kit::assets::IconName;
 use gpui_kit::component::{
-    ActiveTheme, Disableable, Selectable, Sizable, WindowExt,
+    ActiveTheme, Disableable, Icon, Selectable, Sizable, WindowExt,
     button::{Button, ButtonVariants},
     checkbox::Checkbox,
     input::{Input, InputEvent, InputState},
     menu::{DropdownMenu, PopupMenu},
+    popover::Popover,
     scroll::{Scrollbar, ScrollbarMode},
     slider::{Slider, SliderEvent, SliderState},
 };
 use gpui_kit::{
-    App, AppContext, Bounds, Context, Entity, ExternalPaths, FocusHandle, InteractiveElement,
-    IntoElement, KeyBinding, ListAlignment, ListOffset, ListState, Menu, MenuItem, MouseButton,
-    ObjectFit, ParentElement, Pixels, Render, RenderImage, SharedString, Size,
-    StatefulInteractiveElement, Styled, StyledImage, Subscription, TestSupportExt, Window,
+    App, AppContext, Bounds, Context, Entity, ExternalPaths, FocusHandle, Focusable,
+    InteractiveElement, IntoElement, KeyBinding, ListAlignment, ListOffset, ListState, Menu,
+    MenuItem, MouseButton, ObjectFit, ParentElement, Pixels, Render, RenderImage, SharedString,
+    Size, StatefulInteractiveElement, Styled, StyledImage, Subscription, TestSupportExt, Window,
     WindowBounds, WindowOptions, canvas, div, img, list, point, prelude::FluentBuilder, px, size,
 };
 use std::{
@@ -85,6 +87,36 @@ const MAX_TEXTURE_SIDE: u32 = 8192;
 const MAX_PAGE_REQUESTS: usize = 2;
 const MAX_THUMB_REQUESTS: usize = 2;
 const TICK: Duration = Duration::from_millis(80);
+
+fn fit_label(fit: FitMode) -> &'static str {
+    match fit {
+        FitMode::Window => "適合視窗",
+        FitMode::Width => "適合寬度",
+        FitMode::Height => "適合高度",
+        FitMode::Original => "原始尺寸",
+        FitMode::Custom => "自訂縮放",
+    }
+}
+
+fn zoom_percentage(scale: Option<f32>) -> String {
+    match scale.filter(|scale| scale.is_finite() && *scale > 0.) {
+        Some(scale) if scale < 0.01 => "<1%".into(),
+        Some(scale) => format!("{:.0}%", f64::from(scale) * 100.),
+        None => "—".into(),
+    }
+}
+
+fn zoom_input_value(scale: f32) -> String {
+    let percent = f64::from(scale) * 100.;
+    if percent < 0.01 {
+        percent.to_string()
+    } else {
+        format!("{percent:.2}")
+            .trim_end_matches('0')
+            .trim_end_matches('.')
+            .to_string()
+    }
+}
 
 type RequestKey = (u64, u64, usize, bool);
 type VisibleRequests = Rc<RefCell<BTreeSet<(usize, bool)>>>;
@@ -214,6 +246,7 @@ pub struct ReaderView {
     path_pending: bool,
     page_input: Entity<InputState>,
     zoom_input: Entity<InputState>,
+    zoom_open: bool,
     path_input: Entity<InputState>,
     interval_input: Entity<InputState>,
     page_slider: Entity<SliderState>,
@@ -248,7 +281,7 @@ impl ReaderView {
         let focus = cx.focus_handle();
         focus.focus(window, cx);
         let page_input = cx.new(|cx| InputState::new(window, cx).default_value("1"));
-        let zoom_input = cx.new(|cx| InputState::new(window, cx).default_value("100"));
+        let zoom_input = cx.new(|cx| InputState::new(window, cx).placeholder("—"));
         let path_input = cx.new(|cx| InputState::new(window, cx).placeholder("資料夾路徑"));
         let interval_input = cx.new(|cx| {
             InputState::new(window, cx).default_value(settings.preferences.interval.to_string())
@@ -277,17 +310,20 @@ impl ReaderView {
             &zoom_input,
             window,
             |this, input, event, window, cx| {
-                if matches!(event, InputEvent::PressEnter { .. }) {
+                if matches!(event, InputEvent::PressEnter { .. })
+                    && this.zoom_open
+                    && this.effective_scale().is_some()
+                {
                     let value = input.read(cx).value();
-                    match value.trim().trim_end_matches('%').parse::<f32>() {
+                    let value = value.trim();
+                    match value.strip_suffix('%').unwrap_or(value).parse::<f32>() {
                         Ok(percent) if percent.is_finite() => {
-                            this.reader.set_zoom(percent / 100.);
-                            this.relayout(cx);
-                            this.sync_controls(window, cx);
+                            this.apply_zoom(percent / 100., window, cx);
+                            this.zoom_open = false;
+                            this.set_message("已套用縮放比例。", false, cx);
                         }
                         _ => this.set_message("縮放必須是 10–800%。", true, cx),
                     }
-                    this.focus.focus(window, cx);
                 }
             },
         ));
@@ -400,6 +436,7 @@ impl ReaderView {
             path_pending: false,
             page_input,
             zoom_input,
+            zoom_open: false,
             path_input,
             interval_input,
             page_slider,
@@ -459,9 +496,7 @@ impl ReaderView {
         let page = (self.reader.current + 1).to_string();
         self.page_input
             .update(cx, |input, cx| input.set_value(page, window, cx));
-        let zoom = format!("{:.0}", self.reader.zoom * 100.);
-        self.zoom_input
-            .update(cx, |input, cx| input.set_value(zoom, window, cx));
+        self.sync_zoom_input(false, window, cx);
         let maximum = self.page_count().saturating_sub(1).max(1);
         let progress = self.reader.current as f32 / maximum as f32 * 100.;
         self.page_slider
@@ -469,6 +504,41 @@ impl ReaderView {
         self.thumbnails.scroll_to_reveal_item(self.reader.current);
         self.dirty = true;
         cx.notify();
+    }
+
+    fn sync_zoom_input(&self, force: bool, window: &mut Window, cx: &mut Context<Self>) {
+        let input = self.zoom_input.read(cx);
+        if !force && input.focus_handle(cx).is_focused(window) {
+            return;
+        }
+        let value = self
+            .effective_scale()
+            .map(zoom_input_value)
+            .unwrap_or_default();
+        if input.value().as_ref() != value {
+            self.zoom_input
+                .update(cx, |input, cx| input.set_value(value, window, cx));
+        }
+    }
+
+    fn apply_zoom(&mut self, zoom: f32, window: &mut Window, cx: &mut Context<Self>) {
+        if self.effective_scale().is_none() {
+            return;
+        }
+        self.reader.set_zoom(zoom);
+        self.relayout(cx);
+        self.sync_zoom_input(true, window, cx);
+        self.sync_controls(window, cx);
+    }
+
+    fn zoom_by(&mut self, factor: f32, window: &mut Window, cx: &mut Context<Self>) {
+        if factor.is_finite()
+            && factor > 0.
+            && let Some(scale) = self.effective_scale()
+        {
+            let zoom = (f64::from(scale) * f64::from(factor)).clamp(0.1, 8.) as f32;
+            self.apply_zoom(zoom, window, cx);
+        }
     }
 
     fn flush_settings(&self) -> Result<(), String> {
@@ -590,6 +660,7 @@ impl ReaderView {
     }
 
     fn open_path(&mut self, path: PathBuf, window: &mut Window, cx: &mut Context<Self>) {
+        self.zoom_open = false;
         self.focus.focus(window, cx);
         self.open_revision += 1;
         let revision = self.open_revision;
@@ -616,6 +687,7 @@ impl ReaderView {
                 view.opening = false;
                 match result {
                     Ok(book) => {
+                        view.zoom_open = false;
                         let explicit = explicit_image.then_some(book.initial_page);
                         view.reader.set_book(Arc::new(book), explicit);
                         view.book_revision += 1;
@@ -785,6 +857,8 @@ impl ReaderView {
             SavePage => self.save_page(window, cx),
             Quit => cx.quit(),
             Close => {
+                self.zoom_open = false;
+                self.focus.focus(window, cx);
                 self.open_revision += 1;
                 self.book_revision += 1;
                 self.reader.close();
@@ -851,18 +925,17 @@ impl ReaderView {
                     _ => FitMode::Window,
                 };
                 self.reader.set_fit(fit);
+                self.zoom_open = false;
                 self.relayout(cx);
+                self.sync_zoom_input(true, window, cx);
                 self.sync_controls(window, cx);
             }
             ZoomIn | ZoomOut | ZoomReset => {
                 if command == ZoomReset {
-                    self.reader.set_zoom(1.);
+                    self.apply_zoom(1., window, cx);
                 } else {
-                    self.reader
-                        .zoom_by(if command == ZoomIn { 1.15 } else { 1. / 1.15 });
+                    self.zoom_by(if command == ZoomIn { 1.15 } else { 1. / 1.15 }, window, cx);
                 }
-                self.relayout(cx);
-                self.sync_controls(window, cx);
             }
             First | Last | Next | Previous | Left | Right => {
                 match command {
@@ -1127,13 +1200,44 @@ impl ReaderView {
         }
     }
 
+    fn page_dimensions(&self, index: usize) -> Option<(u32, u32)> {
+        if let Some(page) = self.pages.get(&index) {
+            return Some((page.width, page.height));
+        }
+        self.geometry.get(&index).map(|page| {
+            if (self.reader.rotation - page.rotation).rem_euclid(180) == 90 {
+                (page.height, page.width)
+            } else {
+                (page.width, page.height)
+            }
+        })
+    }
+
+    fn effective_scale(&self) -> Option<f32> {
+        if self.reader.book.is_none()
+            || self.viewer_bounds.size.width <= px(0.)
+            || self.viewer_bounds.size.height <= px(0.)
+            || self.errors.contains_key(&(self.reader.current, false))
+        {
+            return None;
+        }
+        let (width, height) = self.page_dimensions(self.reader.current)?;
+        let count = self.reader.visible_indices().len();
+        Some(self.page_layout(width, height, count).scale)
+    }
+
     fn layout_for(&self, width: u32, height: u32, count: usize) -> (f32, f32) {
+        let layout = self.page_layout(width, height, count);
+        (layout.width, layout.height)
+    }
+
+    fn page_layout(&self, width: u32, height: u32, count: usize) -> crate::reader::PageLayout {
         let width = width.max(1) as f32;
         let height = height.max(1) as f32;
         let available_width =
             (f32::from(self.viewer_size.width) - 24.).max(1.) / count.max(1) as f32;
         let available_height = (f32::from(self.viewer_size.height) - 24.).max(1.);
-        let layout = crate::reader::fitted_page_layout(
+        crate::reader::fitted_page_layout(
             width,
             height,
             0,
@@ -1141,8 +1245,7 @@ impl ReaderView {
             self.reader.zoom,
             available_width,
             available_height,
-        );
-        (layout.width, layout.height)
+        )
     }
 
     fn page_element(
@@ -1213,13 +1316,7 @@ impl ReaderView {
                 );
             }
             frame = frame.child(picture);
-        } else if let Some(geometry) = self.geometry.get(&index) {
-            let (width, height) =
-                if (self.reader.rotation - geometry.rotation).rem_euclid(180) == 90 {
-                    (geometry.height, geometry.width)
-                } else {
-                    (geometry.width, geometry.height)
-                };
+        } else if let Some((width, height)) = self.page_dimensions(index) {
             let (width, height) = self.layout_for(width, height, count);
             frame = frame
                 .w(px(width + 8.))
@@ -1322,6 +1419,184 @@ impl ReaderView {
         }
     }
 
+    fn render_zoom_control(&self, cx: &mut Context<Self>) -> gpui_kit::AnyElement {
+        let scale = self.effective_scale();
+        let percent = zoom_percentage(scale);
+        let fit = self.reader.settings.preferences.fit;
+        let mode = fit_label(fit);
+        let enabled = scale.is_some();
+        let input = self.zoom_input.clone();
+        let owner = cx.entity().downgrade();
+        div()
+            .flex()
+            .flex_none()
+            .items_center()
+            .gap_1()
+            .child("縮放")
+            .child(
+                Popover::new("zoom-popover")
+                    .open(self.zoom_open && self.reader.book.is_some())
+                    .on_open_change(cx.listener(|this, open: &bool, window, cx| {
+                        this.zoom_open = *open && this.reader.book.is_some();
+                        this.sync_zoom_input(true, window, cx);
+                        cx.notify();
+                    }))
+                    .trigger(
+                        Button::new("zoom-trigger")
+                            .small()
+                            .outline()
+                            .icon(IconName::FileText)
+                            .label(format!("{mode}  |  {percent}"))
+                            .child(Icon::new(IconName::ChevronDown).small())
+                            .accessibility_label(format!("縮放設定，{mode}，{percent}"))
+                            .disabled(self.reader.book.is_none())
+                            .tooltip("選擇適應方式或輸入縮放比例。雙頁時，百分比以目前頁面為準。"),
+                    )
+                    .content(move |_, _, cx| {
+                        let mut stepper = div().flex().items_center().gap_2().child("縮放比例");
+                        for (id, label, command) in [
+                            ("zoom-out", "−", Command::ZoomOut),
+                            ("zoom-in", "+", Command::ZoomIn),
+                        ] {
+                            if command == Command::ZoomIn {
+                                stepper = stepper
+                                    .child(
+                                        Input::new(&input)
+                                            .id("zoom-input")
+                                            .aria_label("縮放百分比")
+                                            .small()
+                                            .w_16()
+                                            .disabled(!enabled),
+                                    )
+                                    .child("%");
+                            }
+                            let owner = owner.clone();
+                            stepper = stepper.child(
+                                Button::new(id)
+                                    .small()
+                                    .outline()
+                                    .label(label)
+                                    .accessibility_label(if command == Command::ZoomIn {
+                                        "放大"
+                                    } else {
+                                        "縮小"
+                                    })
+                                    .disabled(!enabled)
+                                    .on_click(move |_, window, cx| {
+                                        _ = owner.update(cx, |this, cx| {
+                                            this.perform(command, window, cx);
+                                        });
+                                    }),
+                            );
+                        }
+                        let mut choices = div()
+                            .flex()
+                            .flex_col()
+                            .gap_1()
+                            .border_t_1()
+                            .border_color(cx.theme().border)
+                            .pt_3()
+                            .child(
+                                div()
+                                    .text_xs()
+                                    .text_color(cx.theme().muted_foreground)
+                                    .child("適應方式"),
+                            );
+                        for (id, value, shortcut, description, command) in [
+                            (
+                                "zoom-fit-window",
+                                FitMode::Window,
+                                "F",
+                                "完整顯示整頁",
+                                Command::FitWindow,
+                            ),
+                            (
+                                "zoom-fit-width",
+                                FitMode::Width,
+                                "W",
+                                "依閱讀區寬度縮放",
+                                Command::FitWidth,
+                            ),
+                            (
+                                "zoom-fit-height",
+                                FitMode::Height,
+                                "H",
+                                "依閱讀區高度縮放",
+                                Command::FitHeight,
+                            ),
+                            (
+                                "zoom-original",
+                                FitMode::Original,
+                                "1",
+                                "依圖片原尺寸顯示",
+                                Command::Original,
+                            ),
+                        ] {
+                            let selected = fit == value;
+                            let owner = owner.clone();
+                            choices = choices.child(
+                                Button::new(id)
+                                    .small()
+                                    .ghost()
+                                    .w_full()
+                                    .h_auto()
+                                    .py_2()
+                                    .selected(selected)
+                                    .toggled(selected)
+                                    .accessibility_label(fit_label(value))
+                                    .child(
+                                        div()
+                                            .flex()
+                                            .items_center()
+                                            .gap_2()
+                                            .w_full()
+                                            .child(div().w_4().when(selected, |this| {
+                                                this.child(Icon::new(IconName::Check).small())
+                                            }))
+                                            .child(
+                                                div()
+                                                    .flex()
+                                                    .flex_col()
+                                                    .items_start()
+                                                    .flex_1()
+                                                    .child(div().text_sm().child(fit_label(value)))
+                                                    .child(
+                                                        div()
+                                                            .text_xs()
+                                                            .text_color(cx.theme().muted_foreground)
+                                                            .child(description),
+                                                    ),
+                                            )
+                                            .child(
+                                                div()
+                                                    .text_xs()
+                                                    .text_color(cx.theme().muted_foreground)
+                                                    .child(shortcut),
+                                            ),
+                                    )
+                                    .on_click(move |_, window, cx| {
+                                        _ = owner.update(cx, |this, cx| {
+                                            this.perform(command, window, cx);
+                                        });
+                                    }),
+                            );
+                        }
+                        div()
+                            .id("zoom-panel")
+                            .test_support()
+                            .role(gpui_kit::Role::Group)
+                            .aria_label("縮放設定")
+                            .flex()
+                            .flex_col()
+                            .w_80()
+                            .gap_3()
+                            .child(stepper)
+                            .child(choices)
+                    }),
+            )
+            .into_any_element()
+    }
+
     fn render_chrome(&self, cx: &mut Context<Self>) -> gpui_kit::AnyElement {
         let mut menus = div()
             .flex()
@@ -1384,23 +1659,7 @@ impl ReaderView {
                 Command::Direction,
                 cx,
             ))
-            .child(self.button("fit", "適合視窗", Command::FitWindow, cx))
-            .child(
-                self.button("zoom-out", "−", Command::ZoomOut, cx)
-                    .tooltip("縮小（−）"),
-            )
-            .child(
-                Input::new(&self.zoom_input)
-                    .id("zoom-input")
-                    .aria_label("縮放百分比")
-                    .small()
-                    .w_16(),
-            )
-            .child("%")
-            .child(
-                self.button("zoom-in", "+", Command::ZoomIn, cx)
-                    .tooltip("放大（+）"),
-            )
+            .child(self.render_zoom_control(cx))
             .child(
                 self.button("bookmark", "書籤", Command::Bookmark, cx)
                     .disabled(!opened),
@@ -2070,13 +2329,18 @@ impl ReaderView {
                                     }
                                     _ = view.update(cx, |this, cx| {
                                         let delta = event.delta.pixel_delta(px(16.)).y;
-                                        this.reader.zoom_by(if delta > px(0.) {
-                                            1.1
-                                        } else {
-                                            1. / 1.1
-                                        });
-                                        this.relayout(cx);
-                                        this.sync_controls(window, cx);
+                                        // A panel over the viewer must not pass wheel zoom through.
+                                        if this.zoom_open
+                                            || delta == px(0.)
+                                            || !f32::from(delta).is_finite()
+                                        {
+                                            return;
+                                        }
+                                        this.zoom_by(
+                                            if delta > px(0.) { 1.1 } else { 1. / 1.1 },
+                                            window,
+                                            cx,
+                                        );
                                     });
                                     cx.stop_propagation();
                                 }
@@ -2179,7 +2443,8 @@ impl ReaderView {
 }
 
 impl Render for ReaderView {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        self.sync_zoom_input(false, window, cx);
         self.visible_thumbnails.borrow_mut().clear();
         let workspace = div()
             .flex()
@@ -2313,7 +2578,8 @@ pub fn init(cx: &mut App) {
 
 fn bind_commands(cx: &mut App) {
     use Command::*;
-    let navigation = "Reader && !Input";
+    let navigation = "Reader && !Input && !PopoverContent";
+    let reader = "Reader";
     for (key, command) in [
         ("space", Next),
         ("pagedown", Next),
@@ -2327,14 +2593,6 @@ fn bind_commands(cx: &mut App) {
         ("s", Spread),
         ("c", Continuous),
         ("d", Direction),
-        ("f", FitWindow),
-        ("w", FitWidth),
-        ("h", FitHeight),
-        ("1", Original),
-        ("+", ZoomIn),
-        ("=", ZoomIn),
-        ("-", ZoomOut),
-        ("0", ZoomReset),
         ("[", RotateLeft),
         ("]", RotateRight),
         ("b", Bookmark),
@@ -2346,6 +2604,18 @@ fn bind_commands(cx: &mut App) {
         cx.bind_keys([KeyBinding::new(key, command, Some(navigation))]);
     }
     for (key, command) in [
+        ("f", FitWindow),
+        ("w", FitWidth),
+        ("h", FitHeight),
+        ("1", Original),
+        ("+", ZoomIn),
+        ("=", ZoomIn),
+        ("-", ZoomOut),
+        ("0", ZoomReset),
+    ] {
+        cx.bind_keys([KeyBinding::new(key, command, Some("Reader && !Input"))]);
+    }
+    for (key, command) in [
         ("ctrl-o", OpenFile),
         ("ctrl-shift-o", OpenFolder),
         ("ctrl-s", SavePage),
@@ -2353,7 +2623,7 @@ fn bind_commands(cx: &mut App) {
         ("f11", Fullscreen),
         ("escape", Escape),
     ] {
-        cx.bind_keys([KeyBinding::new(key, command, Some("Reader"))]);
+        cx.bind_keys([KeyBinding::new(key, command, Some(reader))]);
     }
     #[cfg(target_os = "macos")]
     for (key, command) in [
@@ -2365,10 +2635,10 @@ fn bind_commands(cx: &mut App) {
         ("cmd-,", Settings),
         ("ctrl-cmd-f", Fullscreen),
     ] {
-        cx.bind_keys([KeyBinding::new(key, command, Some("Reader"))]);
+        cx.bind_keys([KeyBinding::new(key, command, Some(reader))]);
     }
     #[cfg(target_os = "windows")]
-    cx.bind_keys([KeyBinding::new("alt-f4", Quit, Some("Reader"))]);
+    cx.bind_keys([KeyBinding::new("alt-f4", Quit, Some(reader))]);
     cx.set_menus([
         Menu::new("MangaMeeya Rust").items([
             MenuItem::action("About MangaMeeya Rust…", About),

@@ -2,6 +2,8 @@ use super::*;
 use gpui_kit::{AnyWindowHandle, TestAppContext, test::TestWindowExt};
 use tempfile::TempDir;
 
+mod zoom;
+
 struct Fixture {
     directory: TempDir,
     window: AnyWindowHandle,
@@ -87,6 +89,98 @@ fn pump(fixture: &Fixture, cx: &mut TestAppContext) {
         .unwrap();
     }
     cx.run_until_parked();
+}
+
+#[gpui_kit::test]
+fn controlled_popover_updates_content_and_isolates_reader_shortcuts(cx: &mut TestAppContext) {
+    use gpui_kit::component::popover::Popover;
+
+    struct Probe {
+        open: bool,
+        changes: usize,
+        trigger_focus: FocusHandle,
+        input: Entity<InputState>,
+        outside: Entity<InputState>,
+    }
+
+    impl Render for Probe {
+        fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+            let owner = cx.entity().downgrade();
+            let input = self.input.clone();
+            let label = self.changes.to_string();
+            div()
+                .size_full()
+                .key_context("Reader")
+                .on_action(cx.listener(|this, _: &Command, _, cx| {
+                    this.changes += 100;
+                    cx.notify();
+                }))
+                .child(
+                    Popover::new("probe-popover")
+                        .open(self.open)
+                        .on_open_change(cx.listener(|this, open: &bool, _, cx| {
+                            this.open = *open;
+                            cx.notify();
+                        }))
+                        .trigger(
+                            Button::new("probe-trigger")
+                                .label("Open")
+                                .track_focus(&self.trigger_focus),
+                        )
+                        .content(move |_, _, _| {
+                            let owner = owner.clone();
+                            div()
+                                .id("probe-panel")
+                                .test_support()
+                                .flex()
+                                .flex_col()
+                                .child(Input::new(&input).id("probe-input"))
+                                .child(Button::new("probe-change").label(label.clone()).on_click(
+                                    move |_, _, cx| {
+                                        _ = owner.update(cx, |this, cx| {
+                                            this.changes += 1;
+                                            cx.notify();
+                                        });
+                                    },
+                                ))
+                        }),
+                )
+                .child(Input::new(&self.outside).id("probe-outside").w_32())
+        }
+    }
+
+    cx.update(init);
+    let (window, probe) = cx.update(|cx| {
+        gpui_kit::open_window(WindowOptions::default(), cx, |window, cx| {
+            cx.new(|cx| Probe {
+                open: false,
+                changes: 0,
+                trigger_focus: cx.focus_handle(),
+                input: cx.new(|cx| InputState::new(window, cx).default_value("62")),
+                outside: cx.new(|cx| InputState::new(window, cx)),
+            })
+        })
+        .unwrap()
+    });
+    cx.update_window(window, |_, window, cx| {
+        probe.read(cx).trigger_focus.clone().focus(window, cx);
+        window.press("enter", cx);
+        assert!(window.try_find("probe-panel").is_some());
+        window.click("probe-change", cx);
+        assert_eq!(window.find("probe-change").label(), Some("1"));
+        for key in ["down", "pagedown", "tab"] {
+            window.press(key, cx);
+        }
+        assert_eq!(probe.read(cx).changes, 1);
+        window.press("escape", cx);
+        assert!(!probe.read(cx).open);
+        assert!(probe.read(cx).trigger_focus.is_focused(window));
+        window.click("probe-trigger", cx);
+        window.click("probe-outside", cx);
+        assert!(!probe.read(cx).open);
+        assert_eq!(window.find("probe-outside").focused(), Some(true));
+    })
+    .unwrap();
 }
 
 #[gpui_kit::test]
