@@ -1,7 +1,7 @@
 # MangaMeeya Rust — 桌面效率型實作計畫
 
 - 日期：2026-11-07
-- 狀態：**已核准；程式已實作，完整平台驗證與 PR 交付仍有 blocker**
+- 狀態：**已核准；PR #13 已建立，必要平台 CI 尚待驗證**
 - Objective：桌面效率型｜建議起點
 - 草擬時的基準 commit：`d41f28b`
 - 設計參考：`docs/ui-concepts/01-desktop.html`、`docs/ui-concepts/01-desktop.png`
@@ -223,14 +223,14 @@
 
 ### P6 — 文件、相容性與最終審查
 
-- [x] 更新 `README.md` 的操作入口與降版說明。
+- [x] 更新 `README.md`、`README.tw.md`、`README.ja.md` 的操作入口與降版說明，保留上游三語文件配置。
 - [x] 在 `docs/verification.md` 記錄本次實際平台、命令、結果、畫面路徑及未驗證限制，不改寫歷史結果。
 - [x] 依 `.changenote/README.md` 新增使用者可見的 minor release note，並以指定版本 CLI 驗證；不手動修改版本號或 Release 狀態檔。
 - [x] 審查設定安全、焦點、空資料、長檔名、縮圖虛擬化與原生選單回歸。
 - [x] 確認最終 diff 只包含核准範圍，未更動使用者其他檔案，未納入產生的原生截圖或二進位產物。
 - [x] 更新本計畫的核准記錄、逐項結果與證據；若仍有必要檢查未驗證，列出 blocker，不回報 `DONE`。
 
-預計受影響檔案：`src/ui.rs`、`src/settings.rs`、`src/i18n.rs`、`src/ui/tests.rs`、`src/ui/tests/desktop.rs`、`src/ui/tests/i18n.rs`、`src/ui/tests/zoom.rs`、`tests/rendering.rs`、`README.md`、`docs/verification.md`、本計畫與一份 `.changenote/` note。原型檔案只作設計參考，不解除其 ignore、不納入正式執行相依。
+預計受影響檔案：`src/ui.rs`、`src/settings.rs`、`src/i18n.rs`、`src/ui/tests.rs`、`src/ui/tests/desktop.rs`、`src/ui/tests/i18n.rs`、`src/ui/tests/zoom.rs`、`tests/rendering.rs`、`README.md`、`README.tw.md`、`README.ja.md`、`docs/verification.md`、本計畫與一份 `.changenote/` note。原型檔案只作設計參考，不解除其 ignore、不納入正式執行相依。
 
 ## 7. 可驗證的驗收條件
 
@@ -314,7 +314,10 @@ git diff --check
 2. 最終 Windows 全套測試為預設並行 166 passed / 2 failed（既有 IPC ConnectionReset）；序列執行 168 passed / 0 failed，無 ignored。較早的序列執行曾失敗，最終已全過；仍需正常並行 CI 結果。queue test 在基準 `d41f28b` 也重現，原因未定位；未改 IPC 或刪除測試掩蓋失敗。
 3. A1 的 Windows bounds／事件矩陣、A2–A12 的本機互動／設定檢查通過；UI 共 60 項，設定共 24 項。A13 的全套序列測試通過；A1 的 Metal 證據、必要 macOS gate 與正常並行 CI 尚未完成。
 4. macOS arm64 tests／Clippy／Metal 與 before/after、Intel macOS compile／Clippy 尚未執行；不以 HTML 原型圖片替代。
-5. GitHub CLI 未登入，建立 PR 與取得正常 PR CI 需要可用的 GitHub 授權；已向使用者說明登入方式。
+5. [PR #13](https://github.com/narumiruna/mangameeya-rust/pull/13) 已建立。WSL GitHub CLI 授權可用，先前 Windows CLI 的登入 blocker 已解除。
+   - 2026-11-07 合併上游 `main` 的 `986512f`，保留已發布的 `0.3.0` metadata、已消耗的 release notes 與三語 README 配置。
+   - README 衝突以保留英文主頁並將桌面 UI 操作、面板欄位與安全降版說明同步至三語文件解決；Rust 程式、測試與 dependencies 未改動。
+   - 合併後 fmt、Clippy、原生 rendering 與版本整合測試通過；序列測試 168 項通過，預設並行為 167 passed / 1 failed（既有 IPC queue ConnectionReset）。正常 CI 與 macOS 證據仍待確認。
 6. 本機證據、已修復的 review findings、21 項 release checks 的 Linux／Windows 分工與限制見 `docs/verification.md`。
 7. 目前不得回報 `DONE`。保留必要驗證與交付 blocker，不降低既定驗收標準。
 
@@ -324,4 +327,4 @@ git diff --check
 - 使用者核准：2026-11-07，指定本計畫並授權端到端實作及 PR 交付。
 - 實作開始：2026-11-07；分支 `narumi/feat/desktop-efficiency-ui`，基準與 `origin/main` 同為 `d41f28b`。
 - 基準檢查：Windows MSVC `cargo test --locked --all-features` 為 139 passed / 3 failed；兩個 IPC rejection tests 出現既有 ConnectionReset，一個設定備份測試出現暫時 AccessDenied。設定測試單獨重跑通過，IPC queue 測試單獨仍失敗；保留紀錄，不視為本次成功。基準 production rendering 通過。
-- 必要檢查：Windows UI 60 項、設定 24 項與 production rendering 通過；fmt、Clippy、changenote 與跨環境合計 21 項 release tests 通過。完整套件序列執行 168 項全過，預設並行仍有基準也重現的 IPC 失敗，macOS／PR 證據未取得；詳見第 11 節。
+- 必要檢查：Windows UI 60 項、設定 24 項與 production rendering 通過；fmt、Clippy、changenote 與跨環境合計 21 項 release tests 通過。完整套件序列執行 168 項全過，預設並行仍有基準也重現的 IPC 失敗。PR #13 已建立，macOS／正常 CI 證據仍未取得；詳見第 11 節。

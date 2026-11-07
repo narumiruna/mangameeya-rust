@@ -154,12 +154,13 @@ The transient lock was simulated deterministically in regression tests; it did n
 Implementation work started on 2026-11-07 from `d41f28b` on Windows x64.
 The approved plan is `docs/plans/2026-11-07_desktop-efficiency-plan.md`.
 The branch is `narumi/feat/desktop-efficiency-ui`.
-**This work is not fully verified. Required platform checks and PR delivery remain blocked.**
+**This work is not fully verified. PR #13 is open; required platform checks still need CI evidence.**
 
 The change uses GPUI Kit 0.9.0 without new dependencies. It adds a grouped toolbar, explicit reading modes, resizable side panels, three reading-tool tabs, and a page-information Popover. Reading, decoding, archive, IPC, and export implementations are unchanged.
 
-### Local evidence
+### Initial implementation evidence
 
+These results describe the original implementation before the main-branch merge. Merge checks are recorded below.
 Rust is 1.99.1. Cargo commands used the native Windows MSVC toolchain.
 The shell is WSL; the Cargo process and test executables are Windows programs, not Linux builds.
 The native Rust bin directory was added only to the child process PATH so Cargo could find rustfmt and Clippy.
@@ -216,12 +217,39 @@ Windows runs the interaction and geometry checks but the existing test does not 
 
 Older builds reject the new key. Before a downgrade, back up `settings.json` and remove only `preferences.panel_layout` from a working copy. Builds that also predate language support require the documented removal of `preferences.language`. Do not reset reading data to downgrade.
 
+### Merge-conflict resolution
+
+On 2026-11-07, the branch was updated with `main` at `986512f`.
+Upstream split the README into English, Traditional Chinese, and Japanese and released version 0.3.0.
+The merge keeps that document structure and release metadata.
+The desktop UI controls, panel settings, and safe downgrade instructions are present in all three README files.
+
+No Rust source, test, dependency resolution, build script, asset, or workflow was changed by this conflict resolution.
+The completed upstream release notes stay removed. The desktop feature note remains pending.
+The pinned changenote CLI reports the next minor version as 0.4.0; this check did not change product version files.
+
+Checks on the combined tree:
+
+| Check | Result |
+| --- | --- |
+| Formatting and all-target/all-feature Clippy | Passed on Windows MSVC |
+| Full Rust suite, default parallelism | 167 passed, 1 failed in the existing IPC queue test with ConnectionReset |
+| Full Rust suite, serial execution | 168 passed; no failures or ignored tests |
+| Production rendering | Passed native Windows events and geometry |
+| Pinned changenote status and native version integration | Passed; version integration used temporary fixtures |
+| Release/DMG mock checks | 20 passed on Linux; the skipped native CLI case passed separately on Windows |
+| Multilingual README checks | Upstream sections, local links, settings fields, code fences, and conflict-marker checks passed |
+
+The new logs are `target/desktop-merge-clippy.log`, `desktop-merge-tests.log`, `desktop-merge-tests-serial.log`, `desktop-merge-rendering.log`, `desktop-merge-changenote.json`, and `desktop-merge-version-test.log`.
+This merge does not establish macOS or parallel CI success. The existing IPC failure is not hidden or removed.
+No PR was merged, package published, version tag created, or release workflow dispatched by this conflict resolution.
+
 ### Remaining required evidence
 
 - Normal parallel CI confirmation for this implementation revision. The full serial Windows suite passed; the local parallel baseline IPC failures remain unresolved.
 - macOS arm64 tests, Clippy, Metal rendering, and actual before/after captures.
 - Intel macOS all-target compile/Clippy evidence.
-- GitHub PR and its normal CI results. GitHub CLI currently has no authenticated host; an authenticated account or API token is needed to create the PR. No release workflow was dispatched.
+- Normal CI results from [PR #13](https://github.com/narumiruna/mangameeya-rust/pull/13). WSL GitHub CLI authentication is available; the initial Windows CLI login blocker is resolved. No release workflow was dispatched for this work.
 
 Physical DPI, IME, Intel desktop interaction, and subjective reading comfort remain extra platform review paths. No package was published and no version tag was created.
 
