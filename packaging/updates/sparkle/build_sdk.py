@@ -40,11 +40,25 @@ def validate_source(source):
                 f"Patched source changed: {name}")
 
 
+def report_failure(message):
+    print(message, file=sys.stderr)
+    if os.environ.get("GITHUB_ACTIONS") == "true":
+        escaped = message.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
+        print(f"::error::{escaped}", flush=True)
+
+
 def run(command, log, environment, timeout=300):
     print("+", " ".join(map(str, command)), flush=True)
-    with log.open("w", encoding="utf-8") as output:
-        subprocess.run(list(map(str, command)), check=True, stdin=subprocess.DEVNULL,
-                       stdout=output, stderr=subprocess.STDOUT, env=environment, timeout=timeout)
+    try:
+        with log.open("w", encoding="utf-8") as output:
+            subprocess.run(list(map(str, command)), check=True, stdin=subprocess.DEVNULL,
+                           stdout=output, stderr=subprocess.STDOUT, env=environment, timeout=timeout)
+    except subprocess.SubprocessError:
+        lines = log.read_text(encoding="utf-8", errors="replace").splitlines()
+        failures = [line for line in lines if "error:" in line.lower() or "failed" in line.lower()]
+        detail = "\n".join(line[:700] for line in [*failures[-20:], *lines[-15:]])[-16000:]
+        report_failure(f"{log.name}:\n{detail}")
+        raise
 
 
 def required_tests(source):
@@ -171,7 +185,8 @@ def main():
     try:
         build(args.source, args.output, args.arch)
     except (ValueError, OSError, subprocess.SubprocessError) as error:
-        parser.exit(1, f"{error}\n")
+        report_failure(str(error))
+        parser.exit(1)
 
 
 if __name__ == "__main__":

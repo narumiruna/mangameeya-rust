@@ -21,6 +21,13 @@ def require(condition: bool, message: str) -> None:
         raise ValueError(message)
 
 
+def report_failure(message: str) -> None:
+    print(message, file=sys.stderr)
+    if os.environ.get("GITHUB_ACTIONS") == "true":
+        escaped = message.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
+        print(f"::error::{escaped}", flush=True)
+
+
 def run(args: list[str | Path], *, cwd: Path, env: dict[str, str], timeout: int = 300,
         log: Path | None = None) -> None:
     command = [str(a) for a in args]
@@ -31,8 +38,15 @@ def run(args: list[str | Path], *, cwd: Path, env: dict[str, str], timeout: int 
     if log is None:
         subprocess.run(command, **options)
     else:
-        with log.open("wb") as output:
-            subprocess.run(command, stdout=output, stderr=subprocess.STDOUT, **options)
+        try:
+            with log.open("wb") as output:
+                subprocess.run(command, stdout=output, stderr=subprocess.STDOUT, **options)
+        except subprocess.SubprocessError:
+            lines = log.read_text(encoding="utf-8", errors="replace").splitlines()
+            failures = [line for line in lines if "error" in line.lower() or "fail" in line.lower()]
+            detail = "\n".join(line[:700] for line in [*failures[-20:], *lines[-15:]])[-16000:]
+            report_failure(f"{log.name}:\n{detail}")
+            raise
 
 
 def toolchain() -> tuple[Path, dict[str, str]]:
@@ -166,7 +180,8 @@ def main() -> None:
         else:
             parser.error("--source and --output are required")
     except (ValueError, RuntimeError, OSError, subprocess.SubprocessError) as error:
-        parser.exit(1, f"{error}\n")
+        report_failure(str(error))
+        parser.exit(1)
 
 
 if __name__ == "__main__":
