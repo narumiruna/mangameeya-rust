@@ -54,6 +54,8 @@ jobs:
       fail-fast: false
       matrix:
         include:
+          - runner: ubuntu-24.04
+            target: x86_64-unknown-linux-gnu
           - runner: windows-latest
             target: x86_64-pc-windows-msvc
             artifact_name: mangameeya-rust-windows
@@ -76,6 +78,14 @@ jobs:
         with:
           ref: ${{ inputs.revision || github.sha }}
           persist-credentials: false
+
+      - name: Install Linux build and text-system dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends \
+            pkg-config libfontconfig1-dev libfreetype6-dev libxcb1-dev \
+            libxkbcommon-dev libxkbcommon-x11-dev fonts-dejavu-core fonts-noto-cjk
 
       - name: Select full Xcode and check Metal compiler
         if: runner.os == 'macOS'
@@ -136,6 +146,7 @@ jobs:
         run: bash packaging/macos/build.sh '${{ matrix.target }}'
 
       - name: Upload native packages
+        if: runner.os == 'Windows' || runner.os == 'macOS'
         uses: actions/upload-artifact@v6
         with:
           name: ${{ matrix.artifact_name }}

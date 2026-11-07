@@ -109,12 +109,18 @@ without starting another process. The UI handles these native events separately.
 
 ## CI
 
-`.github/workflows/windows.yml` checks Rust formatting, tests, and Clippy on Windows
-x64, macOS ARM64, and macOS x86_64. It builds native packages and uploads a separate
-artifact for each platform. Windows also runs the silent installer test. macOS jobs
-set `DEVELOPER_DIR` to full Xcode and check the Metal compiler before Cargo builds.
-All platforms run `cargo test --locked --test rendering` against the production UI
-with the native text system. macOS also uses the Metal renderer and uploads
+`.github/workflows/ci.yml` checks Rust formatting, tests, and Clippy on Linux x64,
+Windows x64, macOS ARM64, and macOS x86_64. Linux installs Fontconfig, FreeType, XCB,
+XKB, and Latin/CJK fonts for headless interaction and layout tests with the native
+text system. These tests need no display server or GPU. Linux does not produce a
+package or verify desktop launch or GPU rendering.
+
+Windows and macOS build native packages and upload a separate artifact for each
+target. Windows also runs the silent installer test. macOS jobs set `DEVELOPER_DIR`
+to full Xcode and check the Metal compiler before Cargo builds.
+All platforms run `cargo test --locked --test rendering` against the production UI.
+Linux uses native text shaping. The Windows headless backend uses a no-op text system.
+macOS uses its native text system and Metal renderer, and uploads
 `target/ui-smoke/*.png` as separate artifacts, including screenshots available after
 a failed test.
 
@@ -135,7 +141,7 @@ flowchart TD
     Push[Push to main] --> PR[Manage release PR from pending notes]
     Push --> Select[Select an incomplete validated release batch]
     Merge[Owner reviews and merges release PR] --> Push
-    Select --> CI[Check exact commit on Windows and both macOS architectures]
+    Select --> CI[Check exact commit on Linux, Windows, and both macOS architectures]
     CI --> Publish[Publish guarded tag and GitHub Release]
     Publish --> Upload[Upload the five native packages]
 ```
