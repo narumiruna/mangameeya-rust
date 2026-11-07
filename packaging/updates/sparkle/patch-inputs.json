@@ -1,7 +1,7 @@
 {
   "schema": 1,
   "commit": "ab7d71291238df6e0492143b120c9b696a35f603",
-  "patch_sha256": "1c2f13590c22256a11b2dd499f8c62ed61b450ed4ae45d2312aede0a157fab99",
+  "patch_sha256": "110eab8161f9a08d6db07b98094b879f66eb050d5e55eef4809abbb9e145afb8",
   "inputs": {
     "Autoupdate/AppInstaller.m": "39369669a98181f81fa58ab7d409c8310fbe4b5ff046fb48bd11a39632195dd1",
     "Autoupdate/SPUInstallationInputData.h": "5ec4ff8b833f772e5ea459b5080fe65f35d42a83431d0be9605b3c44106c3b67",
@@ -35,6 +35,6 @@
     "Sparkle/SPUUpdater.m": "2a84bedb9abdf262abbe017cacdd53cecec76d0b4275e26c4be393ff0f7e57ec",
     "Sparkle/SPUUpdaterDelegate.h": "db7f3caefb92c11533b8dd364553b05bba7f257da387df0397ef6780ad9bdb8f",
     "Sparkle/SPUUserDriver.h": "1fe9cfa681ef5bdb0909ddc09a7d4db587f2c42bf1c39f528c417099fcfbfad5",
-    "Tests/SUInstallerTest.m": "fb00108f9b664fde7c3be119fdb38747e9995cd9466285ff028b751f0558f1ba"
+    "Tests/SUInstallerTest.m": "303884176aeba5a2f3443ccf6ce1b5c8e7c2093a49d60a5ca35700ab2366abe9"
   }
 }

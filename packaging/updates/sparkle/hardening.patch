@@ -1123,7 +1123,7 @@ diff --git a/Sparkle/SPUUserDriver.h b/Sparkle/SPUUserDriver.h
 diff --git a/Tests/SUInstallerTest.m b/Tests/SUInstallerTest.m
 --- a/Tests/SUInstallerTest.m
 +++ b/Tests/SUInstallerTest.m
-@@ -13,6 +13,375 @@
+@@ -13,6 +13,377 @@
  #import "SUInstallerProtocol.h"
  #import "SPUInstallationType.h"
  #import <unistd.h>
@@ -1238,7 +1238,9 @@ diff --git a/Tests/SUInstallerTest.m b/Tests/SUInstallerTest.m
 +    XCTAssertNotNil(archive);
 +    SUPipedUnarchiver *unarchiver = [[SUPipedUnarchiver alloc] initWithArchivePath:archive extractionDirectory:root.path];
 +    XCTestExpectation *completed = [self expectationWithDescription:@"Canceled extraction reports failure"];
-+    Method launch = class_getInstanceMethod(NSTask.class, @selector(launchAndReturnError:));
++    // NSTask is a class cluster; intercept the concrete task's implementation.
++    Class taskClass = object_getClass([[NSTask alloc] init]);
++    Method launch = class_getInstanceMethod(taskClass, @selector(launchAndReturnError:));
 +    SUOriginalTaskLaunch = method_getImplementation(launch);
 +    SUExtractionStarted = dispatch_semaphore_create(0);
 +    SUExtractionLaunches = 0;
