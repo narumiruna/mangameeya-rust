@@ -184,7 +184,8 @@ permissions > Allow GitHub Actions to create and approve pull requests**. The se
 was disabled when this integration was prepared. Branch rules must also allow the
 managed release branch. The workflow gives only PR management `pull-requests: write`;
 selection and native builds use read access, while publication and asset upload need
-`contents: write`. No personal token is required by the configured flow.
+`contents: write`. Asset upload uses `PAT_TOKEN` when configured and otherwise uses
+the job's `GITHUB_TOKEN`. No personal token is required by the configured flow.
 
 PRs created with the default `GITHUB_TOKEN` do not start PR workflows automatically.
 The release flow still runs exact-commit native checks before publication. If branch

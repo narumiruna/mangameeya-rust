@@ -5,6 +5,7 @@ if [[ $# != 1 || ! -d "$1" ]]; then
     printf 'Usage: bash packaging/upload-release.sh <artifact-directory>\n' >&2
     exit 1
 fi
+: "${GH_TOKEN:?GH_TOKEN is required}"
 : "${GH_REPO:?GH_REPO is required}"
 : "${RELEASES:?RELEASES is required}"
 : "${RELEASE_COMMIT:?RELEASE_COMMIT is required}"
