@@ -64,7 +64,10 @@
 3. 保留 `ResetFilters` 既有語意：只重設亮度、對比與灰階，不重設旋轉或偏好；正式標籤明確使用「重設濾鏡」。
 4. 模式切換不自動覆寫目前 FitMode 或自訂縮放。原型展示的模式預設縮放不直接移植；每種模式獨立記憶縮放不在本次範圍。
 5. 保留既有書籤模型與設定，不移植原型的多頁書籤集合或重新載入即消失的資料模型。
-6. 使用 GPUI ActiveTheme 與既有 Lucide icons；不強制套用原型的淺色背景或特定藍色。
+6. 原核准範圍使用 GPUI ActiveTheme 與既有 Lucide icons，不要求還原原型配色。
+   - 後續使用者比較設計圖與 Windows 實際畫面，要求提出改進方案，再以 `resolve findings` 核准修正。
+   - 此後續範圍改為還原桌面原型的靜態配色、選中樣式、間距與資訊層級；仍使用 GPUI ActiveTheme，不新增主題切換或改寫閱讀引擎。
+   - 後續結果與未驗證項目記錄在 `docs/verification.md` 的 Desktop visual-parity follow-up，不以原計畫的歷史測試結果替代。
 
 ## 4. 目標介面與操作規則
 
