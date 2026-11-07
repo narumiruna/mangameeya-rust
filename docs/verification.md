@@ -309,3 +309,16 @@ Local artifacts are under `C:/Users/narumi/workspace/mangameeya-rust/target/`:
 - `desktop-visual-tests.log` and `desktop-visual-tests-serial.log`
 
 The screenshot and logs are generated evidence, not committed assets. The screenshot uses synthetic artwork, not the concept's artwork or the user's comic. It does not prove pixel-for-pixel parity. Windows 100%/150% screenshots, the full native screenshot state matrix, macOS checks, and user visual approval remain unverified. No package was installed or published, and the running user application was not replaced.
+
+## Confirmed auto-update preflight
+
+The approved auto-update plan is blocked at its initial technical gate. No updater
+was integrated into the reader, installers, packages, or release workflow.
+The [preflight record](auto-update-preflight.md) contains the pinned SDK source/API
+findings, limited native Windows crypto/ABI smoke results, unchanged-application
+baseline failures and reruns, and required owner/design actions.
+
+The Windows smoke check is not a GPUI/SDK callback or installation test. macOS SDK
+runtime, signing, notarization, and actual updates remain unverified. Existing
+reader CI success cannot satisfy the updater acceptance criteria. Do not report
+this plan as complete or use test signing keys for a production package.
