@@ -264,3 +264,16 @@ These checks are not represented as local passes:
 - **Subjective visual acceptance:** A maintainer can review the generated captures and native reading workflow on the intended display and input hardware. Automated geometry and pixel checks do not establish personal usability acceptance. This optional product review is not an agent coding gate.
 
 The project does not require credentials, paid services, or changes to comic sources to build or test locally.
+
+## Confirmed auto-update preflight
+
+The approved auto-update plan is blocked at its initial technical gate. No updater
+was integrated into the reader, installers, packages, or release workflow.
+The [preflight record](auto-update-preflight.md) contains the pinned SDK source/API
+findings, limited native Windows crypto/ABI smoke results, unchanged-application
+baseline failures and reruns, and required owner/design actions.
+
+The Windows smoke check is not a GPUI/SDK callback or installation test. macOS SDK
+runtime, signing, notarization, and actual updates remain unverified. Existing
+reader CI success cannot satisfy the updater acceptance criteria. Do not report
+this plan as complete or use test signing keys for a production package.
