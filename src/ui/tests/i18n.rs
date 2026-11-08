@@ -313,7 +313,6 @@ fn language_changes_preserve_reader_state_history_and_input_drafts(cx: &mut Test
             fixture.view.update(cx, |view, cx| {
                 assert!(view.zoom_open);
                 view.controls_pending = false;
-                view.path_pending = false;
                 for (input, draft) in [
                     (&view.page_input, "004"),
                     (&view.path_input, "/draft/日本語/正體中文"),
@@ -357,7 +356,7 @@ fn language_changes_preserve_reader_state_history_and_input_drafts(cx: &mut Test
                     .inspector_visible
             );
             assert!(view.zoom_open);
-            assert!(!view.controls_pending && !view.path_pending);
+            assert!(!view.controls_pending);
             for (input, draft) in [
                 (&view.page_input, "004"),
                 (&view.path_input, "/draft/日本語/正體中文"),

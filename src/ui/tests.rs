@@ -6,6 +6,7 @@ use tempfile::TempDir;
 mod browser;
 mod browser_lifecycle;
 mod desktop;
+mod files;
 mod i18n;
 mod preferences;
 mod visual;
@@ -906,11 +907,12 @@ fn file_browser_history_fullscreen_and_slideshow_commands_work(cx: &mut TestAppC
     .unwrap();
     pump(&fixture, cx);
     cx.update_window(fixture.window, |_, window, cx| {
-        let entry = SharedString::from(format!(
-            "entry:{}",
-            folder.join("2.png").canonicalize().unwrap().display()
-        ));
-        window.click(entry, cx);
+        let entry = super::files::entry_id(&folder.join("2.png"));
+        window.click(entry.clone(), cx);
+        fixture
+            .view
+            .read_with(cx, |view, _| assert_eq!(view.reader.current, 0));
+        window.double_click(entry, cx);
     })
     .unwrap();
     pump(&fixture, cx);

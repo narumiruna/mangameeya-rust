@@ -614,3 +614,148 @@ that documentation-only head before the PR is marked ready.
 - **Recovery:** Revert the feature and its unreleased note. Settings need no conversion;
   do not reset reading positions, history, bookmarks, or comic files. No package was
   published, version tag created, or release workflow dispatched by this work.
+
+## Expandable Files sidebar
+
+Implementation started on 2026-11-09 from `798ce33`, the current `origin/main`, on
+`narumi/feat/expandable-files-tree`. The selected reference is design 02 under
+`docs/files-sidebar-concepts/`. The execution plan is
+`docs/plans/2026-11-09_expandable-files-tree-plan.md`.
+
+### Scope and native behavior
+
+- The Files sidebar has independent directory, selection, focus, query, history,
+  and request state. Disclosures expand folders; folder names change only the
+  sidebar location. Single file clicks select. Double-click, Enter on a file, and
+  Read selection use the existing book-opening pipeline.
+- Sidebar navigation does not replace the central canvas, pause playback, request
+  covers, or write settings. Current-book and selected-row markers are separate.
+  The original central browser retains its query, selection, order, scroll, cover
+  limits, and Backspace workflow. Its folder-reading action remains available in
+  File → Read this folder while browsing.
+- Locate retains the successful source entry independently of the consumed central
+  return origin. It supports images, archives, folder books, and aliases. Initial
+  external opens establish the source folder before manual sidebar navigation.
+  Later external opens preserve a manually chosen location.
+- Search filters loaded metadata, including collapsed branches. It does not load
+  unvisited folders. Normal expansion returns after clearing the query. Hidden
+  filtering covers dot entries and Windows Hidden/System attributes. Locate can
+  enable hidden visibility and report the change.
+- The location field displays ordinary drive and UNC paths without using display
+  text as an entry identity. Enter submits; Escape restores the accepted path.
+  Invalid paths and failed reads retain the prior location and reader. Retry keeps
+  the failed operation: a Locate failure retries Locate, not a previous navigation.
+- The existing 224 logical-pixel sidebar default and 216–320 range are unchanged.
+  History retains at most 32 metadata snapshots. Tree state is session-only. There
+  are no new dependencies, persisted preferences, version changes, or source-file
+  writes. Folder reading keeps the existing recursive-image policy; it does not
+  combine archives.
+
+### Verification results
+
+Rust is 1.99.1. Windows commands use native MSVC from PowerShell, invoked through
+WSL. Linux commands use the installed native x86_64 Linux toolchain and separate
+`target/linux-browser/` outputs. The existing ignored linker-name links under
+`target/native-libs/` supply the installed xkbcommon libraries; no system files or
+repository build configuration were changed.
+
+| Check | Result |
+| --- | --- |
+| Baseline Windows formatting, all-target Clippy, production rendering | Passed before implementation |
+| Baseline Windows full suite | 253 passed; 3 existing IPC failures; none ignored |
+| Windows `cargo fmt --all -- --check` | Passed |
+| Windows tree model tests | 45 passed |
+| Windows native Files event tests | 24 passed |
+| Windows central-browser event/lifecycle tests | 32 passed |
+| Windows final `cargo test --locked --all-features` | **Failed: 324 passed, 1 existing IPC failure; none ignored** |
+| Linux final `cargo test --locked --all-features` | 326 passed; no failures or ignored tests; normal parallel execution |
+| Windows and Linux production rendering | Passed, including the Files matrix below |
+| Windows and Linux all-target/all-feature Clippy with `-D warnings` | Passed |
+| Pinned changenote v0.10.0 status | Passed; one minor feature note; no product version files changed |
+| Release/version/DMG mock tests with the pinned CLI | 21 passed; GitHub and packaging actions are mocked |
+| Local HTML prototype verification | 459 checks passed in Chromium 156.0.8078.4, offline |
+| Diff and intended-path whitespace checks | Passed |
+
+The Windows full-suite failure is
+`instance::tests::queue_is_bounded_and_rejects_overflow`, which reports Winsock
+10054 (`ConnectionReset`) at `src/instance.rs:539`. It also failed before this
+change and in an isolated rerun. The baseline additionally failed
+`forwards_paths_and_empty_focus_requests` and
+`rejects_oversized_payloads_and_path_counts`. No IPC source, assertions, test
+parallelism, or workflow was changed. The Linux pass does not replace Windows
+execution evidence. **The Windows full suite is not reported as passing, and the
+existing required CI gates still apply before merge or release.**
+
+Logs are under ignored `target/files-tree/`: `baseline-*`, `model-final-tests.log`,
+`files-final-tests.log`, `final-browser.log`, `final-tests.log`,
+`final-tests-retry.log`, `ipc-isolated.log`, `final-fmt.log`, `final-clippy.log`,
+`final-rendering.log`, `linux-tests.log`, `linux-clippy.log`,
+`linux-rendering.log`, and `release-tests.log`. HTML captures remain in an OS
+temporary directory. These files are local evidence, not tracked source assets.
+
+### Regression and review evidence
+
+- Model tests cover 10,000 siblings, native ordering and colliding display names,
+  separate aliases, branch-local cycles, hidden classification, history bounds and
+  exact anchors, lazy filtering, root replacement, duplicate/stale completions,
+  two occupied worker slots, failures, and retries. Obsolete synchronous reads keep
+  their slots until completion.
+- Review found and fixed interrupted expanded branches that could stay idle after
+  Back or Locate cancellation. Accepted explicit expansions resume without scanning
+  query-only branches or retrying persistent errors indefinitely. Close invalidates
+  pending work and leaves canceled unloaded branches available to expand again.
+- Directory requests capture the expected canonical owner. A retargeted alias
+  cannot install ancestor contents under a stale node. Detached descendants and
+  their work are invalidated. Staged Locate merges check owner identity both before
+  replay and at each install; unrelated expanded branches remain intact.
+- Native events prove selection versus reading, recursive image-folder reading,
+  failed opens, correct image and folder Backspace origins, source identity after
+  central return, Unicode/verbatim/invalid UNC drafts, real Windows Hidden/System
+  attributes and junctions, settings/source byte preservation, retained playback,
+  and virtual viewport rows. Keyboard movement reads cached rows without cloning
+  the complete tree for each key.
+- Focus tests cover normal tree keys, search-time expansion locks, input editing,
+  Escape cancellation, tab/sidebar removal, completed and delayed Locate, newer
+  successful/failed book intents, and Retry after source deletion/restoration.
+  Background work cannot reclaim focus after the user leaves Files. Automatic
+  location work does not replace the BookOpened status message.
+- Book replacement releases images from the currently borrowed window's native
+  atlas. The added regression checks that the old atlas entry is removed and the
+  replacement is present.
+- Production rendering adds 54 Files cases: three locales × three viewport sizes
+  (1280×800, 960×640, 800×540) × three exact sidebar widths (216, 224, 320) × two
+  central modes. The right inspector is hidden in this isolated matrix so a 320 px
+  sidebar can fit the smallest viewport without changing panel preferences or the
+  central minimum. Existing desktop and central-browser panel checks remain intact.
+  The matrix checks fixed controls, labels, bounds, active-row reachability, sibling
+  icon alignment, keyboard reachability, and long names. It also checks 54 End-key
+  states. The smallest tree scrolls to rows rather than requiring all rows visible.
+- Existing reader and central-browser rendering workflows remain unchanged. Local
+  Windows and Linux rendering verifies native events and geometry, not Metal
+  pixels. The rendering test emits `target/ui-smoke/files-*.png` on macOS; those
+  platform captures were not produced locally and are not claimed as local visual
+  evidence. The HTML screenshots are not native evidence.
+
+The complete change was reviewed for correctness, security, lifecycle safety,
+compatibility, regressions, and scope. The Windows baseline failure remains disclosed;
+no assertion or required CI gate was removed to hide it.
+
+### Retained Files handoff and recovery
+
+- **Platform maintainer:** Prerequisites: the PR head, normal required CI results,
+  native toolchains, and a desktop at the intended scaling. Run the macOS arm64 and
+  Intel suites and inspect their Files captures; assess the disclosed Windows IPC
+  baseline failure under normal CI. Inspect physical shortcuts, IME composition,
+  assistive-technology announcements, native fonts, high-DPI layout, and real UNC
+  shares. Expected result: platform-specific execution and visual evidence. Local
+  headless Windows/WSL checks do not establish these physical paths or macOS pixels.
+  Keep all existing merge/release gates; do not call the Windows local suite or
+  unexecuted platforms verified.
+- **Product maintainer:** With native captures available from supported platform
+  execution, compare design 02 for hierarchy clarity, loaded-only search wording,
+  and reading comfort. Expected result: a visual/usability assessment. This
+  subjective review is optional and is not an agent coding gate.
+- **Recovery:** Revert the tree implementation, its tests/docs, and unreleased
+  feature note. Keep the HTML studies as design references. No settings conversion
+  or comic-file recovery is required; do not reset reading history or bookmarks.
+  No package was published, version tag created, or release workflow dispatched.
