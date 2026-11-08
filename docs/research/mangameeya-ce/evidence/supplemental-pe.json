@@ -1,0 +1,2105 @@
+{
+  "source": "supplemental-python-stdlib-pe-parser-not-REA",
+  "artifact": {
+    "name": "MangaMeeyaCE.exe",
+    "sha256": "ec0b517af2813c841d350a95080725d8842e8fdf4eb7f1590c9027466b55e530",
+    "bytes": 708608
+  },
+  "pe": {
+    "pe_header_offset": 240,
+    "machine": "0x14c",
+    "sections": [
+      {
+        "name": ".text",
+        "virtual_size": 563600,
+        "rva": "0x1000",
+        "raw_offset": 4096,
+        "raw_bytes": 565248,
+        "characteristics": "0x60000020"
+      },
+      {
+        "name": ".rdata",
+        "virtual_size": 71148,
+        "rva": "0x8b000",
+        "raw_offset": 569344,
+        "raw_bytes": 73728,
+        "characteristics": "0x40000040"
+      },
+      {
+        "name": ".data",
+        "virtual_size": 20960,
+        "rva": "0x9d000",
+        "raw_offset": 643072,
+        "raw_bytes": 12288,
+        "characteristics": "0xc0000040"
+      },
+      {
+        "name": ".rsrc",
+        "virtual_size": 51972,
+        "rva": "0xa3000",
+        "raw_offset": 655360,
+        "raw_bytes": 53248,
+        "characteristics": "0x40000040"
+      }
+    ],
+    "coff_timestamp_claim_utc": "2006-06-02T11:53:13+00:00",
+    "linker_version": [
+      8,
+      0
+    ],
+    "characteristics": "0x103",
+    "dll_characteristics": "0x0",
+    "image_base": "0x400000",
+    "entry_rva": "0x79c00",
+    "entry_va": "0x479c00",
+    "subsystem": 2,
+    "directories": [
+      {
+        "name": "export",
+        "rva": "0x0",
+        "bytes": 0
+      },
+      {
+        "name": "import",
+        "rva": "0x9afa4",
+        "bytes": 160
+      },
+      {
+        "name": "resource",
+        "rva": "0xa3000",
+        "bytes": 45532
+      },
+      {
+        "name": "exception",
+        "rva": "0x0",
+        "bytes": 0
+      },
+      {
+        "name": "security",
+        "rva": "0x0",
+        "bytes": 0
+      },
+      {
+        "name": "relocation",
+        "rva": "0x0",
+        "bytes": 0
+      },
+      {
+        "name": "debug",
+        "rva": "0x8b510",
+        "bytes": 28
+      },
+      {
+        "name": "architecture",
+        "rva": "0x0",
+        "bytes": 0
+      },
+      {
+        "name": "global_ptr",
+        "rva": "0x0",
+        "bytes": 0
+      },
+      {
+        "name": "tls",
+        "rva": "0x0",
+        "bytes": 0
+      },
+      {
+        "name": "load_config",
+        "rva": "0x963e8",
+        "bytes": 64
+      },
+      {
+        "name": "bound_import",
+        "rva": "0x0",
+        "bytes": 0
+      },
+      {
+        "name": "iat",
+        "rva": "0x8b000",
+        "bytes": 1068
+      },
+      {
+        "name": "delay_import",
+        "rva": "0x0",
+        "bytes": 0
+      },
+      {
+        "name": "clr",
+        "rva": "0x0",
+        "bytes": 0
+      },
+      {
+        "name": "reserved",
+        "rva": "0x0",
+        "bytes": 0
+      }
+    ],
+    "coff_symbol_count": 0
+  },
+  "normal_imports": [
+    {
+      "dll": "KERNEL32.dll",
+      "descriptor_offset": 634788,
+      "functions": [
+        {
+          "iat_rva": "0x8b0b8",
+          "iat_va": "0x48b0b8",
+          "name": "LocalLock"
+        },
+        {
+          "iat_rva": "0x8b0bc",
+          "iat_va": "0x48b0bc",
+          "name": "LocalFree"
+        },
+        {
+          "iat_rva": "0x8b0c0",
+          "iat_va": "0x48b0c0",
+          "name": "MoveFileW"
+        },
+        {
+          "iat_rva": "0x8b0c4",
+          "iat_va": "0x48b0c4",
+          "name": "GetStringTypeW"
+        },
+        {
+          "iat_rva": "0x8b0c8",
+          "iat_va": "0x48b0c8",
+          "name": "GetStringTypeA"
+        },
+        {
+          "iat_rva": "0x8b0cc",
+          "iat_va": "0x48b0cc",
+          "name": "LCMapStringW"
+        },
+        {
+          "iat_rva": "0x8b0d0",
+          "iat_va": "0x48b0d0",
+          "name": "LCMapStringA"
+        },
+        {
+          "iat_rva": "0x8b0d4",
+          "iat_va": "0x48b0d4",
+          "name": "WideCharToMultiByte"
+        },
+        {
+          "iat_rva": "0x8b0d8",
+          "iat_va": "0x48b0d8",
+          "name": "GetLocaleInfoA"
+        },
+        {
+          "iat_rva": "0x8b0dc",
+          "iat_va": "0x48b0dc",
+          "name": "LoadLibraryA"
+        },
+        {
+          "iat_rva": "0x8b0e0",
+          "iat_va": "0x48b0e0",
+          "name": "GetSystemTimeAsFileTime"
+        },
+        {
+          "iat_rva": "0x8b0e4",
+          "iat_va": "0x48b0e4",
+          "name": "GetCurrentProcessId"
+        },
+        {
+          "iat_rva": "0x8b0e8",
+          "iat_va": "0x48b0e8",
+          "name": "QueryPerformanceCounter"
+        },
+        {
+          "iat_rva": "0x8b0ec",
+          "iat_va": "0x48b0ec",
+          "name": "GetStartupInfoA"
+        },
+        {
+          "iat_rva": "0x8b0f0",
+          "iat_va": "0x48b0f0",
+          "name": "GetFileType"
+        },
+        {
+          "iat_rva": "0x8b0f4",
+          "iat_va": "0x48b0f4",
+          "name": "SetHandleCount"
+        },
+        {
+          "iat_rva": "0x8b0f8",
+          "iat_va": "0x48b0f8",
+          "name": "GetCommandLineW"
+        },
+        {
+          "iat_rva": "0x8b0fc",
+          "iat_va": "0x48b0fc",
+          "name": "GetCommandLineA"
+        },
+        {
+          "iat_rva": "0x8b100",
+          "iat_va": "0x48b100",
+          "name": "GetEnvironmentStringsW"
+        },
+        {
+          "iat_rva": "0x8b104",
+          "iat_va": "0x48b104",
+          "name": "FreeEnvironmentStringsW"
+        },
+        {
+          "iat_rva": "0x8b108",
+          "iat_va": "0x48b108",
+          "name": "GetEnvironmentStrings"
+        },
+        {
+          "iat_rva": "0x8b10c",
+          "iat_va": "0x48b10c",
+          "name": "LocalSize"
+        },
+        {
+          "iat_rva": "0x8b110",
+          "iat_va": "0x48b110",
+          "name": "HeapSize"
+        },
+        {
+          "iat_rva": "0x8b114",
+          "iat_va": "0x48b114",
+          "name": "GetOEMCP"
+        },
+        {
+          "iat_rva": "0x8b118",
+          "iat_va": "0x48b118",
+          "name": "GetACP"
+        },
+        {
+          "iat_rva": "0x8b11c",
+          "iat_va": "0x48b11c",
+          "name": "GetCPInfo"
+        },
+        {
+          "iat_rva": "0x8b120",
+          "iat_va": "0x48b120",
+          "name": "HeapReAlloc"
+        },
+        {
+          "iat_rva": "0x8b124",
+          "iat_va": "0x48b124",
+          "name": "HeapCreate"
+        },
+        {
+          "iat_rva": "0x8b128",
+          "iat_va": "0x48b128",
+          "name": "HeapDestroy"
+        },
+        {
+          "iat_rva": "0x8b12c",
+          "iat_va": "0x48b12c",
+          "name": "GetModuleFileNameA"
+        },
+        {
+          "iat_rva": "0x8b130",
+          "iat_va": "0x48b130",
+          "name": "GetStdHandle"
+        },
+        {
+          "iat_rva": "0x8b134",
+          "iat_va": "0x48b134",
+          "name": "ExitProcess"
+        },
+        {
+          "iat_rva": "0x8b138",
+          "iat_va": "0x48b138",
+          "name": "InterlockedDecrement"
+        },
+        {
+          "iat_rva": "0x8b13c",
+          "iat_va": "0x48b13c",
+          "name": "InterlockedIncrement"
+        },
+        {
+          "iat_rva": "0x8b140",
+          "iat_va": "0x48b140",
+          "name": "TlsFree"
+        },
+        {
+          "iat_rva": "0x8b144",
+          "iat_va": "0x48b144",
+          "name": "TlsSetValue"
+        },
+        {
+          "iat_rva": "0x8b148",
+          "iat_va": "0x48b148",
+          "name": "TlsAlloc"
+        },
+        {
+          "iat_rva": "0x8b14c",
+          "iat_va": "0x48b14c",
+          "name": "TlsGetValue"
+        },
+        {
+          "iat_rva": "0x8b150",
+          "iat_va": "0x48b150",
+          "name": "GetModuleHandleA"
+        },
+        {
+          "iat_rva": "0x8b154",
+          "iat_va": "0x48b154",
+          "name": "GetStartupInfoW"
+        },
+        {
+          "iat_rva": "0x8b158",
+          "iat_va": "0x48b158",
+          "name": "GetProcessHeap"
+        },
+        {
+          "iat_rva": "0x8b15c",
+          "iat_va": "0x48b15c",
+          "name": "GetVersionExA"
+        },
+        {
+          "iat_rva": "0x8b160",
+          "iat_va": "0x48b160",
+          "name": "HeapAlloc"
+        },
+        {
+          "iat_rva": "0x8b164",
+          "iat_va": "0x48b164",
+          "name": "HeapFree"
+        },
+        {
+          "iat_rva": "0x8b168",
+          "iat_va": "0x48b168",
+          "name": "CreateThread"
+        },
+        {
+          "iat_rva": "0x8b16c",
+          "iat_va": "0x48b16c",
+          "name": "ExitThread"
+        },
+        {
+          "iat_rva": "0x8b170",
+          "iat_va": "0x48b170",
+          "name": "RtlUnwind"
+        },
+        {
+          "iat_rva": "0x8b174",
+          "iat_va": "0x48b174",
+          "name": "RaiseException"
+        },
+        {
+          "iat_rva": "0x8b178",
+          "iat_va": "0x48b178",
+          "name": "IsDebuggerPresent"
+        },
+        {
+          "iat_rva": "0x8b17c",
+          "iat_va": "0x48b17c",
+          "name": "SetUnhandledExceptionFilter"
+        },
+        {
+          "iat_rva": "0x8b180",
+          "iat_va": "0x48b180",
+          "name": "UnhandledExceptionFilter"
+        },
+        {
+          "iat_rva": "0x8b184",
+          "iat_va": "0x48b184",
+          "name": "GetCurrentProcess"
+        },
+        {
+          "iat_rva": "0x8b188",
+          "iat_va": "0x48b188",
+          "name": "TerminateProcess"
+        },
+        {
+          "iat_rva": "0x8b18c",
+          "iat_va": "0x48b18c",
+          "name": "LocalUnlock"
+        },
+        {
+          "iat_rva": "0x8b190",
+          "iat_va": "0x48b190",
+          "name": "OutputDebugStringW"
+        },
+        {
+          "iat_rva": "0x8b194",
+          "iat_va": "0x48b194",
+          "name": "FileTimeToSystemTime"
+        },
+        {
+          "iat_rva": "0x8b198",
+          "iat_va": "0x48b198",
+          "name": "SetThreadPriority"
+        },
+        {
+          "iat_rva": "0x8b19c",
+          "iat_va": "0x48b19c",
+          "name": "InitializeCriticalSection"
+        },
+        {
+          "iat_rva": "0x8b1a0",
+          "iat_va": "0x48b1a0",
+          "name": "DeleteCriticalSection"
+        },
+        {
+          "iat_rva": "0x8b1a4",
+          "iat_va": "0x48b1a4",
+          "name": "GetLocalTime"
+        },
+        {
+          "iat_rva": "0x8b1a8",
+          "iat_va": "0x48b1a8",
+          "name": "CompareStringW"
+        },
+        {
+          "iat_rva": "0x8b1ac",
+          "iat_va": "0x48b1ac",
+          "name": "Sleep"
+        },
+        {
+          "iat_rva": "0x8b1b0",
+          "iat_va": "0x48b1b0",
+          "name": "SystemTimeToFileTime"
+        },
+        {
+          "iat_rva": "0x8b1b4",
+          "iat_va": "0x48b1b4",
+          "name": "lstrcpynW"
+        },
+        {
+          "iat_rva": "0x8b1b8",
+          "iat_va": "0x48b1b8",
+          "name": "GetModuleFileNameW"
+        },
+        {
+          "iat_rva": "0x8b1bc",
+          "iat_va": "0x48b1bc",
+          "name": "VirtualAlloc"
+        },
+        {
+          "iat_rva": "0x8b1c0",
+          "iat_va": "0x48b1c0",
+          "name": "lstrcpyW"
+        },
+        {
+          "iat_rva": "0x8b1c4",
+          "iat_va": "0x48b1c4",
+          "name": "lstrcatW"
+        },
+        {
+          "iat_rva": "0x8b1c8",
+          "iat_va": "0x48b1c8",
+          "name": "GlobalMemoryStatus"
+        },
+        {
+          "iat_rva": "0x8b1cc",
+          "iat_va": "0x48b1cc",
+          "name": "VirtualFree"
+        },
+        {
+          "iat_rva": "0x8b1d0",
+          "iat_va": "0x48b1d0",
+          "name": "CreateFileW"
+        },
+        {
+          "iat_rva": "0x8b1d4",
+          "iat_va": "0x48b1d4",
+          "name": "GetFileSize"
+        },
+        {
+          "iat_rva": "0x8b1d8",
+          "iat_va": "0x48b1d8",
+          "name": "GetFileTime"
+        },
+        {
+          "iat_rva": "0x8b1dc",
+          "iat_va": "0x48b1dc",
+          "name": "WriteFile"
+        },
+        {
+          "iat_rva": "0x8b1e0",
+          "iat_va": "0x48b1e0",
+          "name": "SetFilePointer"
+        },
+        {
+          "iat_rva": "0x8b1e4",
+          "iat_va": "0x48b1e4",
+          "name": "GetLastError"
+        },
+        {
+          "iat_rva": "0x8b1e8",
+          "iat_va": "0x48b1e8",
+          "name": "ReadFile"
+        },
+        {
+          "iat_rva": "0x8b1ec",
+          "iat_va": "0x48b1ec",
+          "name": "WaitForSingleObject"
+        },
+        {
+          "iat_rva": "0x8b1f0",
+          "iat_va": "0x48b1f0",
+          "name": "CloseHandle"
+        },
+        {
+          "iat_rva": "0x8b1f4",
+          "iat_va": "0x48b1f4",
+          "name": "CreateDirectoryW"
+        },
+        {
+          "iat_rva": "0x8b1f8",
+          "iat_va": "0x48b1f8",
+          "name": "DeleteFileW"
+        },
+        {
+          "iat_rva": "0x8b1fc",
+          "iat_va": "0x48b1fc",
+          "name": "MultiByteToWideChar"
+        },
+        {
+          "iat_rva": "0x8b200",
+          "iat_va": "0x48b200",
+          "name": "LoadLibraryW"
+        },
+        {
+          "iat_rva": "0x8b204",
+          "iat_va": "0x48b204",
+          "name": "GetProcAddress"
+        },
+        {
+          "iat_rva": "0x8b208",
+          "iat_va": "0x48b208",
+          "name": "FreeLibrary"
+        },
+        {
+          "iat_rva": "0x8b20c",
+          "iat_va": "0x48b20c",
+          "name": "EnterCriticalSection"
+        },
+        {
+          "iat_rva": "0x8b210",
+          "iat_va": "0x48b210",
+          "name": "FileTimeToLocalFileTime"
+        },
+        {
+          "iat_rva": "0x8b214",
+          "iat_va": "0x48b214",
+          "name": "FindFirstFileW"
+        },
+        {
+          "iat_rva": "0x8b218",
+          "iat_va": "0x48b218",
+          "name": "FindNextFileW"
+        },
+        {
+          "iat_rva": "0x8b21c",
+          "iat_va": "0x48b21c",
+          "name": "lstrcmpW"
+        },
+        {
+          "iat_rva": "0x8b220",
+          "iat_va": "0x48b220",
+          "name": "FindClose"
+        },
+        {
+          "iat_rva": "0x8b224",
+          "iat_va": "0x48b224",
+          "name": "GetCurrentThreadId"
+        },
+        {
+          "iat_rva": "0x8b228",
+          "iat_va": "0x48b228",
+          "name": "LeaveCriticalSection"
+        },
+        {
+          "iat_rva": "0x8b22c",
+          "iat_va": "0x48b22c",
+          "name": "GetTickCount"
+        },
+        {
+          "iat_rva": "0x8b230",
+          "iat_va": "0x48b230",
+          "name": "GetFileAttributesW"
+        },
+        {
+          "iat_rva": "0x8b234",
+          "iat_va": "0x48b234",
+          "name": "SetLastError"
+        },
+        {
+          "iat_rva": "0x8b238",
+          "iat_va": "0x48b238",
+          "name": "lstrlenW"
+        },
+        {
+          "iat_rva": "0x8b23c",
+          "iat_va": "0x48b23c",
+          "name": "FreeEnvironmentStringsA"
+        },
+        {
+          "iat_rva": "0x8b240",
+          "iat_va": "0x48b240",
+          "name": "lstrcmpiW"
+        }
+      ]
+    },
+    {
+      "dll": "USER32.dll",
+      "descriptor_offset": 634808,
+      "functions": [
+        {
+          "iat_rva": "0x8b270",
+          "iat_va": "0x48b270",
+          "name": "PeekMessageW"
+        },
+        {
+          "iat_rva": "0x8b274",
+          "iat_va": "0x48b274",
+          "name": "SetScrollInfo"
+        },
+        {
+          "iat_rva": "0x8b278",
+          "iat_va": "0x48b278",
+          "name": "GetSysColor"
+        },
+        {
+          "iat_rva": "0x8b27c",
+          "iat_va": "0x48b27c",
+          "name": "OffsetRect"
+        },
+        {
+          "iat_rva": "0x8b280",
+          "iat_va": "0x48b280",
+          "name": "GetSysColorBrush"
+        },
+        {
+          "iat_rva": "0x8b284",
+          "iat_va": "0x48b284",
+          "name": "KillTimer"
+        },
+        {
+          "iat_rva": "0x8b288",
+          "iat_va": "0x48b288",
+          "name": "WindowFromPoint"
+        },
+        {
+          "iat_rva": "0x8b28c",
+          "iat_va": "0x48b28c",
+          "name": "InsertMenuW"
+        },
+        {
+          "iat_rva": "0x8b290",
+          "iat_va": "0x48b290",
+          "name": "DrawTextW"
+        },
+        {
+          "iat_rva": "0x8b294",
+          "iat_va": "0x48b294",
+          "name": "CreateWindowExW"
+        },
+        {
+          "iat_rva": "0x8b298",
+          "iat_va": "0x48b298",
+          "name": "CreateMenu"
+        },
+        {
+          "iat_rva": "0x8b29c",
+          "iat_va": "0x48b29c",
+          "name": "DrawMenuBar"
+        },
+        {
+          "iat_rva": "0x8b2a0",
+          "iat_va": "0x48b2a0",
+          "name": "LoadMenuW"
+        },
+        {
+          "iat_rva": "0x8b2a4",
+          "iat_va": "0x48b2a4",
+          "name": "GetSubMenu"
+        },
+        {
+          "iat_rva": "0x8b2a8",
+          "iat_va": "0x48b2a8",
+          "name": "LoadStringW"
+        },
+        {
+          "iat_rva": "0x8b2ac",
+          "iat_va": "0x48b2ac",
+          "name": "GetMenuItemInfoW"
+        },
+        {
+          "iat_rva": "0x8b2b0",
+          "iat_va": "0x48b2b0",
+          "name": "SetMenuItemInfoW"
+        },
+        {
+          "iat_rva": "0x8b2b4",
+          "iat_va": "0x48b2b4",
+          "name": "SetCapture"
+        },
+        {
+          "iat_rva": "0x8b2b8",
+          "iat_va": "0x48b2b8",
+          "name": "ReleaseCapture"
+        },
+        {
+          "iat_rva": "0x8b2bc",
+          "iat_va": "0x48b2bc",
+          "name": "SetCursor"
+        },
+        {
+          "iat_rva": "0x8b2c0",
+          "iat_va": "0x48b2c0",
+          "name": "SetParent"
+        },
+        {
+          "iat_rva": "0x8b2c4",
+          "iat_va": "0x48b2c4",
+          "name": "LoadIconW"
+        },
+        {
+          "iat_rva": "0x8b2c8",
+          "iat_va": "0x48b2c8",
+          "name": "LoadCursorW"
+        },
+        {
+          "iat_rva": "0x8b2cc",
+          "iat_va": "0x48b2cc",
+          "name": "RegisterClassW"
+        },
+        {
+          "iat_rva": "0x8b2d0",
+          "iat_va": "0x48b2d0",
+          "name": "LoadAcceleratorsW"
+        },
+        {
+          "iat_rva": "0x8b2d4",
+          "iat_va": "0x48b2d4",
+          "name": "PostMessageW"
+        },
+        {
+          "iat_rva": "0x8b2d8",
+          "iat_va": "0x48b2d8",
+          "name": "ShowWindow"
+        },
+        {
+          "iat_rva": "0x8b2dc",
+          "iat_va": "0x48b2dc",
+          "name": "EnableWindow"
+        },
+        {
+          "iat_rva": "0x8b2e0",
+          "iat_va": "0x48b2e0",
+          "name": "SetFocus"
+        },
+        {
+          "iat_rva": "0x8b2e4",
+          "iat_va": "0x48b2e4",
+          "name": "SetTimer"
+        },
+        {
+          "iat_rva": "0x8b2e8",
+          "iat_va": "0x48b2e8",
+          "name": "EnableMenuItem"
+        },
+        {
+          "iat_rva": "0x8b2ec",
+          "iat_va": "0x48b2ec",
+          "name": "IntersectRect"
+        },
+        {
+          "iat_rva": "0x8b2f0",
+          "iat_va": "0x48b2f0",
+          "name": "ScrollDC"
+        },
+        {
+          "iat_rva": "0x8b2f4",
+          "iat_va": "0x48b2f4",
+          "name": "SubtractRect"
+        },
+        {
+          "iat_rva": "0x8b2f8",
+          "iat_va": "0x48b2f8",
+          "name": "ScrollWindowEx"
+        },
+        {
+          "iat_rva": "0x8b2fc",
+          "iat_va": "0x48b2fc",
+          "name": "DrawFocusRect"
+        },
+        {
+          "iat_rva": "0x8b300",
+          "iat_va": "0x48b300",
+          "name": "GetScrollInfo"
+        },
+        {
+          "iat_rva": "0x8b304",
+          "iat_va": "0x48b304",
+          "name": "DeleteMenu"
+        },
+        {
+          "iat_rva": "0x8b308",
+          "iat_va": "0x48b308",
+          "name": "SendDlgItemMessageW"
+        },
+        {
+          "iat_rva": "0x8b30c",
+          "iat_va": "0x48b30c",
+          "name": "CheckDlgButton"
+        },
+        {
+          "iat_rva": "0x8b310",
+          "iat_va": "0x48b310",
+          "name": "GetParent"
+        },
+        {
+          "iat_rva": "0x8b314",
+          "iat_va": "0x48b314",
+          "name": "SetWindowLongW"
+        },
+        {
+          "iat_rva": "0x8b318",
+          "iat_va": "0x48b318",
+          "name": "GetFocus"
+        },
+        {
+          "iat_rva": "0x8b31c",
+          "iat_va": "0x48b31c",
+          "name": "DefWindowProcW"
+        },
+        {
+          "iat_rva": "0x8b320",
+          "iat_va": "0x48b320",
+          "name": "PtInRect"
+        },
+        {
+          "iat_rva": "0x8b324",
+          "iat_va": "0x48b324",
+          "name": "TranslateAcceleratorW"
+        },
+        {
+          "iat_rva": "0x8b328",
+          "iat_va": "0x48b328",
+          "name": "IsWindow"
+        },
+        {
+          "iat_rva": "0x8b32c",
+          "iat_va": "0x48b32c",
+          "name": "GetWindow"
+        },
+        {
+          "iat_rva": "0x8b330",
+          "iat_va": "0x48b330",
+          "name": "FindWindowW"
+        },
+        {
+          "iat_rva": "0x8b334",
+          "iat_va": "0x48b334",
+          "name": "SetForegroundWindow"
+        },
+        {
+          "iat_rva": "0x8b338",
+          "iat_va": "0x48b338",
+          "name": "CallWindowProcW"
+        },
+        {
+          "iat_rva": "0x8b33c",
+          "iat_va": "0x48b33c",
+          "name": "BeginPaint"
+        },
+        {
+          "iat_rva": "0x8b340",
+          "iat_va": "0x48b340",
+          "name": "GetClientRect"
+        },
+        {
+          "iat_rva": "0x8b344",
+          "iat_va": "0x48b344",
+          "name": "EndPaint"
+        },
+        {
+          "iat_rva": "0x8b348",
+          "iat_va": "0x48b348",
+          "name": "CheckRadioButton"
+        },
+        {
+          "iat_rva": "0x8b34c",
+          "iat_va": "0x48b34c",
+          "name": "SystemParametersInfoW"
+        },
+        {
+          "iat_rva": "0x8b350",
+          "iat_va": "0x48b350",
+          "name": "GetMenu"
+        },
+        {
+          "iat_rva": "0x8b354",
+          "iat_va": "0x48b354",
+          "name": "EnumDisplayMonitors"
+        },
+        {
+          "iat_rva": "0x8b358",
+          "iat_va": "0x48b358",
+          "name": "MessageBeep"
+        },
+        {
+          "iat_rva": "0x8b35c",
+          "iat_va": "0x48b35c",
+          "name": "GetCursorPos"
+        },
+        {
+          "iat_rva": "0x8b360",
+          "iat_va": "0x48b360",
+          "name": "CreatePopupMenu"
+        },
+        {
+          "iat_rva": "0x8b364",
+          "iat_va": "0x48b364",
+          "name": "TrackPopupMenu"
+        },
+        {
+          "iat_rva": "0x8b368",
+          "iat_va": "0x48b368",
+          "name": "DestroyMenu"
+        },
+        {
+          "iat_rva": "0x8b36c",
+          "iat_va": "0x48b36c",
+          "name": "ScreenToClient"
+        },
+        {
+          "iat_rva": "0x8b370",
+          "iat_va": "0x48b370",
+          "name": "MoveWindow"
+        },
+        {
+          "iat_rva": "0x8b374",
+          "iat_va": "0x48b374",
+          "name": "ClientToScreen"
+        },
+        {
+          "iat_rva": "0x8b378",
+          "iat_va": "0x48b378",
+          "name": "GetDC"
+        },
+        {
+          "iat_rva": "0x8b37c",
+          "iat_va": "0x48b37c",
+          "name": "ReleaseDC"
+        },
+        {
+          "iat_rva": "0x8b380",
+          "iat_va": "0x48b380",
+          "name": "FillRect"
+        },
+        {
+          "iat_rva": "0x8b384",
+          "iat_va": "0x48b384",
+          "name": "MapWindowPoints"
+        },
+        {
+          "iat_rva": "0x8b388",
+          "iat_va": "0x48b388",
+          "name": "SetWindowsHookExW"
+        },
+        {
+          "iat_rva": "0x8b38c",
+          "iat_va": "0x48b38c",
+          "name": "UnhookWindowsHookEx"
+        },
+        {
+          "iat_rva": "0x8b390",
+          "iat_va": "0x48b390",
+          "name": "GetDlgCtrlID"
+        },
+        {
+          "iat_rva": "0x8b394",
+          "iat_va": "0x48b394",
+          "name": "GetAsyncKeyState"
+        },
+        {
+          "iat_rva": "0x8b398",
+          "iat_va": "0x48b398",
+          "name": "CallNextHookEx"
+        },
+        {
+          "iat_rva": "0x8b39c",
+          "iat_va": "0x48b39c",
+          "name": "InvalidateRect"
+        },
+        {
+          "iat_rva": "0x8b3a0",
+          "iat_va": "0x48b3a0",
+          "name": "UpdateWindow"
+        },
+        {
+          "iat_rva": "0x8b3a4",
+          "iat_va": "0x48b3a4",
+          "name": "SetMenu"
+        },
+        {
+          "iat_rva": "0x8b3a8",
+          "iat_va": "0x48b3a8",
+          "name": "IsWindowVisible"
+        },
+        {
+          "iat_rva": "0x8b3ac",
+          "iat_va": "0x48b3ac",
+          "name": "CreateDialogParamW"
+        },
+        {
+          "iat_rva": "0x8b3b0",
+          "iat_va": "0x48b3b0",
+          "name": "GetMessageW"
+        },
+        {
+          "iat_rva": "0x8b3b4",
+          "iat_va": "0x48b3b4",
+          "name": "IsDialogMessageW"
+        },
+        {
+          "iat_rva": "0x8b3b8",
+          "iat_va": "0x48b3b8",
+          "name": "TranslateMessage"
+        },
+        {
+          "iat_rva": "0x8b3bc",
+          "iat_va": "0x48b3bc",
+          "name": "DispatchMessageW"
+        },
+        {
+          "iat_rva": "0x8b3c0",
+          "iat_va": "0x48b3c0",
+          "name": "SendMessageW"
+        },
+        {
+          "iat_rva": "0x8b3c4",
+          "iat_va": "0x48b3c4",
+          "name": "SetWindowPos"
+        },
+        {
+          "iat_rva": "0x8b3c8",
+          "iat_va": "0x48b3c8",
+          "name": "DestroyWindow"
+        },
+        {
+          "iat_rva": "0x8b3cc",
+          "iat_va": "0x48b3cc",
+          "name": "GetWindowRect"
+        },
+        {
+          "iat_rva": "0x8b3d0",
+          "iat_va": "0x48b3d0",
+          "name": "GetSystemMetrics"
+        },
+        {
+          "iat_rva": "0x8b3d4",
+          "iat_va": "0x48b3d4",
+          "name": "SetWindowTextW"
+        },
+        {
+          "iat_rva": "0x8b3d8",
+          "iat_va": "0x48b3d8",
+          "name": "SetDlgItemInt"
+        },
+        {
+          "iat_rva": "0x8b3dc",
+          "iat_va": "0x48b3dc",
+          "name": "GetDlgItemInt"
+        },
+        {
+          "iat_rva": "0x8b3e0",
+          "iat_va": "0x48b3e0",
+          "name": "DialogBoxParamW"
+        },
+        {
+          "iat_rva": "0x8b3e4",
+          "iat_va": "0x48b3e4",
+          "name": "MessageBoxW"
+        },
+        {
+          "iat_rva": "0x8b3e8",
+          "iat_va": "0x48b3e8",
+          "name": "wsprintfW"
+        },
+        {
+          "iat_rva": "0x8b3ec",
+          "iat_va": "0x48b3ec",
+          "name": "GetWindowLongW"
+        },
+        {
+          "iat_rva": "0x8b3f0",
+          "iat_va": "0x48b3f0",
+          "name": "IsDlgButtonChecked"
+        },
+        {
+          "iat_rva": "0x8b3f4",
+          "iat_va": "0x48b3f4",
+          "name": "GetDlgItemTextW"
+        },
+        {
+          "iat_rva": "0x8b3f8",
+          "iat_va": "0x48b3f8",
+          "name": "SetDlgItemTextW"
+        },
+        {
+          "iat_rva": "0x8b3fc",
+          "iat_va": "0x48b3fc",
+          "name": "GetDlgItem"
+        },
+        {
+          "iat_rva": "0x8b400",
+          "iat_va": "0x48b400",
+          "name": "EndDialog"
+        },
+        {
+          "iat_rva": "0x8b404",
+          "iat_va": "0x48b404",
+          "name": "PostQuitMessage"
+        }
+      ]
+    },
+    {
+      "dll": "GDI32.dll",
+      "descriptor_offset": 634828,
+      "functions": [
+        {
+          "iat_rva": "0x8b014",
+          "iat_va": "0x48b014",
+          "name": "CreateRectRgnIndirect"
+        },
+        {
+          "iat_rva": "0x8b018",
+          "iat_va": "0x48b018",
+          "name": "CreateDIBSection"
+        },
+        {
+          "iat_rva": "0x8b01c",
+          "iat_va": "0x48b01c",
+          "name": "Ellipse"
+        },
+        {
+          "iat_rva": "0x8b020",
+          "iat_va": "0x48b020",
+          "name": "LineTo"
+        },
+        {
+          "iat_rva": "0x8b024",
+          "iat_va": "0x48b024",
+          "name": "MoveToEx"
+        },
+        {
+          "iat_rva": "0x8b028",
+          "iat_va": "0x48b028",
+          "name": "SelectObject"
+        },
+        {
+          "iat_rva": "0x8b02c",
+          "iat_va": "0x48b02c",
+          "name": "CreatePen"
+        },
+        {
+          "iat_rva": "0x8b030",
+          "iat_va": "0x48b030",
+          "name": "Rectangle"
+        },
+        {
+          "iat_rva": "0x8b034",
+          "iat_va": "0x48b034",
+          "name": "GetTextExtentPoint32W"
+        },
+        {
+          "iat_rva": "0x8b038",
+          "iat_va": "0x48b038",
+          "name": "SetTextColor"
+        },
+        {
+          "iat_rva": "0x8b03c",
+          "iat_va": "0x48b03c",
+          "name": "SetBkMode"
+        },
+        {
+          "iat_rva": "0x8b040",
+          "iat_va": "0x48b040",
+          "name": "CombineRgn"
+        },
+        {
+          "iat_rva": "0x8b044",
+          "iat_va": "0x48b044",
+          "name": "SetDIBitsToDevice"
+        },
+        {
+          "iat_rva": "0x8b048",
+          "iat_va": "0x48b048",
+          "name": "BitBlt"
+        },
+        {
+          "iat_rva": "0x8b04c",
+          "iat_va": "0x48b04c",
+          "name": "CreateCompatibleDC"
+        },
+        {
+          "iat_rva": "0x8b050",
+          "iat_va": "0x48b050",
+          "name": "StretchDIBits"
+        },
+        {
+          "iat_rva": "0x8b054",
+          "iat_va": "0x48b054",
+          "name": "StretchBlt"
+        },
+        {
+          "iat_rva": "0x8b058",
+          "iat_va": "0x48b058",
+          "name": "DeleteObject"
+        },
+        {
+          "iat_rva": "0x8b05c",
+          "iat_va": "0x48b05c",
+          "name": "SetStretchBltMode"
+        },
+        {
+          "iat_rva": "0x8b060",
+          "iat_va": "0x48b060",
+          "name": "Polygon"
+        },
+        {
+          "iat_rva": "0x8b064",
+          "iat_va": "0x48b064",
+          "name": "UnrealizeObject"
+        },
+        {
+          "iat_rva": "0x8b068",
+          "iat_va": "0x48b068",
+          "name": "CreatePatternBrush"
+        },
+        {
+          "iat_rva": "0x8b06c",
+          "iat_va": "0x48b06c",
+          "name": "CreateCompatibleBitmap"
+        },
+        {
+          "iat_rva": "0x8b070",
+          "iat_va": "0x48b070",
+          "name": "GetTextMetricsW"
+        },
+        {
+          "iat_rva": "0x8b074",
+          "iat_va": "0x48b074",
+          "name": "CreateFontIndirectW"
+        },
+        {
+          "iat_rva": "0x8b078",
+          "iat_va": "0x48b078",
+          "name": "FillRgn"
+        },
+        {
+          "iat_rva": "0x8b07c",
+          "iat_va": "0x48b07c",
+          "name": "SetBkColor"
+        },
+        {
+          "iat_rva": "0x8b080",
+          "iat_va": "0x48b080",
+          "name": "Arc"
+        },
+        {
+          "iat_rva": "0x8b084",
+          "iat_va": "0x48b084",
+          "name": "CreateEllipticRgn"
+        },
+        {
+          "iat_rva": "0x8b088",
+          "iat_va": "0x48b088",
+          "name": "ExtSelectClipRgn"
+        },
+        {
+          "iat_rva": "0x8b08c",
+          "iat_va": "0x48b08c",
+          "name": "GetClipBox"
+        },
+        {
+          "iat_rva": "0x8b090",
+          "iat_va": "0x48b090",
+          "name": "CreateRectRgn"
+        },
+        {
+          "iat_rva": "0x8b094",
+          "iat_va": "0x48b094",
+          "name": "EqualRgn"
+        },
+        {
+          "iat_rva": "0x8b098",
+          "iat_va": "0x48b098",
+          "name": "ExtTextOutW"
+        },
+        {
+          "iat_rva": "0x8b09c",
+          "iat_va": "0x48b09c",
+          "name": "DeleteDC"
+        },
+        {
+          "iat_rva": "0x8b0a0",
+          "iat_va": "0x48b0a0",
+          "name": "CreateSolidBrush"
+        },
+        {
+          "iat_rva": "0x8b0a4",
+          "iat_va": "0x48b0a4",
+          "name": "EnumFontFamiliesW"
+        },
+        {
+          "iat_rva": "0x8b0a8",
+          "iat_va": "0x48b0a8",
+          "name": "SetBrushOrgEx"
+        },
+        {
+          "iat_rva": "0x8b0ac",
+          "iat_va": "0x48b0ac",
+          "name": "SelectClipRgn"
+        },
+        {
+          "iat_rva": "0x8b0b0",
+          "iat_va": "0x48b0b0",
+          "name": "GetStockObject"
+        }
+      ]
+    },
+    {
+      "dll": "comdlg32.dll",
+      "descriptor_offset": 634848,
+      "functions": [
+        {
+          "iat_rva": "0x8b40c",
+          "iat_va": "0x48b40c",
+          "name": "ChooseColorW"
+        },
+        {
+          "iat_rva": "0x8b410",
+          "iat_va": "0x48b410",
+          "name": "GetSaveFileNameW"
+        },
+        {
+          "iat_rva": "0x8b414",
+          "iat_va": "0x48b414",
+          "name": "GetOpenFileNameW"
+        }
+      ]
+    },
+    {
+      "dll": "SHELL32.dll",
+      "descriptor_offset": 634868,
+      "functions": [
+        {
+          "iat_rva": "0x8b248",
+          "iat_va": "0x48b248",
+          "name": "DragAcceptFiles"
+        },
+        {
+          "iat_rva": "0x8b24c",
+          "iat_va": "0x48b24c",
+          "name": "DragQueryFileW"
+        },
+        {
+          "iat_rva": "0x8b250",
+          "iat_va": "0x48b250",
+          "name": "DragFinish"
+        },
+        {
+          "iat_rva": "0x8b254",
+          "iat_va": "0x48b254",
+          "name": "SHGetPathFromIDListW"
+        },
+        {
+          "iat_rva": "0x8b258",
+          "iat_va": "0x48b258",
+          "name": "SHGetMalloc"
+        },
+        {
+          "iat_rva": "0x8b25c",
+          "iat_va": "0x48b25c",
+          "name": "SHGetDesktopFolder"
+        },
+        {
+          "iat_rva": "0x8b260",
+          "iat_va": "0x48b260",
+          "name": "SHGetSpecialFolderLocation"
+        },
+        {
+          "iat_rva": "0x8b264",
+          "iat_va": "0x48b264",
+          "name": "SHGetFileInfoW"
+        },
+        {
+          "iat_rva": "0x8b268",
+          "iat_va": "0x48b268",
+          "name": "SHFileOperationW"
+        }
+      ]
+    },
+    {
+      "dll": "ole32.dll",
+      "descriptor_offset": 634888,
+      "functions": [
+        {
+          "iat_rva": "0x8b41c",
+          "iat_va": "0x48b41c",
+          "name": "CoCreateInstance"
+        },
+        {
+          "iat_rva": "0x8b420",
+          "iat_va": "0x48b420",
+          "name": "CoInitialize"
+        },
+        {
+          "iat_rva": "0x8b424",
+          "iat_va": "0x48b424",
+          "name": "CoUninitialize"
+        }
+      ]
+    },
+    {
+      "dll": "COMCTL32.dll",
+      "descriptor_offset": 634908,
+      "functions": [
+        {
+          "iat_rva": "0x8b000",
+          "iat_va": "0x48b000",
+          "name": "ImageList_DrawEx"
+        },
+        {
+          "iat_rva": "0x8b004",
+          "iat_va": "0x48b004",
+          "name": "CreatePropertySheetPageW"
+        },
+        {
+          "iat_rva": "0x8b008",
+          "iat_va": "0x48b008",
+          "name": "PropertySheetW"
+        },
+        {
+          "iat_rva": "0x8b00c",
+          "iat_va": "0x48b00c",
+          "name": "ImageList_GetIconSize"
+        }
+      ]
+    }
+  ],
+  "literal_candidates": [
+    {
+      "encoding": "ascii",
+      "offset": 570860,
+      "va": "0x48b5ec",
+      "text": "CheckArchive"
+    },
+    {
+      "encoding": "ascii",
+      "offset": 570876,
+      "va": "0x48b5fc",
+      "text": "ArcSetComment"
+    },
+    {
+      "encoding": "ascii",
+      "offset": 570892,
+      "va": "0x48b60c",
+      "text": "ArcCompressFile"
+    },
+    {
+      "encoding": "ascii",
+      "offset": 570908,
+      "va": "0x48b61c",
+      "text": "ArcWriteClose"
+    },
+    {
+      "encoding": "ascii",
+      "offset": 570924,
+      "va": "0x48b62c",
+      "text": "ArcWriteOpen"
+    },
+    {
+      "encoding": "ascii",
+      "offset": 570940,
+      "va": "0x48b63c",
+      "text": "ArcSetPassword"
+    },
+    {
+      "encoding": "ascii",
+      "offset": 570956,
+      "va": "0x48b64c",
+      "text": "ArcGetComment"
+    },
+    {
+      "encoding": "ascii",
+      "offset": 570972,
+      "va": "0x48b65c",
+      "text": "ArcGetDecodeStream"
+    },
+    {
+      "encoding": "ascii",
+      "offset": 570992,
+      "va": "0x48b670",
+      "text": "ArcGetFileInfo"
+    },
+    {
+      "encoding": "ascii",
+      "offset": 571008,
+      "va": "0x48b680",
+      "text": "ArcClose"
+    },
+    {
+      "encoding": "ascii",
+      "offset": 571020,
+      "va": "0x48b68c",
+      "text": "ArcOpen"
+    },
+    {
+      "encoding": "ascii",
+      "offset": 571028,
+      "va": "0x48b694",
+      "text": "ArcGetVersion"
+    },
+    {
+      "encoding": "ascii",
+      "offset": 574164,
+      "va": "0x48c2d4",
+      "text": "InternetReadFile"
+    },
+    {
+      "encoding": "ascii",
+      "offset": 574184,
+      "va": "0x48c2e8",
+      "text": "InternetCloseHandle"
+    },
+    {
+      "encoding": "ascii",
+      "offset": 574204,
+      "va": "0x48c2fc",
+      "text": "HttpQueryInfoW"
+    },
+    {
+      "encoding": "ascii",
+      "offset": 574220,
+      "va": "0x48c30c",
+      "text": "InternetOpenUrlW"
+    },
+    {
+      "encoding": "ascii",
+      "offset": 574240,
+      "va": "0x48c320",
+      "text": "InternetOpenW"
+    },
+    {
+      "encoding": "ascii",
+      "offset": 581224,
+      "va": "0x48de68",
+      "text": "ijlWrite"
+    },
+    {
+      "encoding": "ascii",
+      "offset": 581236,
+      "va": "0x48de74",
+      "text": "ijlRead"
+    },
+    {
+      "encoding": "ascii",
+      "offset": 581244,
+      "va": "0x48de7c",
+      "text": "ijlFree"
+    },
+    {
+      "encoding": "ascii",
+      "offset": 581252,
+      "va": "0x48de84",
+      "text": "ijlInit"
+    },
+    {
+      "encoding": "ascii",
+      "offset": 581260,
+      "va": "0x48de8c",
+      "text": "ijlGetLibVersion"
+    },
+    {
+      "encoding": "ascii",
+      "offset": 581280,
+      "va": "0x48dea0",
+      "text": "SavePicture"
+    },
+    {
+      "encoding": "ascii",
+      "offset": 581292,
+      "va": "0x48deac",
+      "text": "GifAddFrame"
+    },
+    {
+      "encoding": "ascii",
+      "offset": 581304,
+      "va": "0x48deb8",
+      "text": "GifWriteClose"
+    },
+    {
+      "encoding": "ascii",
+      "offset": 581320,
+      "va": "0x48dec8",
+      "text": "GifWriteOpen"
+    },
+    {
+      "encoding": "ascii",
+      "offset": 581336,
+      "va": "0x48ded8",
+      "text": "LoadPicture"
+    },
+    {
+      "encoding": "ascii",
+      "offset": 581348,
+      "va": "0x48dee4",
+      "text": "LoadPictureInfo"
+    },
+    {
+      "encoding": "ascii",
+      "offset": 581364,
+      "va": "0x48def4",
+      "text": "CheckPicture"
+    },
+    {
+      "encoding": "ascii",
+      "offset": 581380,
+      "va": "0x48df04",
+      "text": "GetDllVersion"
+    },
+    {
+      "encoding": "ascii",
+      "offset": 583104,
+      "va": "0x48e5c0",
+      "text": "KERNEL32.DLL"
+    },
+    {
+      "encoding": "ascii",
+      "offset": 583236,
+      "va": "0x48e644",
+      "text": "mscoree.dll"
+    },
+    {
+      "encoding": "ascii",
+      "offset": 606336,
+      "va": "0x494080",
+      "text": "kernel32.dll"
+    },
+    {
+      "encoding": "ascii",
+      "offset": 606452,
+      "va": "0x4940f4",
+      "text": "USER32.DLL"
+    },
+    {
+      "encoding": "ascii",
+      "offset": 636844,
+      "va": "0x49b7ac",
+      "text": "KERNEL32.dll"
+    },
+    {
+      "encoding": "ascii",
+      "offset": 638500,
+      "va": "0x49be24",
+      "text": "USER32.dll"
+    },
+    {
+      "encoding": "ascii",
+      "offset": 639156,
+      "va": "0x49c0b4",
+      "text": "GDI32.dll"
+    },
+    {
+      "encoding": "ascii",
+      "offset": 639222,
+      "va": "0x49c0f6",
+      "text": "comdlg32.dll"
+    },
+    {
+      "encoding": "ascii",
+      "offset": 639414,
+      "va": "0x49c1b6",
+      "text": "SHELL32.dll"
+    },
+    {
+      "encoding": "ascii",
+      "offset": 639480,
+      "va": "0x49c1f8",
+      "text": "ole32.dll"
+    },
+    {
+      "encoding": "ascii",
+      "offset": 639580,
+      "va": "0x49c25c",
+      "text": "COMCTL32.dll"
+    },
+    {
+      "encoding": "utf-16le",
+      "offset": 570800,
+      "va": "0x48b5b0",
+      "text": "%04d.bmp"
+    },
+    {
+      "encoding": "utf-16le",
+      "offset": 571044,
+      "va": "0x48b6a4",
+      "text": "pdf.dll"
+    },
+    {
+      "encoding": "utf-16le",
+      "offset": 571060,
+      "va": "0x48b6b4",
+      "text": "gif.dll"
+    },
+    {
+      "encoding": "utf-16le",
+      "offset": 571076,
+      "va": "0x48b6c4",
+      "text": "arc.dll"
+    },
+    {
+      "encoding": "utf-16le",
+      "offset": 571956,
+      "va": "0x48ba34",
+      "text": "wallpaper.bmp"
+    },
+    {
+      "encoding": "utf-16le",
+      "offset": 572084,
+      "va": "0x48bab4",
+      "text": "*.bmp"
+    },
+    {
+      "encoding": "utf-16le",
+      "offset": 572100,
+      "va": "0x48bac4",
+      "text": ".bmp"
+    },
+    {
+      "encoding": "utf-16le",
+      "offset": 572160,
+      "va": "0x48bb00",
+      "text": "MangaMeeyaCE_%02d.ini"
+    },
+    {
+      "encoding": "utf-16le",
+      "offset": 572972,
+      "va": "0x48be2c",
+      "text": "MangaMeeyaCE.ini"
+    },
+    {
+      "encoding": "utf-16le",
+      "offset": 573008,
+      "va": "0x48be50",
+      "text": "res_lang.dll"
+    },
+    {
+      "encoding": "utf-16le",
+      "offset": 574056,
+      "va": "0x48c268",
+      "text": "http://"
+    },
+    {
+      "encoding": "utf-16le",
+      "offset": 574256,
+      "va": "0x48c330",
+      "text": "wininet.dll"
+    },
+    {
+      "encoding": "utf-16le",
+      "offset": 576802,
+      "va": "0x48cd22",
+      "text": "@ToolButtonL.bmp"
+    },
+    {
+      "encoding": "utf-16le",
+      "offset": 576836,
+      "va": "0x48cd44",
+      "text": "ToolButtonM.bmp"
+    },
+    {
+      "encoding": "utf-16le",
+      "offset": 576868,
+      "va": "0x48cd64",
+      "text": "ToolButtonS.bmp"
+    },
+    {
+      "encoding": "utf-16le",
+      "offset": 578288,
+      "va": "0x48d2f0",
+      "text": "ArcNoncache"
+    },
+    {
+      "encoding": "utf-16le",
+      "offset": 581444,
+      "va": "0x48df44",
+      "text": "jpg.dll"
+    },
+    {
+      "encoding": "utf-16le",
+      "offset": 581460,
+      "va": "0x48df54",
+      "text": "png.dll"
+    },
+    {
+      "encoding": "utf-16le",
+      "offset": 581476,
+      "va": "0x48df64",
+      "text": "jp2.dll"
+    },
+    {
+      "encoding": "utf-16le",
+      "offset": 581616,
+      "va": "0x48dff0",
+      "text": "HTTP %d"
+    },
+    {
+      "encoding": "utf-16le",
+      "offset": 581632,
+      "va": "0x48e000",
+      "text": ".mmt"
+    },
+    {
+      "encoding": "utf-16le",
+      "offset": 581644,
+      "va": "0x48e00c",
+      "text": "Bookmark.mmt"
+    },
+    {
+      "encoding": "utf-16le",
+      "offset": 680732,
+      "va": "0x4a931c",
+      "text": "JPEG"
+    },
+    {
+      "encoding": "utf-16le",
+      "offset": 681250,
+      "va": "0x4a9522",
+      "text": "JPEG"
+    },
+    {
+      "encoding": "utf-16le",
+      "offset": 684096,
+      "va": "0x4aa040",
+      "text": "arc.dll"
+    },
+    {
+      "encoding": "utf-16le",
+      "offset": 684204,
+      "va": "0x4aa0ac",
+      "text": "pdf.dll"
+    },
+    {
+      "encoding": "utf-16le",
+      "offset": 684308,
+      "va": "0x4aa114",
+      "text": "jpg.dll"
+    },
+    {
+      "encoding": "utf-16le",
+      "offset": 694490,
+      "va": "0x4ac8da",
+      "text": "HTTP"
+    },
+    {
+      "encoding": "utf-16le",
+      "offset": 694696,
+      "va": "0x4ac9a8",
+      "text": "MangaMeeyaCE_01.ini"
+    },
+    {
+      "encoding": "utf-16le",
+      "offset": 694758,
+      "va": "0x4ac9e6",
+      "text": "MangaMeeyaCE_02.ini"
+    },
+    {
+      "encoding": "utf-16le",
+      "offset": 694820,
+      "va": "0x4aca24",
+      "text": "MangaMeeyaCE_03.ini"
+    },
+    {
+      "encoding": "utf-16le",
+      "offset": 694882,
+      "va": "0x4aca62",
+      "text": "MangaMeeyaCE_04.ini"
+    },
+    {
+      "encoding": "utf-16le",
+      "offset": 694944,
+      "va": "0x4acaa0",
+      "text": "MangaMeeyaCE_05.ini"
+    },
+    {
+      "encoding": "utf-16le",
+      "offset": 695006,
+      "va": "0x4acade",
+      "text": "MangaMeeyaCE_06.ini"
+    },
+    {
+      "encoding": "utf-16le",
+      "offset": 695068,
+      "va": "0x4acb1c",
+      "text": "MangaMeeyaCE_07.ini"
+    },
+    {
+      "encoding": "utf-16le",
+      "offset": 695130,
+      "va": "0x4acb5a",
+      "text": "MangaMeeyaCE_08.ini"
+    },
+    {
+      "encoding": "utf-16le",
+      "offset": 695192,
+      "va": "0x4acb98",
+      "text": "MangaMeeyaCE_09.ini"
+    },
+    {
+      "encoding": "utf-16le",
+      "offset": 695254,
+      "va": "0x4acbd6",
+      "text": "MangaMeeyaCE_10.ini"
+    },
+    {
+      "encoding": "utf-16le",
+      "offset": 695334,
+      "va": "0x4acc26",
+      "text": "MangaMeeyaCE_01.ini"
+    },
+    {
+      "encoding": "utf-16le",
+      "offset": 695394,
+      "va": "0x4acc62",
+      "text": "MangaMeeyaCE_02.ini"
+    },
+    {
+      "encoding": "utf-16le",
+      "offset": 695454,
+      "va": "0x4acc9e",
+      "text": "MangaMeeyaCE_03.ini"
+    },
+    {
+      "encoding": "utf-16le",
+      "offset": 695514,
+      "va": "0x4accda",
+      "text": "MangaMeeyaCE_04.ini"
+    },
+    {
+      "encoding": "utf-16le",
+      "offset": 695574,
+      "va": "0x4acd16",
+      "text": "MangaMeeyaCE_05.ini"
+    },
+    {
+      "encoding": "utf-16le",
+      "offset": 695634,
+      "va": "0x4acd52",
+      "text": "MangaMeeyaCE_06.ini"
+    },
+    {
+      "encoding": "utf-16le",
+      "offset": 695694,
+      "va": "0x4acd8e",
+      "text": "MangaMeeyaCE_07.ini"
+    },
+    {
+      "encoding": "utf-16le",
+      "offset": 695754,
+      "va": "0x4acdca",
+      "text": "MangaMeeyaCE_08.ini"
+    },
+    {
+      "encoding": "utf-16le",
+      "offset": 695814,
+      "va": "0x4ace06",
+      "text": "MangaMeeyaCE_09.ini"
+    },
+    {
+      "encoding": "utf-16le",
+      "offset": 695874,
+      "va": "0x4ace42",
+      "text": "MangaMeeyaCE_10.ini"
+    }
+  ],
+  "toolbar_bitmaps": [
+    {
+      "name": "ToolButtonS.bmp",
+      "bytes": 52278,
+      "sha256": "5598ae8be7f74b7dc90b10ba847a2893fe4e4befd910340b44af25701c4d8533",
+      "width": 160,
+      "height": 320,
+      "bits_per_pixel": 8
+    },
+    {
+      "name": "ToolButtonM.bmp",
+      "bytes": 81078,
+      "sha256": "a76c7dcd9f6820ebf8bd207b8024721ca2ceab724ba0574c8cdcb2e9c5760aa3",
+      "width": 200,
+      "height": 400,
+      "bits_per_pixel": 8
+    },
+    {
+      "name": "ToolButtonL.bmp",
+      "bytes": 157878,
+      "sha256": "4bb8b508e1458c7000eb76fa6be5fce7ee33e464e3d70d44b8ea87ed9ee31097",
+      "width": 280,
+      "height": 560,
+      "bits_per_pixel": 8
+    }
+  ],
+  "root_files": [
+    {
+      "name": "arc.dll",
+      "bytes": 237568,
+      "sha256": "926aa3f83797d5bb9a810f17fc4d3c897b2ccabc4dc6b0867b34c39edabd73fb"
+    },
+    {
+      "name": "gif.dll",
+      "bytes": 94208,
+      "sha256": "02d68a67e66968223e0c95788ef3a14e207ac538200a7219fbacb4a712d50cea"
+    },
+    {
+      "name": "jpg.dll",
+      "bytes": 811008,
+      "sha256": "fede07b96792f8efec6342cfa0ae493e0a8be061e8837e81ea475ebdb3cc824f"
+    },
+    {
+      "name": "MangaMeeyaCE.exe",
+      "bytes": 708608,
+      "sha256": "ec0b517af2813c841d350a95080725d8842e8fdf4eb7f1590c9027466b55e530"
+    },
+    {
+      "name": "MangaMeeyaCE.ini",
+      "bytes": 12164,
+      "sha256": "29360d321119838baf1db197de2d38795beb9787efe7c46bc2da0d3485db6c25"
+    },
+    {
+      "name": "png.dll",
+      "bytes": 212992,
+      "sha256": "a828b3299f18eff8d442babe8b81510df332c39e1c5da89a19757ee9417fc133"
+    },
+    {
+      "name": "ToolButtonL.bmp",
+      "bytes": 157878,
+      "sha256": "4bb8b508e1458c7000eb76fa6be5fce7ee33e464e3d70d44b8ea87ed9ee31097"
+    },
+    {
+      "name": "ToolButtonM.bmp",
+      "bytes": 81078,
+      "sha256": "a76c7dcd9f6820ebf8bd207b8024721ca2ceab724ba0574c8cdcb2e9c5760aa3"
+    },
+    {
+      "name": "ToolButtonS.bmp",
+      "bytes": 52278,
+      "sha256": "5598ae8be7f74b7dc90b10ba847a2893fe4e4befd910340b44af25701c4d8533"
+    }
+  ],
+  "thumbnail_directory": {
+    "files": 29,
+    "bytes": 451393543,
+    "content_inspected": false,
+    "names_retained": false
+  },
+  "limitations": [
+    "Only normal imports were decoded. Dynamic LoadLibrary/GetProcAddress use can add dependencies.",
+    "COFF timestamp and version text are artifact claims, not authenticated provenance.",
+    "Strings name possible APIs and formats; no call path or execution is established.",
+    "No thumbnail cache contents or private INI values are included."
+  ]
+}

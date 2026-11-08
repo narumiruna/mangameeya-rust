@@ -1,0 +1,65 @@
+{
+  "evidence_id": "ev_24dee97dd17513a2a2c7dfc0a76057a92dc9cff78375453743cfd10c20e12ff4",
+  "subject": {
+    "name": "png.dll",
+    "digest": {
+      "sha256": "a828b3299f18eff8d442babe8b81510df332c39e1c5da89a19757ee9417fc133"
+    },
+    "local_path": "D:/Program files/MangaMeeyaCE/png.dll",
+    "format": "pe",
+    "architecture": "x86"
+  },
+  "provider": {
+    "id": "rea-pe-resources",
+    "name": "REA PE resource parser",
+    "version": "1"
+  },
+  "analysis_profile": null,
+  "predicate_type": "rea.analysis",
+  "operation": "inspect_pe_resources",
+  "parameters": {
+    "path": "D:/Program files/MangaMeeyaCE/png.dll",
+    "max_file_bytes": 67108864,
+    "max_entries": 16384
+  },
+  "raw_result": null,
+  "normalized_result": {
+    "artifact": {
+      "path": "D:/Program files/MangaMeeyaCE/png.dll",
+      "sha256": "a828b3299f18eff8d442babe8b81510df332c39e1c5da89a19757ee9417fc133",
+      "bytes": 212992
+    },
+    "format": "pe32",
+    "machine": 332,
+    "directory": null,
+    "directories": [],
+    "resources": [],
+    "icon_groups": [],
+    "coverage": {
+      "status": "complete",
+      "examined_entries": 0,
+      "resources": 0
+    },
+    "limitations": [
+      "Static PE32/PE32+ type/name/language resource inventory; payloads other than RT_GROUP_ICON remain opaque.",
+      "Icon candidates are resource-table relationships. Language fallback, image decoding and actual shell/window loading are not observed.",
+      "Exact shared byte ranges are retained; non-identical overlapping resource structures or payloads are rejected."
+    ]
+  },
+  "confidence": "observed",
+  "authority": "shipped-artifact",
+  "environment": null,
+  "limitations": [
+    "Static PE32/PE32+ type/name/language resource inventory; payloads other than RT_GROUP_ICON remain opaque.",
+    "Icon candidates are resource-table relationships. Language fallback, image decoding and actual shell/window loading are not observed.",
+    "Exact shared byte ranges are retained; non-identical overlapping resource structures or payloads are rejected."
+  ],
+  "relationship_coverage": null,
+  "locations": [
+    {
+      "kind": "artifact-path",
+      "path": "D:/Program files/MangaMeeyaCE/png.dll"
+    }
+  ],
+  "evidence_links": []
+}

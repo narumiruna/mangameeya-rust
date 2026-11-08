@@ -1,0 +1,1220 @@
+{
+  "source": "supplemental-python-stdlib-pe-and-redacted-ini-parser-not-REA",
+  "main_exe_initial_tables": [
+    {
+      "slot_va": "0x49d080",
+      "file_offset": 643200,
+      "initial_pointer_va": "0x48b6c4",
+      "initial_string": "arc.dll"
+    },
+    {
+      "slot_va": "0x49e668",
+      "file_offset": 648808,
+      "initial_pointer_va": "0x48df44",
+      "initial_string": "jpg.dll"
+    },
+    {
+      "slot_va": "0x49e66c",
+      "file_offset": 648812,
+      "initial_pointer_va": "0x48df54",
+      "initial_string": "png.dll"
+    },
+    {
+      "slot_va": "0x49e670",
+      "file_offset": 648816,
+      "initial_pointer_va": "0x48b6b4",
+      "initial_string": "gif.dll"
+    }
+  ],
+  "dlls": [
+    {
+      "name": "arc.dll",
+      "bytes": 237568,
+      "sha256": "926aa3f83797d5bb9a810f17fc4d3c897b2ccabc4dc6b0867b34c39edabd73fb",
+      "machine": "0x14c",
+      "image_base": "0x10000000",
+      "entry_rva": "0x24020",
+      "coff_timestamp_claim_utc": "2006-05-09T14:28:53+00:00",
+      "normal_imports": [
+        {
+          "dll": "KERNEL32.dll",
+          "count": 71
+        }
+      ],
+      "export_directory_rva": "0x33d10",
+      "export_function_count": 13,
+      "named_exports": [
+        {
+          "name": "ArcClose",
+          "ordinal": 1,
+          "rva": "0x5e60",
+          "file_offset": 24160,
+          "forwarder": null
+        },
+        {
+          "name": "ArcCompressFile",
+          "ordinal": 2,
+          "rva": "0x67d0",
+          "file_offset": 26576,
+          "forwarder": null
+        },
+        {
+          "name": "ArcExtractFile",
+          "ordinal": 3,
+          "rva": "0x60d0",
+          "file_offset": 24784,
+          "forwarder": null
+        },
+        {
+          "name": "ArcGetComment",
+          "ordinal": 4,
+          "rva": "0x6360",
+          "file_offset": 25440,
+          "forwarder": null
+        },
+        {
+          "name": "ArcGetDecodeStream",
+          "ordinal": 5,
+          "rva": "0x6040",
+          "file_offset": 24640,
+          "forwarder": null
+        },
+        {
+          "name": "ArcGetFileInfo",
+          "ordinal": 6,
+          "rva": "0x5ee0",
+          "file_offset": 24288,
+          "forwarder": null
+        },
+        {
+          "name": "ArcGetVersion",
+          "ordinal": 7,
+          "rva": "0x1410",
+          "file_offset": 5136,
+          "forwarder": null
+        },
+        {
+          "name": "ArcOpen",
+          "ordinal": 8,
+          "rva": "0x5de0",
+          "file_offset": 24032,
+          "forwarder": null
+        },
+        {
+          "name": "ArcSetComment",
+          "ordinal": 9,
+          "rva": "0x66b0",
+          "file_offset": 26288,
+          "forwarder": null
+        },
+        {
+          "name": "ArcSetPassword",
+          "ordinal": 10,
+          "rva": "0x64f0",
+          "file_offset": 25840,
+          "forwarder": null
+        },
+        {
+          "name": "ArcWriteClose",
+          "ordinal": 11,
+          "rva": "0x6630",
+          "file_offset": 26160,
+          "forwarder": null
+        },
+        {
+          "name": "ArcWriteOpen",
+          "ordinal": 12,
+          "rva": "0x65b0",
+          "file_offset": 26032,
+          "forwarder": null
+        },
+        {
+          "name": "CheckArchive",
+          "ordinal": 13,
+          "rva": "0x5d10",
+          "file_offset": 23824,
+          "forwarder": null
+        }
+      ],
+      "version_strings": [
+        {
+          "file_offset": 184776,
+          "text": " deflate 1.2.1 Copyright 1995-2003 Jean-loup Gailly "
+        },
+        {
+          "file_offset": 185128,
+          "text": " inflate 1.2.1 Copyright 1995-2003 Mark Adler "
+        },
+        {
+          "file_offset": 182016,
+          "text": "1.2.3"
+        }
+      ],
+      "version_api": {
+        "rva": "0x1410",
+        "file_offset": 5136,
+        "bytes_hex": "b812000000c3",
+        "constant": 18,
+        "meaning_verified": false
+      }
+    },
+    {
+      "name": "gif.dll",
+      "bytes": 94208,
+      "sha256": "02d68a67e66968223e0c95788ef3a14e207ac538200a7219fbacb4a712d50cea",
+      "machine": "0x14c",
+      "image_base": "0x10000000",
+      "entry_rva": "0xbc59",
+      "coff_timestamp_claim_utc": "2005-12-04T14:43:23+00:00",
+      "normal_imports": [
+        {
+          "dll": "KERNEL32.dll",
+          "count": 60
+        }
+      ],
+      "export_directory_rva": "0x13340",
+      "export_function_count": 12,
+      "named_exports": [
+        {
+          "name": "CheckArchive",
+          "ordinal": 1,
+          "rva": "0xa840",
+          "file_offset": 43072,
+          "forwarder": null
+        },
+        {
+          "name": "CheckPicture",
+          "ordinal": 2,
+          "rva": "0xa750",
+          "file_offset": 42832,
+          "forwarder": null
+        },
+        {
+          "name": "GetDllVersion",
+          "ordinal": 3,
+          "rva": "0x5030",
+          "file_offset": 20528,
+          "forwarder": null
+        },
+        {
+          "name": "GifAddFrame",
+          "ordinal": 4,
+          "rva": "0xac90",
+          "file_offset": 44176,
+          "forwarder": null
+        },
+        {
+          "name": "GifClose",
+          "ordinal": 5,
+          "rva": "0xa9c0",
+          "file_offset": 43456,
+          "forwarder": null
+        },
+        {
+          "name": "GifGetDelayTime",
+          "ordinal": 6,
+          "rva": "0xab10",
+          "file_offset": 43792,
+          "forwarder": null
+        },
+        {
+          "name": "GifGetFrameNum",
+          "ordinal": 7,
+          "rva": "0xaaa0",
+          "file_offset": 43680,
+          "forwarder": null
+        },
+        {
+          "name": "GifOpen",
+          "ordinal": 8,
+          "rva": "0xaa30",
+          "file_offset": 43568,
+          "forwarder": null
+        },
+        {
+          "name": "GifWriteClose",
+          "ordinal": 9,
+          "rva": "0x8930",
+          "file_offset": 35120,
+          "forwarder": null
+        },
+        {
+          "name": "GifWriteOpen",
+          "ordinal": 10,
+          "rva": "0x89a0",
+          "file_offset": 35232,
+          "forwarder": null
+        },
+        {
+          "name": "LoadPicture",
+          "ordinal": 11,
+          "rva": "0xac10",
+          "file_offset": 44048,
+          "forwarder": null
+        },
+        {
+          "name": "LoadPictureInfo",
+          "ordinal": 12,
+          "rva": "0xab90",
+          "file_offset": 43920,
+          "forwarder": null
+        }
+      ],
+      "version_strings": [],
+      "version_api": {
+        "rva": "0x5030",
+        "file_offset": 20528,
+        "bytes_hex": "b80b000000c3",
+        "constant": 11,
+        "meaning_verified": false
+      }
+    },
+    {
+      "name": "jpg.dll",
+      "bytes": 811008,
+      "sha256": "fede07b96792f8efec6342cfa0ae493e0a8be061e8837e81ea475ebdb3cc824f",
+      "machine": "0x14c",
+      "image_base": "0x10000000",
+      "entry_rva": "0xa2eab",
+      "coff_timestamp_claim_utc": "2006-03-07T14:48:48+00:00",
+      "normal_imports": [
+        {
+          "dll": "KERNEL32.dll",
+          "count": 72
+        }
+      ],
+      "export_directory_rva": "0xb3710",
+      "export_function_count": 11,
+      "named_exports": [
+        {
+          "name": "GetPicture",
+          "ordinal": 7,
+          "rva": "0x20940",
+          "file_offset": 133440,
+          "forwarder": null
+        },
+        {
+          "name": "GetPictureInfo",
+          "ordinal": 8,
+          "rva": "0x20800",
+          "file_offset": 133120,
+          "forwarder": null
+        },
+        {
+          "name": "GetPluginInfo",
+          "ordinal": 9,
+          "rva": "0x20740",
+          "file_offset": 132928,
+          "forwarder": null
+        },
+        {
+          "name": "GetPreview",
+          "ordinal": 10,
+          "rva": "0x20bd0",
+          "file_offset": 134096,
+          "forwarder": null
+        },
+        {
+          "name": "IsSupported",
+          "ordinal": 11,
+          "rva": "0x20780",
+          "file_offset": 132992,
+          "forwarder": null
+        },
+        {
+          "name": "ijlErrorStr",
+          "ordinal": 6,
+          "rva": "0x13b00",
+          "file_offset": 80640,
+          "forwarder": null
+        },
+        {
+          "name": "ijlFree",
+          "ordinal": 3,
+          "rva": "0x122d0",
+          "file_offset": 74448,
+          "forwarder": null
+        },
+        {
+          "name": "ijlGetLibVersion",
+          "ordinal": 1,
+          "rva": "0x13af0",
+          "file_offset": 80624,
+          "forwarder": null
+        },
+        {
+          "name": "ijlInit",
+          "ordinal": 2,
+          "rva": "0x11b70",
+          "file_offset": 72560,
+          "forwarder": null
+        },
+        {
+          "name": "ijlRead",
+          "ordinal": 4,
+          "rva": "0x12ab0",
+          "file_offset": 76464,
+          "forwarder": null
+        },
+        {
+          "name": "ijlWrite",
+          "ordinal": 5,
+          "rva": "0x13320",
+          "file_offset": 78624,
+          "forwarder": null
+        }
+      ],
+      "version_strings": [
+        {
+          "file_offset": 706288,
+          "text": "ijl20l.lib"
+        },
+        {
+          "file_offset": 706280,
+          "text": "2.5.15"
+        },
+        {
+          "file_offset": 706268,
+          "text": "[2.5.15.47]"
+        },
+        {
+          "file_offset": 706256,
+          "text": "Feb 27 2006"
+        }
+      ],
+      "ijl_version_structure": {
+        "rva": "0xb4290",
+        "file_offset": 737936,
+        "first_three_dwords": [
+          2,
+          5,
+          15
+        ]
+      },
+      "fixed_file_info": {
+        "file_offset": 786568,
+        "file_version": [
+          1,
+          0,
+          0,
+          0
+        ],
+        "product_version": [
+          1,
+          0,
+          0,
+          0
+        ]
+      }
+    },
+    {
+      "name": "png.dll",
+      "bytes": 212992,
+      "sha256": "a828b3299f18eff8d442babe8b81510df332c39e1c5da89a19757ee9417fc133",
+      "machine": "0x14c",
+      "image_base": "0x10000000",
+      "entry_rva": "0x19725",
+      "coff_timestamp_claim_utc": "2005-12-04T14:43:55+00:00",
+      "normal_imports": [
+        {
+          "dll": "KERNEL32.dll",
+          "count": 66
+        }
+      ],
+      "export_directory_rva": "0x2fc00",
+      "export_function_count": 5,
+      "named_exports": [
+        {
+          "name": "CheckPicture",
+          "ordinal": 1,
+          "rva": "0x2150",
+          "file_offset": 8528,
+          "forwarder": null
+        },
+        {
+          "name": "GetDllVersion",
+          "ordinal": 2,
+          "rva": "0x2140",
+          "file_offset": 8512,
+          "forwarder": null
+        },
+        {
+          "name": "LoadPicture",
+          "ordinal": 3,
+          "rva": "0x2a30",
+          "file_offset": 10800,
+          "forwarder": null
+        },
+        {
+          "name": "LoadPictureInfo",
+          "ordinal": 4,
+          "rva": "0x2970",
+          "file_offset": 10608,
+          "forwarder": null
+        },
+        {
+          "name": "SavePicture",
+          "ordinal": 5,
+          "rva": "0x2b40",
+          "file_offset": 11072,
+          "forwarder": null
+        }
+      ],
+      "version_strings": [
+        {
+          "file_offset": 151904,
+          "text": "1.2.8"
+        },
+        {
+          "file_offset": 171384,
+          "text": " deflate 1.2.3 Copyright 1995-2005 Jean-loup Gailly "
+        },
+        {
+          "file_offset": 171736,
+          "text": " inflate 1.2.3 Copyright 1995-2005 Mark Adler "
+        },
+        {
+          "file_offset": 152412,
+          "text": "1.2.3"
+        }
+      ],
+      "version_api": {
+        "rva": "0x2140",
+        "file_offset": 8512,
+        "bytes_hex": "b80b000000c3",
+        "constant": 11,
+        "meaning_verified": false
+      }
+    }
+  ],
+  "ini": {
+    "name": "MangaMeeyaCE.ini",
+    "bytes": 12164,
+    "sha256": "29360d321119838baf1db197de2d38795beb9787efe7c46bc2da0d3485db6c25",
+    "encoding": "UTF-16LE with BOM",
+    "header": ";MangaMeeyaCE v2.4Beta",
+    "interpretation": "Current saved settings only, not factory defaults; enum meanings and units are not inferred from numeric values.",
+    "sections": [
+      {
+        "name": "FrameWnd",
+        "file_offset": 54,
+        "selected_values": []
+      },
+      {
+        "name": "TrackWnd",
+        "file_offset": 286,
+        "selected_values": []
+      },
+      {
+        "name": "ToolWnd1",
+        "file_offset": 524,
+        "selected_values": []
+      },
+      {
+        "name": "ToolWnd2",
+        "file_offset": 836,
+        "selected_values": []
+      },
+      {
+        "name": "ToolWnd3",
+        "file_offset": 1122,
+        "selected_values": []
+      },
+      {
+        "name": "ToolWnd4",
+        "file_offset": 1424,
+        "selected_values": []
+      },
+      {
+        "name": "FolderTreeWnd",
+        "file_offset": 1642,
+        "selected_values": []
+      },
+      {
+        "name": "ImageInfoWnd",
+        "file_offset": 1852,
+        "selected_values": []
+      },
+      {
+        "name": "FileListWnd",
+        "file_offset": 2062,
+        "selected_values": []
+      },
+      {
+        "name": "FilterRotateWnd",
+        "file_offset": 2328,
+        "selected_values": []
+      },
+      {
+        "name": "FilterClippingWnd",
+        "file_offset": 2546,
+        "selected_values": []
+      },
+      {
+        "name": "FilterBrightnessWnd",
+        "file_offset": 2768,
+        "selected_values": []
+      },
+      {
+        "name": "FilterSharpnessWnd",
+        "file_offset": 2992,
+        "selected_values": []
+      },
+      {
+        "name": "FilterResizeWnd",
+        "file_offset": 3214,
+        "selected_values": []
+      },
+      {
+        "name": "ViewWnd1",
+        "file_offset": 3432,
+        "selected_values": []
+      },
+      {
+        "name": "General",
+        "file_offset": 3522,
+        "selected_values": [
+          {
+            "key": "SubFolderLoad",
+            "value": "2",
+            "file_offset": 3586
+          },
+          {
+            "key": "BGColor",
+            "value": "0",
+            "file_offset": 3620
+          },
+          {
+            "key": "FullScreen",
+            "value": "0",
+            "file_offset": 3642
+          },
+          {
+            "key": "PostFilter",
+            "value": "0",
+            "file_offset": 3856
+          },
+          {
+            "key": "FSProgress",
+            "value": "1",
+            "file_offset": 3884
+          },
+          {
+            "key": "ConfirmDelete",
+            "value": "1",
+            "file_offset": 3912
+          },
+          {
+            "key": "PageEffect",
+            "value": "1",
+            "file_offset": 3976
+          },
+          {
+            "key": "PageEffectType",
+            "value": "0",
+            "file_offset": 4004
+          },
+          {
+            "key": "PageEffectDir",
+            "value": "0",
+            "file_offset": 4040
+          },
+          {
+            "key": "PageEffectWait",
+            "value": "500",
+            "file_offset": 4074
+          }
+        ]
+      },
+      {
+        "name": "History",
+        "file_offset": 4118,
+        "selected_values": []
+      },
+      {
+        "name": "Bookmark",
+        "file_offset": 4798,
+        "selected_values": []
+      },
+      {
+        "name": "Cache",
+        "file_offset": 5254,
+        "selected_values": [
+          {
+            "key": "PictureCacheSize",
+            "value": "20",
+            "file_offset": 5272
+          },
+          {
+            "key": "FileCacheSize",
+            "value": "1",
+            "file_offset": 5314
+          },
+          {
+            "key": "PreLoad",
+            "value": "1",
+            "file_offset": 5348
+          },
+          {
+            "key": "LoadScaled",
+            "value": "1",
+            "file_offset": 5370
+          },
+          {
+            "key": "LoadCached",
+            "value": "0",
+            "file_offset": 5398
+          }
+        ]
+      },
+      {
+        "name": "ViewMode",
+        "file_offset": 5430,
+        "selected_values": [
+          {
+            "key": "OpenViewMode",
+            "value": "0",
+            "file_offset": 5454
+          },
+          {
+            "key": "Sort",
+            "value": "3",
+            "file_offset": 5486
+          },
+          {
+            "key": "PageMode",
+            "value": "1",
+            "file_offset": 5502
+          },
+          {
+            "key": "AutoPageMode",
+            "value": "0",
+            "file_offset": 5526
+          },
+          {
+            "key": "BindDir",
+            "value": "1",
+            "file_offset": 5770
+          },
+          {
+            "key": "DoorPage",
+            "value": "0",
+            "file_offset": 5792
+          },
+          {
+            "key": "Origin",
+            "value": "0",
+            "file_offset": 5816
+          }
+        ]
+      },
+      {
+        "name": "ThumbnailMode",
+        "file_offset": 5840,
+        "selected_values": [
+          {
+            "key": "Column",
+            "value": "1",
+            "file_offset": 5874
+          },
+          {
+            "key": "SpaceColumn",
+            "value": "8",
+            "file_offset": 5894
+          },
+          {
+            "key": "SpaceRow",
+            "value": "8",
+            "file_offset": 5924
+          },
+          {
+            "key": "Origin",
+            "value": "0",
+            "file_offset": 5948
+          }
+        ]
+      },
+      {
+        "name": "ExploreMode",
+        "file_offset": 5972,
+        "selected_values": [
+          {
+            "key": "Width",
+            "value": "200",
+            "file_offset": 6002
+          },
+          {
+            "key": "Height",
+            "value": "200",
+            "file_offset": 6024
+          },
+          {
+            "key": "FontSize",
+            "value": "24",
+            "file_offset": 6048
+          },
+          {
+            "key": "TextLine",
+            "value": "2",
+            "file_offset": 6074
+          },
+          {
+            "key": "FrontCover",
+            "value": "1",
+            "file_offset": 6098
+          },
+          {
+            "key": "AddUpFolder",
+            "value": "0",
+            "file_offset": 6126
+          },
+          {
+            "key": "BGColor",
+            "value": "0",
+            "file_offset": 6156
+          },
+          {
+            "key": "TextColor",
+            "value": "16777215",
+            "file_offset": 6178
+          },
+          {
+            "key": "Save",
+            "value": "1",
+            "file_offset": 6218
+          }
+        ]
+      },
+      {
+        "name": "ScaleMode",
+        "file_offset": 6328,
+        "selected_values": [
+          {
+            "key": "Mode",
+            "value": "6",
+            "file_offset": 6354
+          },
+          {
+            "key": "NoZoomIn",
+            "value": "0",
+            "file_offset": 6370
+          },
+          {
+            "key": "OptionalScale",
+            "value": "0",
+            "file_offset": 6394
+          },
+          {
+            "key": "OptionalWidth",
+            "value": "1280",
+            "file_offset": 6428
+          },
+          {
+            "key": "OptionalHeight",
+            "value": "0",
+            "file_offset": 6468
+          },
+          {
+            "key": "ResizeFilter",
+            "value": "3",
+            "file_offset": 6504
+          }
+        ]
+      },
+      {
+        "name": "Scroll",
+        "file_offset": 6540,
+        "selected_values": [
+          {
+            "key": "DispBar",
+            "value": "1",
+            "file_offset": 6560
+          },
+          {
+            "key": "HorzDistance",
+            "value": "50",
+            "file_offset": 6582
+          },
+          {
+            "key": "VertDistance",
+            "value": "50",
+            "file_offset": 6616
+          },
+          {
+            "key": "DragDistance",
+            "value": "1",
+            "file_offset": 6650
+          },
+          {
+            "key": "Order",
+            "value": "0",
+            "file_offset": 6682
+          },
+          {
+            "key": "SmoothScroll",
+            "value": "1",
+            "file_offset": 6700
+          },
+          {
+            "key": "SmoothScrollSpeed",
+            "value": "0",
+            "file_offset": 6732
+          },
+          {
+            "key": "SmoothScrollAccel",
+            "value": "50",
+            "file_offset": 6774
+          }
+        ]
+      },
+      {
+        "name": "Zoom",
+        "file_offset": 6822,
+        "selected_values": [
+          {
+            "key": "DZoom",
+            "value": "1.5",
+            "file_offset": 6838
+          }
+        ]
+      },
+      {
+        "name": "Move",
+        "file_offset": 6864,
+        "selected_values": [
+          {
+            "key": "Mode",
+            "value": "0",
+            "file_offset": 6880
+          },
+          {
+            "key": "Distance1",
+            "value": "10",
+            "file_offset": 6896
+          },
+          {
+            "key": "Distance2",
+            "value": "20",
+            "file_offset": 6924
+          },
+          {
+            "key": "Distance3",
+            "value": "4",
+            "file_offset": 6952
+          }
+        ]
+      },
+      {
+        "name": "Play",
+        "file_offset": 6982,
+        "selected_values": [
+          {
+            "key": "Interval",
+            "value": "1000",
+            "file_offset": 6998
+          },
+          {
+            "key": "Option",
+            "value": "0",
+            "file_offset": 7028
+          }
+        ]
+      },
+      {
+        "name": "Loupe",
+        "file_offset": 7052,
+        "selected_values": [
+          {
+            "key": "LoupeType",
+            "value": "0",
+            "file_offset": 7070
+          },
+          {
+            "key": "LoupeSize",
+            "value": "200",
+            "file_offset": 7096
+          },
+          {
+            "key": "LoupeDScale",
+            "value": "200",
+            "file_offset": 7126
+          }
+        ]
+      },
+      {
+        "name": "Loader",
+        "file_offset": 7164,
+        "selected_values": [
+          {
+            "key": "ArcNoncache",
+            "value": "0",
+            "file_offset": 7184
+          },
+          {
+            "key": "PdfType",
+            "value": "0",
+            "file_offset": 7214
+          },
+          {
+            "key": "JpgScale",
+            "value": "0",
+            "file_offset": 7236
+          },
+          {
+            "key": "JpgForceGray",
+            "value": "0",
+            "file_offset": 7260
+          },
+          {
+            "key": "JpgYCbCr",
+            "value": "0",
+            "file_offset": 7292
+          },
+          {
+            "key": "JpgDCTType",
+            "value": "0",
+            "file_offset": 7316
+          },
+          {
+            "key": "JpgBGR16",
+            "value": "0",
+            "file_offset": 7344
+          }
+        ]
+      },
+      {
+        "name": "Save",
+        "file_offset": 7372,
+        "selected_values": [
+          {
+            "key": "Original",
+            "value": "0",
+            "file_offset": 7440
+          },
+          {
+            "key": "GrayScale",
+            "value": "0",
+            "file_offset": 7464
+          },
+          {
+            "key": "Type",
+            "value": "0",
+            "file_offset": 7490
+          },
+          {
+            "key": "JpgQuality",
+            "value": "75",
+            "file_offset": 7506
+          },
+          {
+            "key": "JpgSubSampling",
+            "value": "0",
+            "file_offset": 7536
+          },
+          {
+            "key": "JpgExif",
+            "value": "1",
+            "file_offset": 7572
+          },
+          {
+            "key": "PngCompressLevel",
+            "value": "9",
+            "file_offset": 7594
+          }
+        ]
+      },
+      {
+        "name": "Menu",
+        "file_offset": 7638,
+        "selected_values": []
+      },
+      {
+        "name": "Keyboard",
+        "file_offset": 9002,
+        "selected_values": [
+          {
+            "key": "IgnoreRepeat",
+            "value": "0",
+            "file_offset": 9026
+          }
+        ]
+      },
+      {
+        "name": "Mouse",
+        "file_offset": 10042,
+        "selected_values": [
+          {
+            "key": "Click",
+            "value": "91,92,66,92,91",
+            "file_offset": 10060
+          },
+          {
+            "key": "Drag",
+            "value": "0,1,2,0,0",
+            "file_offset": 10104
+          },
+          {
+            "key": "Wheel",
+            "value": "0",
+            "file_offset": 10136
+          },
+          {
+            "key": "WheelScrollDistance",
+            "value": "20",
+            "file_offset": 10154
+          },
+          {
+            "key": "LongPushInterval",
+            "value": "500",
+            "file_offset": 10202
+          },
+          {
+            "key": "DragAllowance",
+            "value": "8",
+            "file_offset": 10246
+          },
+          {
+            "key": "DragType",
+            "value": "0",
+            "file_offset": 10280
+          },
+          {
+            "key": "ExploreDragType",
+            "value": "1",
+            "file_offset": 10304
+          },
+          {
+            "key": "CursorWindow",
+            "value": "0",
+            "file_offset": 10342
+          },
+          {
+            "key": "CursorFullScreen",
+            "value": "2",
+            "file_offset": 10374
+          },
+          {
+            "key": "GestureIgnoreSame",
+            "value": "0",
+            "file_offset": 11022
+          },
+          {
+            "key": "GestureUnitLength",
+            "value": "10",
+            "file_offset": 11064
+          },
+          {
+            "key": "GestureSplitTime",
+            "value": "200",
+            "file_offset": 11108
+          }
+        ]
+      },
+      {
+        "name": "GenericFilter",
+        "file_offset": 11484,
+        "selected_values": [
+          {
+            "key": "Rotate",
+            "value": "0,1,0,1",
+            "file_offset": 11518
+          },
+          {
+            "key": "Clipping",
+            "value": "0,1,0,0,0,0,5,0,16777215,0",
+            "file_offset": 11550
+          },
+          {
+            "key": "Brightness",
+            "value": "0,0,0,64,64,128,128,192,192,255,255",
+            "file_offset": 11624
+          },
+          {
+            "key": "Sharpness",
+            "value": "0,128,1,8",
+            "file_offset": 11720
+          },
+          {
+            "key": "Resize",
+            "value": "0,100,640,480,1,6",
+            "file_offset": 11762
+          }
+        ]
+      },
+      {
+        "name": "Text",
+        "file_offset": 11818,
+        "selected_values": [
+          {
+            "key": "PriorLoad",
+            "value": "0",
+            "file_offset": 11834
+          },
+          {
+            "key": "Dir",
+            "value": "1",
+            "file_offset": 11860
+          },
+          {
+            "key": "FontSize",
+            "value": "16",
+            "file_offset": 11896
+          },
+          {
+            "key": "FontEffect",
+            "value": "2",
+            "file_offset": 11922
+          },
+          {
+            "key": "FontWeight",
+            "value": "0",
+            "file_offset": 11950
+          },
+          {
+            "key": "LineSpace",
+            "value": "0",
+            "file_offset": 11978
+          },
+          {
+            "key": "EOLSpace",
+            "value": "100",
+            "file_offset": 12004
+          },
+          {
+            "key": "EdgeSpace",
+            "value": "10",
+            "file_offset": 12032
+          },
+          {
+            "key": "Ruby",
+            "value": "1",
+            "file_offset": 12060
+          },
+          {
+            "key": "RubySize",
+            "value": "50",
+            "file_offset": 12076
+          },
+          {
+            "key": "TextColor",
+            "value": "0",
+            "file_offset": 12102
+          },
+          {
+            "key": "BGColor",
+            "value": "16777215",
+            "file_offset": 12128
+          }
+        ]
+      }
+    ]
+  },
+  "limitations": [
+    "DLL exports and version bytes are static observations, not observed calls.",
+    "Main executable table entries are initial file-backed pointer values, not observed runtime values; only the four code-selected DLL-name slots are included.",
+    "All DLL normal imports are KERNEL32.dll; dynamic dependencies can exist.",
+    "Version strings and COFF timestamps are unverified artifact claims.",
+    "INI keys are allowlisted numeric settings. Paths, history entries, bookmark targets and passwords are not retained.",
+    "No file in the thumbnail directory was opened."
+  ]
+}

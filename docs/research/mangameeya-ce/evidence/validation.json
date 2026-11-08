@@ -1,0 +1,142 @@
+{
+  "source": "supplemental-validation-not-REA",
+  "passed": true,
+  "checks": [
+    {
+      "check": "All nine root files match the recorded size and SHA-256",
+      "passed": true,
+      "files": 9
+    },
+    {
+      "check": "All stored JSON files parse",
+      "passed": true,
+      "files": 10
+    },
+    {
+      "check": "REA bundle has complete records and both residual unknowns",
+      "passed": true,
+      "records": 7,
+      "unknowns": 2
+    },
+    {
+      "check": "Standalone REA record matches its bundled record: pe-resources.json",
+      "passed": true
+    },
+    {
+      "check": "REA artifact identity matches current bytes: MangaMeeyaCE.exe",
+      "passed": true
+    },
+    {
+      "check": "Standalone REA record matches its bundled record: arc-pe-resources.json",
+      "passed": true
+    },
+    {
+      "check": "REA artifact identity matches current bytes: arc.dll",
+      "passed": true
+    },
+    {
+      "check": "Standalone REA record matches its bundled record: gif-pe-resources.json",
+      "passed": true
+    },
+    {
+      "check": "REA artifact identity matches current bytes: gif.dll",
+      "passed": true
+    },
+    {
+      "check": "Standalone REA record matches its bundled record: jpg-pe-resources.json",
+      "passed": true
+    },
+    {
+      "check": "REA artifact identity matches current bytes: jpg.dll",
+      "passed": true
+    },
+    {
+      "check": "Standalone REA record matches its bundled record: png-pe-resources.json",
+      "passed": true
+    },
+    {
+      "check": "REA artifact identity matches current bytes: png.dll",
+      "passed": true
+    },
+    {
+      "check": "All 92 resource payload hashes match original bytes",
+      "passed": true,
+      "payloads": 92
+    },
+    {
+      "check": "Decoded resources refer to the selected REA record",
+      "passed": true
+    },
+    {
+      "check": "All 88 selected resource payloads were consumed without failure",
+      "passed": true,
+      "resources": 88
+    },
+    {
+      "check": "All 663 decoded string values match exact source offsets",
+      "passed": true,
+      "strings": 663
+    },
+    {
+      "check": "Resource counts match the report",
+      "passed": true,
+      "counts": {
+        "3": 1,
+        "4": 2,
+        "5": 35,
+        "6": 49,
+        "9": 1,
+        "14": 1,
+        "24": 1
+      }
+    },
+    {
+      "check": "All four DLL hashes and 41 named exports agree with their records",
+      "passed": true,
+      "named_exports": 41
+    },
+    {
+      "check": "Three version-code instruction sequences match original DLL bytes",
+      "passed": true
+    },
+    {
+      "check": "INI identity matches and retained values are numeric-only",
+      "passed": true,
+      "settings": 104
+    },
+    {
+      "check": "History and bookmark sections have no retained values",
+      "passed": true
+    },
+    {
+      "check": "Unknown references resolve within the same artifact scope",
+      "passed": true
+    },
+    {
+      "check": "All report links exist or name this pending validation output",
+      "passed": true,
+      "links": 7
+    },
+    {
+      "check": "Report Evidence and unknown IDs exist in the bundle",
+      "passed": true
+    },
+    {
+      "check": "No thumbnail-cache filenames are retained in research files",
+      "passed": true
+    },
+    {
+      "check": "Research files are text-only",
+      "passed": true
+    },
+    {
+      "check": "No trailing whitespace in the report",
+      "passed": true
+    }
+  ],
+  "limitations": [
+    "No target execution, native decompiler, complete call graph, feature behavior or cache format was validated.",
+    "Cache filenames were compared only for output-redaction checks; no cache file was opened.",
+    "The validation output cannot include its own hash or initial existence check."
+  ]
+}

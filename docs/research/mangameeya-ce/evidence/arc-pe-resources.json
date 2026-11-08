@@ -1,0 +1,156 @@
+{
+  "evidence_id": "ev_49d4b275bfe05cab9c7a4a20731fb159926efdaea2b4869b31cd5cb2aed3dd3b",
+  "subject": {
+    "name": "arc.dll",
+    "digest": {
+      "sha256": "926aa3f83797d5bb9a810f17fc4d3c897b2ccabc4dc6b0867b34c39edabd73fb"
+    },
+    "local_path": "D:/Program files/MangaMeeyaCE/arc.dll",
+    "format": "pe",
+    "architecture": "x86"
+  },
+  "provider": {
+    "id": "rea-pe-resources",
+    "name": "REA PE resource parser",
+    "version": "1"
+  },
+  "analysis_profile": null,
+  "predicate_type": "rea.analysis",
+  "operation": "inspect_pe_resources",
+  "parameters": {
+    "path": "D:/Program files/MangaMeeyaCE/arc.dll",
+    "max_file_bytes": 67108864,
+    "max_entries": 16384
+  },
+  "raw_result": null,
+  "normalized_result": {
+    "artifact": {
+      "path": "D:/Program files/MangaMeeyaCE/arc.dll",
+      "sha256": "926aa3f83797d5bb9a810f17fc4d3c897b2ccabc4dc6b0867b34c39edabd73fb",
+      "bytes": 237568
+    },
+    "format": "pe32",
+    "machine": 332,
+    "directory": {
+      "rva": 237568,
+      "location": {
+        "offset": 221184,
+        "bytes": 176
+      },
+      "data_directory_location": {
+        "offset": 360,
+        "bytes": 8
+      }
+    },
+    "directories": [
+      {
+        "location": {
+          "offset": 221184,
+          "bytes": 24
+        },
+        "characteristics": 0,
+        "timestamp": 0,
+        "major_version": 4,
+        "minor_version": 0,
+        "named_entries": 0,
+        "id_entries": 1
+      },
+      {
+        "location": {
+          "offset": 221208,
+          "bytes": 24
+        },
+        "characteristics": 0,
+        "timestamp": 0,
+        "major_version": 4,
+        "minor_version": 0,
+        "named_entries": 0,
+        "id_entries": 1
+      },
+      {
+        "location": {
+          "offset": 221232,
+          "bytes": 24
+        },
+        "characteristics": 0,
+        "timestamp": 0,
+        "major_version": 4,
+        "minor_version": 0,
+        "named_entries": 0,
+        "id_entries": 1
+      }
+    ],
+    "resources": [
+      {
+        "index": 0,
+        "type": {
+          "kind": "id",
+          "id": 24
+        },
+        "name": {
+          "kind": "id",
+          "id": 2
+        },
+        "language": {
+          "kind": "id",
+          "id": 1033
+        },
+        "entry_locations": [
+          {
+            "offset": 221200,
+            "bytes": 8
+          },
+          {
+            "offset": 221224,
+            "bytes": 8
+          },
+          {
+            "offset": 221248,
+            "bytes": 8
+          }
+        ],
+        "data_entry_location": {
+          "offset": 221256,
+          "bytes": 16
+        },
+        "code_page": 1252,
+        "reserved": 0,
+        "payload": {
+          "rva": 237656,
+          "location": {
+            "offset": 221272,
+            "bytes": 86
+          },
+          "sha256": "388f75e900f0c15fd66249d7b2e7edf6e14eeefb859e6f766b75058e44f27af6"
+        }
+      }
+    ],
+    "icon_groups": [],
+    "coverage": {
+      "status": "complete",
+      "examined_entries": 3,
+      "resources": 1
+    },
+    "limitations": [
+      "Static PE32/PE32+ type/name/language resource inventory; payloads other than RT_GROUP_ICON remain opaque.",
+      "Icon candidates are resource-table relationships. Language fallback, image decoding and actual shell/window loading are not observed.",
+      "Exact shared byte ranges are retained; non-identical overlapping resource structures or payloads are rejected."
+    ]
+  },
+  "confidence": "observed",
+  "authority": "shipped-artifact",
+  "environment": null,
+  "limitations": [
+    "Static PE32/PE32+ type/name/language resource inventory; payloads other than RT_GROUP_ICON remain opaque.",
+    "Icon candidates are resource-table relationships. Language fallback, image decoding and actual shell/window loading are not observed.",
+    "Exact shared byte ranges are retained; non-identical overlapping resource structures or payloads are rejected."
+  ],
+  "relationship_coverage": null,
+  "locations": [
+    {
+      "kind": "artifact-path",
+      "path": "D:/Program files/MangaMeeyaCE/arc.dll"
+    }
+  ],
+  "evidence_links": []
+}

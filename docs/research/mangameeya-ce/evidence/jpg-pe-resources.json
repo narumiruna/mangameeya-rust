@@ -1,0 +1,156 @@
+{
+  "evidence_id": "ev_390623189cf4b0cc636186f832d75f313d789faaf10f03d96e13d96a41099229",
+  "subject": {
+    "name": "jpg.dll",
+    "digest": {
+      "sha256": "fede07b96792f8efec6342cfa0ae493e0a8be061e8837e81ea475ebdb3cc824f"
+    },
+    "local_path": "D:/Program files/MangaMeeyaCE/jpg.dll",
+    "format": "pe",
+    "architecture": "x86"
+  },
+  "provider": {
+    "id": "rea-pe-resources",
+    "name": "REA PE resource parser",
+    "version": "1"
+  },
+  "analysis_profile": null,
+  "predicate_type": "rea.analysis",
+  "operation": "inspect_pe_resources",
+  "parameters": {
+    "path": "D:/Program files/MangaMeeyaCE/jpg.dll",
+    "max_file_bytes": 67108864,
+    "max_entries": 16384
+  },
+  "raw_result": null,
+  "normalized_result": {
+    "artifact": {
+      "path": "D:/Program files/MangaMeeyaCE/jpg.dll",
+      "sha256": "fede07b96792f8efec6342cfa0ae493e0a8be061e8837e81ea475ebdb3cc824f",
+      "bytes": 811008
+    },
+    "format": "pe32",
+    "machine": 332,
+    "directory": {
+      "rva": 790528,
+      "location": {
+        "offset": 786432,
+        "bytes": 472
+      },
+      "data_directory_location": {
+        "offset": 392,
+        "bytes": 8
+      }
+    },
+    "directories": [
+      {
+        "location": {
+          "offset": 786432,
+          "bytes": 24
+        },
+        "characteristics": 0,
+        "timestamp": 0,
+        "major_version": 0,
+        "minor_version": 0,
+        "named_entries": 0,
+        "id_entries": 1
+      },
+      {
+        "location": {
+          "offset": 786456,
+          "bytes": 24
+        },
+        "characteristics": 0,
+        "timestamp": 0,
+        "major_version": 0,
+        "minor_version": 0,
+        "named_entries": 0,
+        "id_entries": 1
+      },
+      {
+        "location": {
+          "offset": 786480,
+          "bytes": 24
+        },
+        "characteristics": 0,
+        "timestamp": 0,
+        "major_version": 0,
+        "minor_version": 0,
+        "named_entries": 0,
+        "id_entries": 1
+      }
+    ],
+    "resources": [
+      {
+        "index": 0,
+        "type": {
+          "kind": "id",
+          "id": 16
+        },
+        "name": {
+          "kind": "id",
+          "id": 1
+        },
+        "language": {
+          "kind": "id",
+          "id": 1041
+        },
+        "entry_locations": [
+          {
+            "offset": 786448,
+            "bytes": 8
+          },
+          {
+            "offset": 786472,
+            "bytes": 8
+          },
+          {
+            "offset": 786496,
+            "bytes": 8
+          }
+        ],
+        "data_entry_location": {
+          "offset": 786504,
+          "bytes": 16
+        },
+        "code_page": 0,
+        "reserved": 0,
+        "payload": {
+          "rva": 790624,
+          "location": {
+            "offset": 786528,
+            "bytes": 376
+          },
+          "sha256": "bb7671484599e56f568c18c83b17ce3ea3073b26dfdc2dc5a3b08e862f308107"
+        }
+      }
+    ],
+    "icon_groups": [],
+    "coverage": {
+      "status": "complete",
+      "examined_entries": 3,
+      "resources": 1
+    },
+    "limitations": [
+      "Static PE32/PE32+ type/name/language resource inventory; payloads other than RT_GROUP_ICON remain opaque.",
+      "Icon candidates are resource-table relationships. Language fallback, image decoding and actual shell/window loading are not observed.",
+      "Exact shared byte ranges are retained; non-identical overlapping resource structures or payloads are rejected."
+    ]
+  },
+  "confidence": "observed",
+  "authority": "shipped-artifact",
+  "environment": null,
+  "limitations": [
+    "Static PE32/PE32+ type/name/language resource inventory; payloads other than RT_GROUP_ICON remain opaque.",
+    "Icon candidates are resource-table relationships. Language fallback, image decoding and actual shell/window loading are not observed.",
+    "Exact shared byte ranges are retained; non-identical overlapping resource structures or payloads are rejected."
+  ],
+  "relationship_coverage": null,
+  "locations": [
+    {
+      "kind": "artifact-path",
+      "path": "D:/Program files/MangaMeeyaCE/jpg.dll"
+    }
+  ],
+  "evidence_links": []
+}
