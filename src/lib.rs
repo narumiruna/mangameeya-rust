@@ -1,6 +1,7 @@
 extern crate gpui_kit as gpui;
 
 pub mod book;
+pub mod browser;
 pub mod i18n;
 pub mod imaging;
 pub mod instance;

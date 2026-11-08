@@ -1,0 +1,110 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <link rel="icon" href="data:,">
+  <link rel="stylesheet" href="shared.css">
+  <link rel="stylesheet" href="integrated.css">
+  <title>整合版：同一框架，切換中央內容 — MangaMeeya</title>
+  <script src="prototype.js" defer></script>
+</head>
+<body class="integrated" data-variant="integrated" data-initial-mode="reader">
+  <header class="study">
+    <div><div class="eyebrow">REFINED DIRECTION / 01 + 03</div><h1>同一個視窗，只換中央內容。</h1><p>先按 <kbd>Backspace</kbd> 看封面網格。工具列、內容導覽與右側工具仍在原位。</p></div>
+    <nav aria-label="原型說明"><a href="index.html">← 方案比較</a><span class="prototype-badge">整合版 · 示範資料</span></nav>
+  </header>
+  <main class="app" id="app">
+    <div class="titlebar"><div class="brand"><span class="brand-mark" aria-hidden="true"></span><span data-reader-title></span><span class="native-title-suffix">— MangaMeeya Rust</span></div><span class="title-note">HTML 互動原型</span></div>
+    <div class="native-menubar" aria-label="保留的應用程式選單，僅外觀示意"><span>檔案</span><span>檢視</span><span>縮放</span><span>移動</span><span>書籤</span><span>工具</span><span>說明</span></div>
+    <div class="native-toolbar">
+      <div class="native-modes" role="group" aria-label="中央內容模式">
+        <button class="action" data-action="resume" data-mode-button="reader"><span data-icon="file" aria-hidden="true"></span>閱讀</button>
+        <button class="action" data-action="browse" data-mode-button="browser"><span data-icon="grid" aria-hidden="true"></span>檔案瀏覽 <kbd>Backspace</kbd></button>
+      </div>
+      <div class="native-retained" title="既有閱讀控制的外觀示意；此次原型不實作這些功能"><span class="retained-selected">▯ 單頁</span><span>▯▯ 雙頁</span><span>☷ 連續</span><i></i><span>適合視窗 ▾</span><span>右 → 左</span></div>
+      <span class="toolbar-spacer"></span>
+      <button class="icon-button" data-toggle-panel="navigation" aria-controls="navigation" aria-expanded="true" aria-label="顯示或隱藏內容導覽" title="內容導覽"><span data-icon="sidebar" aria-hidden="true"></span></button>
+      <button class="icon-button" data-toggle-panel="inspector" aria-controls="inspector" aria-expanded="true" aria-label="顯示或隱藏右側工具" title="右側工具"><span data-icon="tools" aria-hidden="true"></span></button>
+    </div>
+    <div class="native-workspace">
+      <aside class="native-navigation" id="navigation" aria-label="內容導覽">
+        <header class="native-panel-heading"><strong>內容導覽</strong><span data-native-total></span></header>
+        <div class="native-tabs" role="tablist" aria-label="內容導覽分類">
+          <button id="nav-files-tab" role="tab" aria-controls="nav-files" aria-selected="false" tabindex="-1" data-native-tab="files">檔案</button>
+          <button id="nav-thumbnails-tab" role="tab" aria-controls="nav-thumbnails" aria-selected="false" tabindex="-1" data-native-tab="thumbnails">縮圖</button>
+          <button id="nav-recent-tab" role="tab" aria-controls="nav-recent" aria-selected="true" data-native-tab="recent">最近</button>
+        </div>
+        <div class="native-nav-content" id="nav-files" role="tabpanel" aria-labelledby="nav-files-tab" hidden>
+          <p class="native-section-label">示範資料夾</p>
+          <button class="tree-link" data-folder="root"><span data-icon="folder" aria-hidden="true"></span>Comics</button>
+          <button class="tree-link child" data-folder="short"><span data-icon="folder" aria-hidden="true"></span>短篇集</button>
+          <button class="tree-link child" data-folder="scans"><span data-icon="folder" aria-hidden="true"></span>掃描原稿</button>
+          <button class="tree-link child" data-folder="empty"><span data-icon="folder" aria-hidden="true"></span>待整理</button>
+        </div>
+        <div class="native-nav-content native-thumbnails" id="nav-thumbnails" role="tabpanel" aria-labelledby="nav-thumbnails-tab" hidden></div>
+        <div class="native-nav-content" id="nav-recent" role="tabpanel" aria-labelledby="nav-recent-tab"></div>
+        <div class="native-nav-footer"><span data-current-book></span><small>示範內容 · 不讀取磁碟</small></div>
+      </aside>
+      <div class="stage" id="content-slot">
+        <section class="reader" id="reader" aria-label="中央閱讀模式" tabindex="-1">
+          <div class="reader-scroll" id="reader-scroll"><img class="reader-page" id="reading-page" alt="原創示意漫畫"></div>
+        </section>
+        <section class="browser" id="browser" aria-label="中央檔案瀏覽模式" tabindex="-1" hidden>
+          <h2 class="sr-only">檔案瀏覽</h2>
+          <div class="toolbar native-browser-toolbar">
+            <div class="native-location"><nav class="breadcrumbs" aria-label="目前資料夾"></nav><small data-results aria-live="polite"></small></div>
+            <label class="search"><span data-icon="search" aria-hidden="true"></span><input id="search" type="search" aria-label="搜尋目前資料夾" placeholder="搜尋檔名…" autocomplete="off"></label>
+            <div class="sort-group"><label for="sort" class="sr-only">排序</label><select id="sort">
+              <option value="natural">名稱（自然排序）</option><option value="name">名稱（文字排序）</option>
+              <option value="modified">修改日期</option><option value="created">建立日期</option>
+              <option value="size">檔案大小</option><option value="type">檔案類型</option>
+              <option value="pages">頁數</option><option value="progress">閱讀進度</option>
+              <option value="lastRead">最近閱讀</option><option value="random">隨機排序</option>
+            </select>
+            <button class="icon-button" data-action="reverse" aria-label="目前為升冪；切換為降冪" title="切換升冪／降冪"><span data-icon="ascending" aria-hidden="true"></span></button>
+            <button class="icon-button" data-action="shuffle" aria-label="重新隨機排序" title="重新洗牌" hidden><span data-icon="shuffle" aria-hidden="true"></span></button></div>
+            <label class="check-label"><input id="folders-first" type="checkbox" checked>資料夾優先</label>
+            <button class="action native-open" data-action="open">開啟選取 <kbd>Enter</kbd></button>
+          </div>
+          <div class="browser-scroll" id="browser-scroll"><div class="cover-grid" id="entries" role="listbox" aria-label="示範檔案與資料夾"></div></div>
+        </section>
+        <div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
+      </div>
+      <aside class="native-inspector" id="inspector" aria-label="右側工具">
+        <header class="native-panel-heading"><strong>閱讀工具</strong><button class="icon-button" data-toggle-panel="inspector" aria-controls="inspector" aria-expanded="true" aria-label="收起右側工具">×</button></header>
+        <div class="native-tabs" role="tablist" aria-label="工具分類">
+          <button id="tool-image-tab" role="tab" aria-controls="tool-image" aria-selected="false" tabindex="-1" data-tool-tab="image">影像</button>
+          <button id="tool-reading-tab" role="tab" aria-controls="tool-reading" aria-selected="true" data-tool-tab="reading">閱讀</button>
+          <button id="tool-browser-tab" role="tab" aria-controls="tool-browser" aria-selected="false" tabindex="-1" data-tool-tab="browser">瀏覽</button>
+        </div>
+        <div class="native-tool-content" id="tool-reading" role="tabpanel" aria-labelledby="tool-reading-tab">
+          <div class="native-memory-note"><span>✓</span>保留這次的閱讀位置</div><p class="native-hint">原型僅在目前頁面保留狀態。</p>
+          <div class="native-setting"><h3>閱讀背景</h3><div class="native-swatches" role="group" aria-label="閱讀背景">
+            <button data-background="#08090b" aria-pressed="true"><span style="background:#08090b"></span>黑色</button>
+            <button data-background="#303238" aria-pressed="false"><span style="background:#303238"></span>深灰</button>
+            <button data-background="#eee8da" aria-pressed="false"><span style="background:#eee8da"></span>紙色</button>
+          </div></div>
+          <div class="native-setting"><h3>閱讀與瀏覽</h3><p class="native-help"><kbd>Backspace</kbd> 閱讀 → 檔案瀏覽<br><kbd>Enter</kbd> 開啟選取的書籍<br><kbd>Escape</kbd> 回到原本的閱讀</p></div>
+          <div class="native-setting"><h3>相同框架，不同內容</h3><p class="native-hint">中央切換時，這個工具區與左側導覽都不移動。封面設定在「瀏覽」分頁。</p></div>
+        </div>
+        <div class="native-tool-content" id="tool-browser" role="tabpanel" aria-labelledby="tool-browser-tab" hidden>
+          <div class="native-setting"><label for="tile-size">封面大小 <output id="tile-size-value">144 px</output></label><input id="tile-size" type="range" min="100" max="215" value="144"></div>
+          <div class="native-setting"><label class="native-check"><input id="show-filenames" type="checkbox" checked>顯示檔名</label><label for="filename-lines">檔名行數</label><select id="filename-lines"><option value="2">最多 2 行</option><option value="3">最多 3 行</option></select></div>
+          <div class="native-setting"><label class="native-check"><input id="show-metadata" type="checkbox">顯示頁數與閱讀進度</label><p class="native-hint">預設僅顯示封面與檔名，減少卡片裝飾。橫式圖片維持比例，不裁切。</p></div>
+          <div class="native-setting"><h3>排序</h3><p class="native-hint">排序與搜尋在中央網格上方。切換模式後，保留排序、搜尋、選取與捲動位置。</p><button class="action" data-action="browse">查看檔案瀏覽</button></div>
+        </div>
+        <div class="native-tool-content" id="tool-image" role="tabpanel" aria-labelledby="tool-image-tab" hidden><h3>沿用原有影像工具</h3><p class="native-hint">這次只比較閱讀與檔案瀏覽的切換，不模擬影像調整。上方選單與既有閱讀模式、縮放控制也僅保留外觀示意。</p></div>
+        <div class="native-inspector-footer">所有封面與漫畫皆為原創 SVG 示意。<br>顯示調整不會修改來源圖片。</div>
+      </aside>
+    </div>
+    <footer class="native-statusbar">
+      <span class="selection-status" data-selection-status></span>
+      <div class="native-page-controls"><button class="icon-button" data-action="previous" aria-label="上一頁"><span data-icon="left" aria-hidden="true"></span></button><input id="native-page" type="number" min="1" value="18" aria-label="閱讀頁碼"><span data-page-count class="sr-only" aria-hidden="true"></span><span data-native-total-inline></span><button class="icon-button" data-action="next" aria-label="下一頁"><span data-icon="right" aria-hidden="true"></span></button><input id="native-progress" type="range" min="1" max="43" value="18" aria-label="閱讀進度"><span data-progress-label></span></div>
+      <span class="native-view-label" data-native-view></span>
+    </footer>
+  </main>
+  <footer class="caption"><span><strong>整合版：只替換中央畫布，不新增浮層。</strong>雙擊封面，或選取後按 Enter；Esc 返回原閱讀頁。</span><span class="scope">HTML 原型 · 未修改 Rust</span></footer>
+</body>
+</html>

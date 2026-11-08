@@ -449,3 +449,104 @@ Its unresolved external checks are retained below before plan removal.
   reference when available, not OS decoration or generated artwork pixels. Expected
   result: a visual and usability assessment. Automated geometry and pixel tests do not
   establish subjective product acceptance. This review adds no coding or release gate.
+
+## Integrated central file browser
+
+Implementation started from `1534c3e` on `narumi/feat/integrated-file-browser`.
+The execution plan is `docs/plans/2026-11-08_integrated-file-browser-plan.md`.
+The HTML proposals in `docs/file-browser-concepts/` remain design references, not native verification evidence.
+
+### Scope and behavior
+
+Backspace replaces only the central reading canvas with a black file-cover grid.
+The toolbar, resizable side panels, and status bar keep their bounds. Enter or a
+double-click opens a file or enters a folder. Escape closes the active popup before
+returning to the retained book and before exiting fullscreen. Browser search keeps
+normal text editing. A resize drag blocks browser navigation and view changes.
+
+The browser retains its query, sort, native-path selection, and item/row scroll
+anchor. Reading retains the Book, page, zoom, filters, and page scroll. Browsing
+pauses playback, disables reading controls, and stops hidden continuous-page
+selection and reading preload. External opens keep the original image identity;
+an excluding saved filter is cleared so the source can be selected and revealed.
+Older directory, book, and cover results cannot replace a newer intent.
+
+Ten metadata sorts use independent folder grouping, stable native-path ties, and
+unknown-last ordering in either direction. Page counts and percentages are explicitly
+limited to known data. Sorting does not open every archive. Recent-open rank is not
+a reading timestamp. New count data does not reorder the visible grid until sorting
+is applied again. Counts keep the recursive policy used to open the actual book.
+Browser state is runtime-only; no settings schema or dependency was added.
+
+### Cover safety
+
+Covers use the exact image, the first shallow-folder image, or the first naturally
+sorted image in a bounded classic ZIP. Static thumbnails use the existing orientation,
+encoded-byte, decoder-allocation, and pixel limits. Automatic ZIP reads snapshot one
+file handle before parsing: at most 64 MiB source, 4096 entries, and 2 MiB combined
+metadata. ZIP64, encryption, unsupported methods/layouts, and RAR/CBR use an explicit
+format-icon fallback. Manual Book opening keeps its existing format support.
+
+Only the current viewport and one adjacent row on each side request covers. At most
+two jobs run, including obsolete jobs that have not completed. Canonical aliases share
+one worker slot. The 32 MiB pixel cache evicts old images; native atlas releases are
+deferred when the current Window is borrowed. Failures are cached until refresh or a
+changed source key. Refresh also clears known counts. No source image is changed,
+no archive is extracted to disk, and no persistent cover database is created.
+
+### Local verification
+
+Rust is 1.99.1. Windows checks use the native MSVC compiler from WSL; Linux checks
+use the native x86_64 Linux compiler in a separate target directory. Linux already
+had the runtime xkbcommon libraries but lacked development linker names; local
+links under ignored `target/native-libs/` supplied those names. No system files or
+repository dependency declarations were changed.
+
+| Check | Result |
+| --- | --- |
+| Clean `1534c3e` Windows baseline | fmt, all-target/all-feature Clippy, and native rendering passed; full tests: 185 passed, 1 existing IPC queue ConnectionReset failure |
+| `cargo test --locked --all-features`, Linux | 258 passed; no failures or ignored tests; normal parallel execution |
+| Full feature suite, Windows | Latest normal parallel run: 251 passed, 3 failures in unchanged IPC tests listed below; this is not a passing Windows full-suite result |
+| `cargo test --locked --test rendering`, Windows and Linux | Passed, including new isolated browser windows, three locales, three sizes, four panel combinations, stable shell geometry, search editing, and scroll-reachable browser tools |
+| `cargo clippy --locked --all-targets --all-features -- -D warnings` | Passed on Windows and Linux |
+| `cargo fmt --all -- --check` | Passed |
+| Pinned changenote 0.10.0 `status` | Passed; one minor note, no product version files changed |
+| Release/DMG recovery tests | 21 passed with pinned changenote; uploads and native packaging commands are mocked |
+
+The clean baseline ran in a detached worktree, which was removed. A package-only
+clean then rebuilt feature artifacts, so shared Cargo outputs did not reuse the
+baseline binary. Local logs are under `target/integrated-browser-baseline/` and
+`target/integrated-browser/`; these are not tracked artifacts.
+
+The new coverage includes 16 browser-model tests, bounded cover-source cases,
+31 native browser event/lifecycle tests, and a lossless native-ID regression.
+The independent review found alias worker duplication, hidden filter changes,
+recursive count identity, Close cover dispatch, external filtered selection,
+open/listing intent races, and drag shortcut ordering. Each was fixed with a
+regression test. Existing direct-book test fixtures now select Reading explicitly;
+existing test assertions and IPC implementation/tests were not weakened.
+
+The Windows runs retain all failures: `queue_is_bounded_and_rejects_overflow`,
+`rejects_oversized_payloads_and_path_counts` (ConnectionReset), and
+`forwards_paths_and_empty_focus_requests` (unexpected queued path). The clean base
+reproduced the queue failure; earlier sections also record this IPC failure family.
+No cause is asserted for the other two in this final run. No IPC source/test was
+changed, no test was skipped, and no serial run is reported as a parallel pass.
+PR platform CI is required to establish its hosted-platform outcome. The local
+Windows and Linux rendering paths verify events and geometry, not Metal pixels.
+The existing macOS CI rendering path writes real native captures under
+`target/ui-smoke/browser-*`, alongside the previous captures.
+
+### Retained browser handoff and recovery
+
+- **Platform maintainer:** Use the PR's native CI results and macOS capture artifacts.
+  At the intended desktop scaling, inspect physical OS shortcuts, IME composition,
+  focus, font rendering, and high-DPI covers. Geometry tests do not prove these
+  physical desktop paths. Do not claim a platform or native pixels without its
+  corresponding execution evidence. Keep the existing CI/release gates.
+- **Product maintainer:** Compare native reading and browsing captures with proposal
+  04 for cover density, filename readability, and reading comfort. This subjective
+  review is optional and is not an agent coding gate.
+- **Recovery:** Revert the feature and its unreleased note. Settings need no conversion;
+  do not reset reading positions, history, bookmarks, or comic files. No package was
+  published, version tag created, or release workflow dispatched by this work.

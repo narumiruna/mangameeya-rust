@@ -1,6 +1,7 @@
 //! Native reader window, commands, and asynchronous image loading.
 
 mod assets;
+mod browser;
 mod preferences;
 pub use assets::ReaderAssets;
 
@@ -92,6 +93,55 @@ enum Command {
     ClearHistory,
     Escape,
     OpenListedFolder,
+    Browse,
+    ContinueReading,
+    BrowserBack,
+    BrowserOpen,
+    BrowserRefresh,
+}
+
+impl Command {
+    fn reading_only(self) -> bool {
+        use Command::*;
+        matches!(
+            self,
+            SavePage
+                | Single
+                | SetSpread
+                | SetContinuous
+                | Spread
+                | Continuous
+                | Direction
+                | FitWindow
+                | FitWidth
+                | FitHeight
+                | Original
+                | ZoomIn
+                | ZoomOut
+                | ZoomReset
+                | First
+                | Previous
+                | Next
+                | Last
+                | Left
+                | Right
+                | ScrollUp
+                | ScrollDown
+                | Slideshow
+                | Bookmark
+                | Resume
+                | ClearBookmark
+                | RotateLeft
+                | RotateRight
+                | ResetFilters
+        )
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum ContentMode {
+    Reading,
+    Browsing,
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -99,6 +149,7 @@ enum InspectorTab {
     #[default]
     Image,
     Playback,
+    Browser,
 }
 
 // Resize handles straddle panel boundaries. Reserve a band as well as the reader minimum.
@@ -141,6 +192,12 @@ const MAX_TEXTURE_SIDE: u32 = 8192;
 const MAX_PAGE_REQUESTS: usize = 2;
 const MAX_THUMB_REQUESTS: usize = 2;
 const TICK: Duration = Duration::from_millis(80);
+
+fn initial_directory() -> PathBuf {
+    directories::BaseDirs::new()
+        .map(|dirs| dirs.home_dir().to_path_buf())
+        .unwrap_or_else(|| PathBuf::from("."))
+}
 
 fn fit_label(language: Language, fit: FitMode) -> &'static str {
     language.text(match fit {
@@ -271,6 +328,12 @@ struct PageGeometry {
 
 pub struct ReaderView {
     reader: Reader,
+    content_mode: ContentMode,
+    paused_viewer_size: Option<Size<Pixels>>,
+    book_recursive: bool,
+    browser: browser::BrowserUi,
+    reading_origin: Option<PathBuf>,
+    pending_browser_selection: Option<PathBuf>,
     settings_path: PathBuf,
     focus: FocusHandle,
     preferences_window: Option<AnyWindowHandle>,
@@ -360,7 +423,9 @@ impl ReaderView {
             &page_input,
             window,
             |this, input, event, window, cx| {
-                if matches!(event, InputEvent::PressEnter { .. }) {
+                if matches!(event, InputEvent::PressEnter { .. })
+                    && this.content_mode == ContentMode::Reading
+                {
                     match input.read(cx).value().trim().parse::<usize>() {
                         Ok(page) => this.navigate(page.saturating_sub(1), window, cx),
                         Err(_) => this.set_localized_message(Text::InvalidPage, vec![], true, cx),
@@ -409,7 +474,9 @@ impl ReaderView {
         );
         subscriptions.push(
             cx.subscribe_in(&page_slider, window, |this, _, event, window, cx| {
-                if let SliderEvent::Change(value) = event {
+                if let SliderEvent::Change(value) = event
+                    && this.content_mode == ContentMode::Reading
+                {
                     let count = this.page_count().saturating_sub(1);
                     this.navigate(
                         (value.start() / 100. * count as f32).round() as usize,
@@ -422,7 +489,9 @@ impl ReaderView {
         for (filter, slider) in filter_sliders.iter().enumerate() {
             subscriptions.push(
                 cx.subscribe_in(slider, window, move |this, _, event, _, cx| {
-                    if let SliderEvent::Change(value) = event {
+                    if let SliderEvent::Change(value) = event
+                        && this.content_mode == ContentMode::Reading
+                    {
                         match filter {
                             0 => this.reader.filters.brightness = value.start(),
                             1 => this.reader.filters.contrast = value.start(),
@@ -461,8 +530,15 @@ impl ReaderView {
         });
         let continuous = ListState::new(0, ListAlignment::Top, px(500.));
         let thumbnails = ListState::new(0, ListAlignment::Top, px(300.));
+        let browser = browser::BrowserUi::new(window, cx);
         let mut view = Self {
             reader: Reader::new(settings),
+            content_mode: ContentMode::Browsing,
+            paused_viewer_size: None,
+            book_recursive: false,
+            browser,
+            reading_origin: None,
+            pending_browser_selection: None,
             settings_path,
             focus,
             preferences_window: None,
@@ -522,9 +598,7 @@ impl ReaderView {
             _subscriptions: subscriptions,
         };
         view.update_language(window, cx);
-        let home = directories::BaseDirs::new()
-            .map(|dirs| dirs.home_dir().to_path_buf())
-            .unwrap_or_else(|| PathBuf::from("."));
+        let home = initial_directory();
         view.browse(home, window, cx);
         cx.spawn_in(window, async move |view, cx| {
             loop {
@@ -821,7 +895,10 @@ impl ReaderView {
             self.errors.retain(|(_, thumb), _| *thumb);
             self.relayout(cx);
         }
-        if self.reader.slideshow && Instant::now() >= self.next_slide {
+        if self.content_mode == ContentMode::Reading
+            && self.reader.slideshow
+            && Instant::now() >= self.next_slide
+        {
             if self.reader.current + 1 < self.page_count() {
                 self.reader.next();
                 self.after_navigation(window, cx);
@@ -832,7 +909,8 @@ impl ReaderView {
                 self.set_localized_message(Text::SlideshowEnded, vec![], false, cx);
             }
         }
-        if self.reader.settings.preferences.mode == ReadingMode::Continuous
+        if self.content_mode == ContentMode::Reading
+            && self.reader.settings.preferences.mode == ReadingMode::Continuous
             && self.reader.book.is_some()
             && self.continuous_target.is_none()
         {
@@ -884,15 +962,39 @@ impl ReaderView {
             })
             .detach();
         }
-        self.load_requested(cx);
+        if self.content_mode == ContentMode::Browsing {
+            self.browser_tick(cx);
+        } else {
+            self.load_requested(cx);
+        }
         self.evict_cache(true, Some(window), cx);
     }
 
     fn open_path(&mut self, path: PathBuf, window: &mut Window, cx: &mut Context<Self>) {
+        self.open_path_from(path, false, window, cx);
+    }
+
+    fn open_browser_path(&mut self, path: PathBuf, window: &mut Window, cx: &mut Context<Self>) {
+        self.remember_browser_location();
+        self.open_path_from(path, true, window, cx);
+    }
+
+    fn open_path_from(
+        &mut self,
+        path: PathBuf,
+        from_browser: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         self.info_open = false;
         self.zoom_open = false;
         self.focus.focus(window, cx);
         self.open_revision += 1;
+        // A newer open intent owns the current location even before it succeeds.
+        // Do not let an older directory enumeration replace its return snapshot.
+        self.listing_revision += 1;
+        self.pending_browser_selection = None;
+        self.browser_resume(cx);
         let revision = self.open_revision;
         let recursive = self.reader.settings.preferences.recursive_folder;
         let explicit_image = path.is_file()
@@ -912,16 +1014,34 @@ impl ReaderView {
             false,
             cx,
         );
-        let task = cx.background_spawn(async move { Book::open(&path, recursive) });
+        let task = cx.background_spawn(async move {
+            let book = Book::open(&path, recursive)?;
+            // Keep the entry's own name even when it is a symbolic link. Listing
+            // canonicalizes its parent but retains this native child identity.
+            let origin = path
+                .parent()
+                .and_then(|parent| parent.canonicalize().ok())
+                .and_then(|parent| path.file_name().map(|name| parent.join(name)))
+                .unwrap_or_else(|| book.path.clone());
+            let folder_book = book.path.is_dir();
+            Ok::<_, String>((book, origin, folder_book))
+        });
         cx.spawn(async move |view, cx| {
             let result = task.await;
             _ = view.update(cx, |view, cx| {
-                if revision != view.open_revision {
+                if revision != view.open_revision || view.closing {
                     return;
                 }
                 view.opening = false;
                 match result {
-                    Ok(book) => {
+                    Ok((book, origin, folder_book)) => {
+                        view.content_mode = ContentMode::Reading;
+                        view.paused_viewer_size = None;
+                        view.listing_revision += 1;
+                        view.reading_origin = (!from_browser).then_some(origin);
+                        view.book_recursive = folder_book && recursive;
+                        let key = (book.path.clone(), view.book_recursive);
+                        view.browser.model.known_pages.insert(key, book.pages.len());
                         view.zoom_open = false;
                         view.info_open = false;
                         let explicit = explicit_image.then_some(book.initial_page);
@@ -961,14 +1081,27 @@ impl ReaderView {
                         }
                         cx.notify();
                     }
-                    Err(error) => view.set_error(error, cx),
+                    Err(error) => {
+                        if view.reader.book.is_none() && view.listing.is_none() {
+                            view.load_browser_listing(initial_directory(), cx);
+                        }
+                        view.set_error(error, cx);
+                    }
                 }
             });
         })
         .detach();
     }
 
-    fn browse(&mut self, path: PathBuf, _: &mut Window, cx: &mut Context<Self>) {
+    fn browse(&mut self, path: PathBuf, window: &mut Window, cx: &mut Context<Self>) {
+        self.remember_browser_location();
+        self.enter_browser(window, cx);
+        self.reading_origin = None;
+        self.pending_browser_selection = None;
+        self.load_browser_listing(path, cx);
+    }
+
+    fn load_browser_listing(&mut self, path: PathBuf, cx: &mut Context<Self>) {
         self.listing_revision += 1;
         let revision = self.listing_revision;
         self.listing_error = None;
@@ -976,7 +1109,7 @@ impl ReaderView {
         cx.spawn(async move |view, cx| {
             let result = task.await;
             _ = view.update(cx, |view, cx| {
-                if revision != view.listing_revision {
+                if revision != view.listing_revision || view.closing {
                     return;
                 }
                 match result {
@@ -984,6 +1117,22 @@ impl ReaderView {
                         view.files
                             .reset_with_uniform_height(listing.entries.len(), px(32.));
                         view.listing = Some(listing);
+                        view.browser_listing_changed(cx);
+                        if let Some(target) = view.pending_browser_selection.take() {
+                            let visible = view.listing.as_ref().is_some_and(|listing| {
+                                view.browser
+                                    .model
+                                    .order
+                                    .iter()
+                                    .any(|&index| listing.entries[index].entry_path == target)
+                            });
+                            if !visible {
+                                view.browser.model.query.clear();
+                            }
+                            view.browser.model.selected = Some(target);
+                            view.rebuild_browser(cx);
+                            view.reveal_browser_selection();
+                        }
                         view.path_pending = true;
                     }
                     Err(error) => view.listing_error = Some(error),
@@ -995,6 +1144,9 @@ impl ReaderView {
     }
 
     fn navigate(&mut self, page: usize, window: &mut Window, cx: &mut Context<Self>) {
+        if self.content_mode != ContentMode::Reading {
+            return;
+        }
         self.reader.navigate(page);
         self.after_navigation(window, cx);
     }
@@ -1125,6 +1277,59 @@ impl ReaderView {
         .detach();
     }
 
+    fn enter_browser(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.content_mode == ContentMode::Reading {
+            self.paused_viewer_size = Some(self.viewer_size);
+        }
+        self.open_revision += 1;
+        self.opening = false;
+        self.reader.slideshow = false;
+        self.zoom_open = false;
+        self.info_open = false;
+        self.content_mode = ContentMode::Browsing;
+        self.focus.focus(window, cx);
+        cx.notify();
+    }
+
+    fn show_browser(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let origin = self.reading_origin.take();
+        self.enter_browser(window, cx);
+        if let Some(origin) = origin {
+            let parent = origin.parent().unwrap_or(&origin).to_path_buf();
+            self.browse(parent, window, cx);
+            self.pending_browser_selection = Some(origin);
+        } else {
+            self.browser_resume(cx);
+        }
+    }
+
+    fn resume_reading(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.reader.book.is_none() {
+            return;
+        }
+        self.remember_browser_location();
+        self.open_revision += 1;
+        self.listing_revision += 1;
+        self.opening = false;
+        if self
+            .paused_viewer_size
+            .take()
+            .is_some_and(|size| size != self.viewer_size)
+        {
+            self.continuous.remeasure();
+        }
+        self.content_mode = ContentMode::Reading;
+        self.focus.focus(window, cx);
+        cx.notify();
+    }
+
+    fn reading_command_blocked(&self, command: Command) -> bool {
+        self.content_mode == ContentMode::Browsing && command.reading_only()
+            // Direction is also an application preference. Keep its existing
+            // empty-window setup behavior without changing a retained book.
+            && !(command == Command::Direction && self.reader.book.is_none())
+    }
+
     fn perform(&mut self, command: Command, window: &mut Window, cx: &mut Context<Self>) {
         let language = self.language();
         use Command::*;
@@ -1136,10 +1341,84 @@ impl ReaderView {
         {
             return;
         }
-        if cx.has_active_drag() && matches!(command, Sidebar | Inspector | Thumbnails | Settings) {
+        if cx.has_active_drag()
+            && matches!(
+                command,
+                Sidebar
+                    | Inspector
+                    | Thumbnails
+                    | Settings
+                    | Browse
+                    | ContinueReading
+                    | BrowserBack
+                    | BrowserOpen
+                    | BrowserRefresh
+                    | Escape
+                    | Left
+                    | Right
+                    | ScrollUp
+                    | ScrollDown
+                    | First
+                    | Last
+            )
+        {
             return;
         }
+        if self.content_mode == ContentMode::Browsing {
+            let step = self.browser.columns.max(1) as isize;
+            match command {
+                Left => {
+                    self.browser_move(-1, window, cx);
+                    return;
+                }
+                Right => {
+                    self.browser_move(1, window, cx);
+                    return;
+                }
+                ScrollUp => {
+                    self.browser_move(-step, window, cx);
+                    return;
+                }
+                ScrollDown => {
+                    self.browser_move(step, window, cx);
+                    return;
+                }
+                First => {
+                    self.browser_move(-isize::MAX, window, cx);
+                    return;
+                }
+                Last => {
+                    self.browser_move(isize::MAX, window, cx);
+                    return;
+                }
+                _ if self.reading_command_blocked(command) => return,
+                _ => {}
+            }
+        }
         match command {
+            Browse => self.show_browser(window, cx),
+            ContinueReading => self.resume_reading(window, cx),
+            BrowserBack => {
+                if self.content_mode == ContentMode::Reading {
+                    self.show_browser(window, cx);
+                } else if let Some(parent) = self
+                    .listing
+                    .as_ref()
+                    .and_then(|listing| listing.parent.clone())
+                {
+                    self.browse(parent, window, cx);
+                }
+            }
+            BrowserOpen => {
+                if self.content_mode == ContentMode::Browsing {
+                    self.browser_open(window, cx);
+                }
+            }
+            BrowserRefresh => {
+                if self.content_mode == ContentMode::Browsing {
+                    self.browser_refresh(window, cx);
+                }
+            }
             OpenFile => self.request_dialog(false, window, cx),
             OpenFolder => self.request_dialog(true, window, cx),
             SavePage => self.save_page(window, cx),
@@ -1155,6 +1434,14 @@ impl ReaderView {
                 self.open_revision += 1;
                 self.book_revision += 1;
                 self.reader.close();
+                self.content_mode = ContentMode::Browsing;
+                self.paused_viewer_size = None;
+                self.book_recursive = false;
+                self.reading_origin = None;
+                self.pending_browser_selection = None;
+                self.listing_revision += 1;
+                self.clear_browser_covers(cx);
+                self.browser_resume(cx);
                 self.clear_images(Some(window), cx);
                 self.geometry.clear();
                 self.visible.borrow_mut().clear();
@@ -1167,6 +1454,9 @@ impl ReaderView {
                 self.sync_controls(window, cx);
                 window.set_window_title("MangaMeeya Rust");
                 self.set_localized_message(Text::BookClosed, vec![], false, cx);
+                if self.listing.is_none() {
+                    self.load_browser_listing(initial_directory(), cx);
+                }
             }
             Sidebar => {
                 self.reader.settings.preferences.sidebar =
@@ -1233,10 +1523,15 @@ impl ReaderView {
             }
             Fullscreen => window.toggle_fullscreen(),
             Escape => {
-                if self.info_open {
+                if self.info_open || self.zoom_open {
                     self.info_open = false;
+                    self.zoom_open = false;
                     self.focus.focus(window, cx);
                     cx.notify();
+                    return;
+                }
+                if self.content_mode == ContentMode::Browsing {
+                    self.resume_reading(window, cx);
                     return;
                 }
                 if window.is_fullscreen() {
@@ -1358,13 +1653,16 @@ impl ReaderView {
             }
             OpenListedFolder => {
                 if let Some(listing) = &self.listing {
-                    self.open_path(listing.path.clone(), window, cx);
+                    self.open_browser_path(listing.path.clone(), window, cx);
                 }
             }
         }
     }
 
     fn load_requested(&mut self, cx: &mut Context<Self>) {
+        if self.content_mode != ContentMode::Reading || self.closing {
+            return;
+        }
         let Some(book) = self.reader.book.clone() else {
             return;
         };
@@ -1538,7 +1836,8 @@ impl ReaderView {
     }
 
     fn effective_scale(&self) -> Option<f32> {
-        if self.reader.book.is_none()
+        if self.content_mode != ContentMode::Reading
+            || self.reader.book.is_none()
             || self.viewer_bounds.size.width <= px(0.)
             || self.viewer_bounds.size.height <= px(0.)
             || self.errors.contains_key(&(self.reader.current, false))
@@ -1712,6 +2011,7 @@ impl ReaderView {
             .small()
             .ghost()
             .accessibility_label(label)
+            .disabled(self.reading_command_blocked(command))
             .on_click(cx.listener(move |this, _, window, cx| {
                 this.perform(command, window, cx);
                 if command != Command::Settings {
@@ -1723,7 +2023,7 @@ impl ReaderView {
     fn menu_items(&self, group: usize, menu: PopupMenu) -> PopupMenu {
         let language = self.language();
         use Command::*;
-        let opened = self.reader.book.is_some();
+        let opened = self.reader.book.is_some() && self.content_mode == ContentMode::Reading;
         match group {
             0 => menu
                 .menu(language.text(Text::OpenComic), Box::new(OpenFile))
@@ -1738,9 +2038,20 @@ impl ReaderView {
                 .separator()
                 .menu_with_disabled(language.text(Text::SaveImage), Box::new(SavePage), !opened)
                 .separator()
-                .menu_with_disabled(language.text(Text::CloseComic), Box::new(Close), !opened)
+                .menu_with_disabled(
+                    language.text(Text::CloseComic),
+                    Box::new(Close),
+                    self.reader.book.is_none(),
+                )
                 .menu(language.text(Text::Quit), Box::new(Quit)),
             1 => menu
+                .menu(language.text(Text::BrowseFiles), Box::new(Browse))
+                .menu_with_disabled(
+                    language.text(Text::ContinueReading),
+                    Box::new(ContinueReading),
+                    self.reader.book.is_none(),
+                )
+                .separator()
                 .menu_with_check(
                     language.text(Text::ShowSidebar),
                     self.reader.settings.preferences.sidebar,
@@ -1831,9 +2142,15 @@ impl ReaderView {
             .gap_1()
             .child(
                 Popover::new("zoom-popover")
-                    .open(self.zoom_open && self.reader.book.is_some())
+                    .open(
+                        self.zoom_open
+                            && self.reader.book.is_some()
+                            && self.content_mode == ContentMode::Reading,
+                    )
                     .on_open_change(cx.listener(|this, open: &bool, window, cx| {
-                        this.zoom_open = *open && this.reader.book.is_some();
+                        this.zoom_open = *open
+                            && this.reader.book.is_some()
+                            && this.content_mode == ContentMode::Reading;
                         if this.zoom_open {
                             this.info_open = false;
                         }
@@ -1851,7 +2168,10 @@ impl ReaderView {
                                 Text::ZoomSummary,
                                 &[("mode", mode.into()), ("percent", percent.clone())],
                             ))
-                            .disabled(self.reader.book.is_none())
+                            .disabled(
+                                self.reader.book.is_none()
+                                    || self.content_mode != ContentMode::Reading,
+                            )
                             .tooltip(language.text(Text::ZoomTip)),
                     )
                     .content(move |_, _, cx| {
@@ -2079,11 +2399,12 @@ impl ReaderView {
                     .child(self.render_sidebar(cx)),
             );
         }
-        group = group.child(
-            resizable_panel()
-                .size_range(px(280.)..Pixels::MAX)
-                .child(self.render_viewer(cx)),
-        );
+        group = group.child(resizable_panel().size_range(px(280.)..Pixels::MAX).child(
+            match self.content_mode {
+                ContentMode::Reading => self.render_viewer(cx),
+                ContentMode::Browsing => self.render_browser(window, cx),
+            },
+        ));
         if right_visible {
             group = group.child(
                 resizable_panel()
@@ -2189,7 +2510,7 @@ impl ReaderView {
                     }),
             );
         }
-        let opened = self.reader.book.is_some();
+        let opened = self.reader.book.is_some() && self.content_mode == ContentMode::Reading;
         let mut modes = div()
             .id("reading-modes")
             .test_support()
@@ -2236,6 +2557,7 @@ impl ReaderView {
                     .selected(selected)
                     .toggled(selected)
                     .tooltip(language.text(text))
+                    .disabled(!opened)
                     .h(px(30.))
                     .when(selected, |button| {
                         button
@@ -2306,6 +2628,28 @@ impl ReaderView {
                         }),
                     ),
             )
+            .child(
+                self.icon_button(
+                    "browser-toggle",
+                    language.text(if self.content_mode == ContentMode::Reading {
+                        Text::BrowseFiles
+                    } else {
+                        Text::ContinueReading
+                    }),
+                    if self.content_mode == ContentMode::Reading {
+                        IconName::FolderOpen
+                    } else {
+                        IconName::FileText
+                    },
+                    if self.content_mode == ContentMode::Reading {
+                        Command::Browse
+                    } else {
+                        Command::ContinueReading
+                    },
+                    cx,
+                )
+                .disabled(self.content_mode == ContentMode::Browsing && self.reader.book.is_none()),
+            )
             .child(separator())
             .child(modes)
             .child(separator())
@@ -2321,6 +2665,7 @@ impl ReaderView {
                 .when(!compact, |button| {
                     button.w_auto().px_3().child(direction.test_text(direction))
                 })
+                .disabled(self.reading_command_blocked(Command::Direction))
                 .tooltip(format!(
                     "{}: {direction}",
                     language.text(Text::ReadingDirection)
@@ -2786,6 +3131,7 @@ impl ReaderView {
             return div().into_any_element();
         };
         let target = entry.path.clone();
+        let identity = entry.entry_path.clone();
         let directory = entry.is_directory;
         let prefix = match entry.kind {
             EntryKind::Folder => "▸",
@@ -2808,7 +3154,8 @@ impl ReaderView {
                     if directory {
                         this.browse(target.clone(), window, cx);
                     } else {
-                        this.open_path(target.clone(), window, cx);
+                        this.browser.model.selected = Some(identity.clone());
+                        this.open_browser_path(target.clone(), window, cx);
                     }
                 })),
             )
@@ -2848,6 +3195,7 @@ impl ReaderView {
                     )
                     .child(
                         Slider::new(&self.filter_sliders[index])
+                            .disabled(self.content_mode != ContentMode::Reading)
                             .accessibility_label(language.text(text)),
                     ),
             );
@@ -2928,7 +3276,7 @@ impl ReaderView {
                 )
                 .selected(self.reader.slideshow)
                 .toggled(self.reader.slideshow)
-                .disabled(self.reader.book.is_none()),
+                .disabled(self.reader.book.is_none() || self.content_mode != ContentMode::Reading),
             )
             .child(language.text(Text::IntervalLabel))
             .child(
@@ -2955,6 +3303,7 @@ impl ReaderView {
             .aria_label(language.text(Text::ReadingTools));
         for (id, tab, text) in [
             ("inspector-image", InspectorTab::Image, Text::ImageTab),
+            ("inspector-browser", InspectorTab::Browser, Text::BrowserTab),
             (
                 "inspector-playback",
                 InspectorTab::Playback,
@@ -3010,6 +3359,7 @@ impl ReaderView {
             .child(match self.inspector_tab {
                 InspectorTab::Image => self.render_image_tools(cx),
                 InspectorTab::Playback => self.render_playback_tools(cx),
+                InspectorTab::Browser => self.render_browser_tools(cx),
             });
         div()
             .id("inspector")
@@ -3393,13 +3743,13 @@ impl ReaderView {
     fn render_status(&self, cx: &mut Context<Self>) -> gpui_kit::AnyElement {
         let language = self.language();
         let count = self.page_count();
-        let opened = count > 0;
-        let percent = if opened {
+        let opened = count > 0 && self.content_mode == ContentMode::Reading;
+        let percent = if count > 0 {
             ((self.reader.current + 1) as f64 / count as f64 * 100.).round() as u32
         } else {
             0
         };
-        let progress = if opened {
+        let progress = if count > 0 {
             language.format(Text::ReadProgress, &[("percent", percent.to_string())])
         } else {
             "—".to_owned()
@@ -3408,7 +3758,9 @@ impl ReaderView {
         let info = Popover::new("info-popover")
             .open(self.info_open && opened)
             .on_open_change(cx.listener(|this, open: &bool, _, cx| {
-                this.info_open = *open && this.reader.book.is_some();
+                this.info_open = *open
+                    && this.reader.book.is_some()
+                    && this.content_mode == ContentMode::Reading;
                 if this.info_open {
                     this.zoom_open = false;
                 }
@@ -3544,7 +3896,11 @@ impl Render for ReaderView {
         let drop_view = cx.entity().downgrade();
         div()
             .id("reader-window")
-            .key_context("Reader")
+            .key_context(if self.content_mode == ContentMode::Browsing {
+                "Reader FileBrowser"
+            } else {
+                "Reader"
+            })
             .track_focus(&self.focus)
             .on_action(
                 cx.listener(|this, command: &Command, window, cx| {
@@ -3679,7 +4035,7 @@ pub fn init(cx: &mut App) {
 
 fn bind_commands(cx: &mut App) {
     use Command::*;
-    let navigation = "Reader && !Input && !PopoverContent";
+    let navigation = "Reader && !Input && !PopoverContent && !PopupMenu && !Dialog";
     let reader = "Reader";
     for (key, command) in [
         ("space", Next),
@@ -3702,7 +4058,24 @@ fn bind_commands(cx: &mut App) {
         ("t", Thumbnails),
         ("tab", Sidebar),
     ] {
-        cx.bind_keys([KeyBinding::new(key, command, Some(navigation))]);
+        let context = if key == "tab" {
+            "Reader && !Input && !PopoverContent && !PopupMenu && !Dialog && !FileBrowser"
+        } else {
+            navigation
+        };
+        cx.bind_keys([KeyBinding::new(key, command, Some(context))]);
+    }
+    for (key, command) in [
+        ("backspace", BrowserBack),
+        ("enter", BrowserOpen),
+        ("f5", BrowserRefresh),
+        ("escape", Escape),
+    ] {
+        cx.bind_keys([KeyBinding::new(
+            key,
+            command,
+            Some("Reader && !Input && !PopoverContent && !PopupMenu && !Dialog"),
+        )]);
     }
     for (key, command) in [
         ("f", FitWindow),
@@ -3722,7 +4095,6 @@ fn bind_commands(cx: &mut App) {
         ("ctrl-s", SavePage),
         ("ctrl-w", Close),
         ("f11", Fullscreen),
-        ("escape", Escape),
     ] {
         cx.bind_keys([KeyBinding::new(key, command, Some(reader))]);
     }
@@ -3763,6 +4135,8 @@ fn set_native_menus(language: Language, cx: &mut App) {
             MenuItem::action(language.text(Text::CloseComic), Close),
         ]),
         Menu::new(language.text(Text::View)).items([
+            MenuItem::action(language.text(Text::BrowseFiles), Browse),
+            MenuItem::action(language.text(Text::ContinueReading), ContinueReading),
             MenuItem::action(language.text(Text::Sidebar), Sidebar),
             MenuItem::action(language.text(Text::ShowInspector), Inspector),
             MenuItem::action(language.text(Text::SinglePage), Single),

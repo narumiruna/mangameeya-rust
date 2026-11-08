@@ -1044,6 +1044,7 @@ fn desktop_unknown_information_does_not_fabricate_dimensions_or_decode_more_page
         fixture.view.update(cx, |view, cx| {
             view.reader
                 .set_book(Arc::new(Book::open(&folder, false).unwrap()), None);
+            view.content_mode = ContentMode::Reading;
             view.errors.insert((0, false), "Invalid image data".into());
             cx.notify();
         });
