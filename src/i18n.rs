@@ -89,7 +89,8 @@ macro_rules! translations {
 translations! {
     BrowseFiles => ("Browse files", "ファイルを参照", "瀏覽檔案"),
     ContinueReading => ("Continue reading", "読書に戻る", "繼續閱讀"),
-    BrowserTab => ("Browser", "ブラウザー", "瀏覽"),
+    BrowserTab => ("Browser", "閲覧", "瀏覽"),
+    BrowserPageCount => ("Pages: {count}", "{count}ページ", "{count} 頁"),
     BrowserArea => ("File browser", "ファイルブラウザー", "檔案瀏覽區"),
     BrowserSearch => ("Search names", "名前を検索", "搜尋名稱"),
     BrowserSort => ("Sort", "並べ替え", "排序"),

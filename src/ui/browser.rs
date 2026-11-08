@@ -703,7 +703,9 @@ impl ReaderView {
                 .page_count(entry, &self.reader.settings)
                 .map_or_else(
                     || "—".to_owned(),
-                    |count| language.format(Text::PageCount, &[("count", count.to_string())]),
+                    |count| {
+                        language.format(Text::BrowserPageCount, &[("count", count.to_string())])
+                    },
                 );
             let progress = self
                 .browser
