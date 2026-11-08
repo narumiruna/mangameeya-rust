@@ -84,6 +84,7 @@ pub(super) struct BrowserUi {
     name_lines: usize,
     metadata: bool,
     scale: f32,
+    viewport_height: f32,
     generation: u64,
     listing_revision: u64,
     clock: u64,
@@ -144,6 +145,7 @@ impl BrowserUi {
             name_lines: 2,
             metadata: true,
             scale: window.scale_factor(),
+            viewport_height: 0.,
             generation: 0,
             listing_revision: 0,
             clock: 0,
@@ -192,8 +194,7 @@ impl BrowserUi {
     fn cover_key(&self, entry: &book::DirectoryEntry) -> CoverKey {
         // Include a partial row and both overscan rows. This capacity does not
         // change at each scroll offset, so decoded resolution remains stable.
-        let rows = (f32::from(self.grid.viewport_bounds().size.height).max(0.) / self.row_height())
-            .ceil() as usize;
+        let rows = (self.viewport_height.max(0.) / self.row_height()).ceil() as usize;
         let capacity = rows
             .saturating_add(3)
             .saturating_mul(self.columns)
@@ -495,6 +496,13 @@ impl ReaderView {
         let Some(listing) = &self.listing else {
             return;
         };
+        // Row render callbacks cannot borrow ListState. Capture the viewport
+        // here, outside list rendering, before selecting cover dimensions.
+        let height = f32::from(self.browser.grid.viewport_bounds().size.height);
+        if self.browser.viewport_height != height {
+            self.browser.viewport_height = height;
+            cx.notify();
+        }
         // ListState may repaint rows without rebuilding the parent view.
         // Use its current viewport, not all previously rendered rows.
         let range = self.browser.requested_range();
