@@ -1,0 +1,88 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light">
+<title>MangaMeeya｜檔案瀏覽介面提案</title>
+<style>
+:root{font-family:system-ui,-apple-system,"Segoe UI","Microsoft JhengHei",sans-serif;color:#24282e;background:#f6f3ed;line-height:1.7;--blue:#245ac5;--line:#dedbd4}*{box-sizing:border-box}body{margin:0}main{max-width:1240px;margin:auto;padding:48px 32px 32px}a{color:var(--blue);text-underline-offset:4px}a:focus-visible{outline:3px solid #245ac5;outline-offset:5px}header{border-top:3px solid #24282e;padding-top:20px;margin-bottom:48px}.eyebrow{font-size:12px;font-weight:700;letter-spacing:.15em;color:#626975}h1{font-size:clamp(32px,5vw,58px);line-height:1.2;letter-spacing:-.04em;margin:18px 0}header p{max-width:760px;color:#59616c;font-size:17px}.key{display:inline-block;background:#e9edf5;color:#264a86;padding:2px 9px;border:1px solid #d4dcec;border-radius:5px;font-family:inherit;font-size:.85em}.cards{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:24px}.card{min-width:0;display:flex;flex-direction:column}.mini{height:226px;border-radius:8px;overflow:hidden;border:1px solid #d3d0c9;position:relative;font-size:10px;line-height:1.5;user-select:none}.bar{padding:10px 12px;border-bottom:1px solid #ffffff18;display:flex;justify-content:space-between;gap:8px}.grid-mini{background:#191c23;color:#dbe0e9}.grid-mini .bar{background:#222630}.mini-toolbar{padding:10px 12px;color:#a9b1c1;display:flex;justify-content:space-between}.covers{display:grid;grid-template-columns:repeat(4,1fr);gap:9px;padding:0 12px}.cover{height:116px;background:linear-gradient(145deg,#55647b,#252d40);padding:10px 6px;color:#f6f1e9;font-weight:700;display:flex;flex-direction:column;justify-content:space-between;box-shadow:inset 3px 0 #ffffff15}.cover:nth-child(2){background:linear-gradient(140deg,#996c56,#433f54)}.cover:nth-child(3){background:linear-gradient(140deg,#667e6d,#293b48)}.cover:nth-child(4){background:linear-gradient(140deg,#9b864e,#4d4054)}.cover small{font-weight:400;font-size:9px}.mini-foot{padding:10px 12px;color:#a9b1c1}.explorer-mini{background:#fff;color:#4c5868}.explorer-mini .bar{background:#f1f4f8;border-color:#dfe5ed}.panes{display:grid;grid-template-columns:23% 50% 27%;height:190px}.tree{padding:12px 6px;background:#f7f9fc;border-right:1px solid #e2e7ef}.tree div{margin-bottom:10px;white-space:nowrap}.tree .chosen{background:#dce8ff;color:#245ac5}.detail{padding-top:8px;overflow:hidden}.row{display:grid;grid-template-columns:1fr 42px;padding:8px 5px;border-bottom:1px solid #e9edf3;white-space:nowrap}.row.selected{background:#e9f0ff;color:#245ac5}.row.head{background:#f6f8fb;font-size:9px}.preview{border-left:1px solid #e2e7ef;padding:14px 8px;text-align:center}.preview .cover{height:104px;margin-bottom:9px}.switcher-mini{background:#191c23;color:#d7d9e0}.reader-paper{position:absolute;inset:36px 15% 12px;background:repeating-linear-gradient(0deg,#626570 0 2px,#b8b8b5 2px 42px);opacity:.28}.overlay{position:absolute;inset:0 17% 0 0;background:#eee5d6;color:#51483e;box-shadow:12px 0 30px #0008}.overlay .bar{border-color:#d6cbb9}.overlay .mini-toolbar{color:#746752}.switch-list{padding:0 12px}.switch-item{display:flex;gap:10px;padding:7px 0;border-bottom:1px solid #d6cbb9;align-items:center}.tiny-cover{width:29px;height:39px;background:#7f8b80;border-left:3px solid #ffffff40;flex-shrink:0}.switch-item:nth-child(2) .tiny-cover{background:#b28a64}.switch-item small{display:block;color:#827461}.reader-label{position:absolute;right:6px;bottom:13px;writing-mode:vertical-rl;color:#c6c8cf;letter-spacing:3px}.number{color:var(--blue);font-size:12px;font-weight:700;letter-spacing:.12em;margin:22px 0 5px}h2{font-size:23px;line-height:1.4;margin:0 0 12px}.card p{font-size:14px;margin:0 0 12px;color:#59616c}.tradeoff{border-top:1px solid var(--line);padding-top:12px}.card .open{margin-top:auto;display:inline-flex;align-self:flex-start;border:1px solid #b8c9ea;border-radius:5px;padding:8px 14px;text-decoration:none;font-size:14px;font-weight:650;background:#edf2fc}.open:hover{background:#dce7fc}.section{margin-top:48px;border-top:1px solid var(--line);padding-top:24px}.section h2{font-size:20px}.table-wrap{overflow:auto}table{border-collapse:collapse;width:100%;font-size:14px;text-align:left}th,td{border-bottom:1px solid var(--line);padding:12px 14px 12px 0;vertical-align:top}th{color:#626975;font-weight:600}tbody th{color:#24282e;white-space:nowrap}.notes{display:grid;grid-template-columns:1fr 1fr;gap:32px}.notes p,.notes li{font-size:14px;color:#59616c}.notes ul{padding-left:20px;margin-top:8px}.notes li{margin-bottom:8px}footer{margin-top:36px;padding-top:18px;border-top:1px solid var(--line);font-size:12px;color:#626975}@media(max-width:950px){.cards{grid-template-columns:1fr}.card{display:grid;grid-template-columns:minmax(260px,1fr) 1fr;column-gap:24px}.mini{grid-row:1/7;height:240px}.number{margin-top:0}.card .open{margin-top:8px;justify-self:start}.notes{grid-template-columns:1fr;gap:12px}}@media(max-width:620px){main{padding:24px 18px}.card{display:flex}.mini{width:100%;height:226px}.number{margin-top:20px}.cards{gap:36px}.section{margin-top:36px}header{margin-bottom:32px}th,td{min-width:112px}.notes{gap:4px}}
+.preferred{border:2px solid var(--blue);border-radius:10px;padding:24px;margin-bottom:36px;background:#fff}.preferred .number{margin-top:0}.preferred p{color:#59616c}.preferred .open{display:inline-block;padding:10px 18px;background:#edf2fc;border:1px solid #b8c9ea;border-radius:5px;text-decoration:none;font-weight:700}.shell-mini{background:#e8ebef;border:1px solid #afb7c3;border-radius:6px;overflow:hidden;font-size:12px;margin:20px 0}.shell-top,.shell-bottom{padding:8px 12px;color:#414b5b}.shell-body{display:grid;grid-template-columns:minmax(72px,1fr) minmax(140px,3fr) minmax(72px,1fr);min-height:150px}.shell-side{padding:16px 8px;background:#f4f5f7;color:#4c5868}.shell-slot{padding:20px 10px;text-align:center;background:#000;color:#e1e5ec;display:flex;flex-direction:column;justify-content:center;gap:10px}.shell-slot strong{color:#fff}.earlier-title{font-size:25px;margin-bottom:10px}.earlier-intro{color:#59616c;margin-bottom:24px}
+</style>
+</head>
+<body>
+<main>
+<header>
+<div class="eyebrow">MANGAMEEYA / INTERFACE STUDY</div>
+<h1>從閱讀，回到檔案。</h1>
+<p>目前建議方案 04：保留既有 MangaMeeya 視窗外框，只切換中央畫布。閱讀時按 <kbd class="key">Backspace</kbd>，漫畫影像改為黑底封面／檔案網格；不是獨立書庫頁，也不是覆蓋式對話框。</p>
+</header>
+<section class="preferred" aria-labelledby="preferred-title">
+<div class="number">PREFERRED / REFINED DIRECTION · 04</div>
+<h2 id="preferred-title">整合式中央瀏覽區</h2>
+<p>依兩張新參考截圖修正：上方選單與工具列、左側內容導覽、右側閱讀工具，以及底部分頁／進度狀態列維持原位。只有中央區域在閱讀與瀏覽之間切換。</p>
+<div class="shell-mini" role="img" aria-label="方案 04 結構：固定上方選單與工具列、左右面板、底部狀態列；只有中央漫畫影像切換成黑底封面檔案網格">
+<div class="shell-top">固定：選單列 / 工具列</div>
+<div class="shell-body"><div class="shell-side">左側內容導覽<br>檔案<br>縮圖<br>最近閱讀</div><div class="shell-slot"><span>中央漫畫影像</span><strong>↓ Backspace</strong><span>黑底封面／檔案網格</span><span>Enter / 雙擊 → 新書閱讀</span></div><div class="shell-side">右側面板<br>閱讀工具<br>瀏覽設定</div></div>
+<div class="shell-bottom">固定：分頁 / 閱讀進度 / 狀態列</div>
+</div>
+<p>方案 01 的封面網格與方案 03 的閱讀情境接近需求，但前三案都未準確表達結構。方案 04 將這兩點收斂到既有視窗的中央區域，<strong>不沿用方案 03 的覆蓋層</strong>。</p>
+<a class="open" href="04-integrated.html">開啟目前建議方案 04 →</a>
+</section>
+<h2 class="earlier-title" id="earlier-title">早期三案：歷史比較</h2>
+<p class="earlier-intro">保留原提案供比較；以下三案不是目前建議的視窗結構。</p>
+<section class="cards" aria-labelledby="earlier-title">
+<article class="card">
+<div class="mini grid-mini" role="img" aria-label="方案 01 示意：深色全頁介面，工具列下方排列四張大型封面">
+<div class="bar"><b>MangaMeeya / 書庫</b><span>搜尋書名</span></div>
+<div class="mini-toolbar"><span>漫畫 / 收藏</span><span>名稱 ↑ · 資料夾優先</span></div>
+<div class="covers"><div class="cover">山間<br>紀行<small>VOL. 02</small></div><div class="cover">午後<br>書店<small>VOL. 03</small></div><div class="cover">遠方<br>之森<small>VOL. 10</small></div><div class="cover">星夜<br>列車<small>VOL. 12</small></div></div>
+<div class="mini-foot">封面網格 · 選取後開始閱讀</div>
+</div>
+<div class="number">PROPOSAL 01</div>
+<h2>封面書庫</h2>
+<p>深色全頁封面網格，以視覺辨識為主。<strong>封面呈現可供方案 04 參考，但不採用全頁書庫結構。</strong></p>
+<p class="tradeoff">優點：封面清楚、閱讀前後色調一致。<br>取捨：同一畫面可比較的檔案資訊較少。</p>
+<a class="open" href="01-grid.html">開啟方案 01 →</a>
+</article>
+<article class="card">
+<div class="mini explorer-mini" role="img" aria-label="方案 02 示意：淺色三欄介面，左側資料夾樹、中間詳細清單、右側封面預覽">
+<div class="bar"><b>檔案瀏覽</b><span>漫畫 / 收藏</span></div>
+<div class="panes"><div class="tree"><div>▾ 漫畫</div><div class="chosen">　收藏</div><div>　待閱讀</div><div>　已讀</div></div><div class="detail"><div class="row head"><span>名稱 ↑</span><span>頁數</span></div><div class="row"><span>山間紀行 2</span><span>184</span></div><div class="row selected"><span>午後書店 3</span><span>206</span></div><div class="row"><span>遠方之森 10</span><span>192</span></div><div class="row"><span>星夜列車 12</span><span>224</span></div></div><div class="preview"><div class="cover">午後<br>書店<small>VOL. 03</small></div><span>206 頁<br>已讀 38%</span></div></div>
+</div>
+<div class="number">PROPOSAL 02</div>
+<h2>詳細檔案總管</h2>
+<p>淺色三欄：資料夾樹、可排序的詳細清單、封面預覽。<strong>適合重視中繼資料比較的使用者。</strong></p>
+<p class="tradeoff">優點：日期、大小與進度容易比較。<br>取捨：欄位密度較高，窄視窗收起預覽與部分欄位。</p>
+<a class="open" href="02-explorer.html">開啟方案 02 →</a>
+</article>
+<article class="card">
+<div class="mini switcher-mini" role="img" aria-label="方案 03 示意：暖色全高書庫面板覆蓋於深色閱讀畫面上，右側仍可見閱讀內容">
+<div class="reader-paper"></div><span class="reader-label">閱讀畫面保留</span>
+<div class="overlay"><div class="bar"><b>切換書籍</b><span>書庫</span></div><div class="mini-toolbar"><span>漫畫 / 收藏</span><span>最近閱讀 ↓</span></div><div class="switch-list"><div class="switch-item"><span class="tiny-cover"></span><span>山間紀行 2<small>繼續閱讀 · 72 / 184</small></span></div><div class="switch-item"><span class="tiny-cover"></span><span>午後書店 3<small>未讀 · 206 頁</small></span></div><div class="switch-item"><span class="tiny-cover"></span><span>遠方之森 10<small>已讀完 · 192 頁</small></span></div></div></div>
+</div>
+<div class="number">PROPOSAL 03</div>
+<h2>閱讀上層書庫</h2>
+<p>暖色全高書庫覆蓋於保留的深色閱讀畫面之前。<strong>適合快速換書，並保留閱讀位置的視覺線索。</strong></p>
+<p class="tradeoff">優點：切換時仍可辨識目前閱讀內容。<br>取捨：覆蓋層可用空間較少，背景可能分散注意力。</p>
+<a class="open" href="03-switcher.html">開啟方案 03 →</a>
+</article>
+</section>
+<section class="section" aria-labelledby="compare-title">
+<h2 id="compare-title">早期三案比較</h2>
+<div class="table-wrap"><table><thead><tr><th scope="col">比較項目</th><th scope="col">01 封面書庫</th><th scope="col">02 詳細檔案總管</th><th scope="col">03 閱讀上層書庫</th></tr></thead><tbody><tr><th scope="row">主要結構</th><td>深色全頁網格</td><td>淺色三欄清單</td><td>暖色全高覆蓋層</td></tr><tr><th scope="row">主要優勢</th><td>封面辨識</td><td>中繼資料比較效率</td><td>快速切換、保留閱讀線索</td></tr><tr><th scope="row">主要成本</th><td>詳細資訊密度較低</td><td>欄位占用橫向空間</td><td>瀏覽區域較窄</td></tr><tr><th scope="row">建議用途</th><td>封面呈現參考</td><td>大量檔案整理</td><td>閱讀中尋找下一本</td></tr></tbody></table></div>
+</section>
+<section class="section notes" aria-label="共用行為與實作範圍">
+<div><h2>四案共用的操作</h2><ul>
+<li>方案 04 預設顯示閱讀畫面；早期三案預設顯示瀏覽畫面。上方模式控制可返回瀏覽或繼續閱讀。選取書籍後，按「開啟選取」、Enter 或雙擊書籍進入閱讀。</li>
+<li>方案 04 左側保留檔案／縮圖／最近閱讀；右側「瀏覽」分頁提供封面大小、檔名與中繼資料控制。兩個側欄可分別切換顯示。</li>
+<li>閱讀中按 Backspace 返回同一資料夾；瀏覽中按 Backspace 返回上一層，在根目錄不動作。編輯輸入欄位時不攔截此按鍵。</li>
+<li>提供示範資料夾導覽、搜尋，以及名稱自然／字面、修改日期、建立日期、大小、類型、頁數、閱讀進度、最近閱讀、固定種子的隨機排序。升冪／降冪與「資料夾優先」分別控制。</li>
+<li>同一頁面生命週期內保留閱讀進度與瀏覽狀態，包括捲動、排序、篩選及選取；重新載入後重設，不使用持久儲存。</li>
+</ul></div>
+<div><h2>這是介面原型，不是原生功能</h2><p>所有書籍、封面與檔案資訊均為模擬資料，不讀取檔案系統，不修改 Rust 程式。</p><p><code>src/ui.rs</code> 目前已有側邊欄的檔案瀏覽；方案 04 評估的是只切換中央畫布、保留既有視窗外框的結構。<code>src/book.rs</code> 已有自然排序與資料夾優先，本次多欄位排序僅在 HTML 原型示範，不代表原生功能已新增。</p><p>比較頁與四個原型均可離線開啟，共用本機 <code>prototype.js</code> 與 <code>shared.css</code>；方案 04 另需 <code>integrated.css</code>，請保留整個目錄。方案 04 的原生選單列與既有閱讀模式／縮放控制僅為靜態視覺示意，不代表已實作功能。原型不驗證原生 GPUI、檔案系統、OS 整合、無障礙或效能。操作與驗證步驟見 <a href="README.md">README.md</a>。</p></div>
+</section>
+<footer>上方為原創 HTML / CSS 結構示意，封面僅用原創向量圖；未嵌入或複製參考截圖。系統字型 · 無網路資源 · 模擬資料</footer>
+</main>
+</body>
+</html>

@@ -8,8 +8,12 @@ use std::{
     io::{self, Read, Write},
     path::{Path, PathBuf},
     sync::{Arc, Mutex},
+    time::SystemTime,
 };
 use zip::ZipArchive;
+
+mod cover;
+pub use cover::{CoverSource, read_cover};
 
 pub const MAX_PAGE_BYTES: u64 = 128 * 1024 * 1024;
 pub const IMAGE_EXTENSIONS: &[&str] = &["jpg", "jpeg", "jpe", "png", "gif", "bmp", "webp"];
@@ -68,9 +72,16 @@ pub struct DirectoryListing {
 #[derive(Debug, Clone)]
 pub struct DirectoryEntry {
     pub name: String,
+    /// Native child path before canonicalization; distinct aliases retain distinct identities.
+    pub entry_path: PathBuf,
+    /// Canonical read target.
     pub path: PathBuf,
     pub is_directory: bool,
     pub kind: EntryKind,
+    /// Regular-file size only; folders are not summed.
+    pub size: Option<u64>,
+    pub modified: Option<SystemTime>,
+    pub created: Option<SystemTime>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -530,7 +541,7 @@ fn read_bounded(reader: impl Read, limit: usize) -> Result<Vec<u8>, String> {
 }
 
 /// Lists folders first, then supported files, with natural case-insensitive order.
-/// Returned paths are canonical, including paths reached through symbolic links.
+/// Read targets are canonical; `entry_path` retains each native child identity.
 pub fn browse_directory(path: &Path) -> Result<DirectoryListing, String> {
     let path = canonicalize(path)?;
     if !path.is_dir() {
@@ -556,8 +567,12 @@ pub fn browse_directory(path: &Path) -> Result<DirectoryListing, String> {
         entries.push(DirectoryEntry {
             name: display_name(&file),
             path: canonicalize(&file)?,
+            entry_path: file,
             is_directory: kind == EntryKind::Folder,
             kind,
+            size: metadata.is_file().then_some(metadata.len()),
+            modified: metadata.modified().ok(),
+            created: metadata.created().ok(),
         });
     }
     entries.sort_by(|left, right| {
@@ -566,6 +581,7 @@ pub fn browse_directory(path: &Path) -> Result<DirectoryListing, String> {
             .cmp(&left.is_directory)
             .then_with(|| natord::compare_ignore_case(&left.name, &right.name))
             .then_with(|| left.name.cmp(&right.name))
+            .then_with(|| left.entry_path.cmp(&right.entry_path))
     });
     Ok(DirectoryListing {
         parent: path.parent().map(Path::to_path_buf),
@@ -1349,6 +1365,60 @@ mod tests {
             assert_error(book.save_page(0, &hard_link), "original");
             assert_eq!(fs::read(path).unwrap(), original);
         }
+    }
+
+    #[test]
+    fn directory_browser_metadata_preserves_file_size_and_optional_times() {
+        let temp = tempdir().unwrap();
+        fs::create_dir(temp.path().join("folder")).unwrap();
+        fs::write(temp.path().join("image.png"), b"image bytes").unwrap();
+        fs::write(temp.path().join("book.cbz"), b"archive bytes").unwrap();
+        let listing = browse_directory(temp.path()).unwrap();
+        for entry in &listing.entries {
+            let metadata = fs::metadata(&entry.entry_path).unwrap();
+            assert_eq!(entry.size, metadata.is_file().then_some(metadata.len()));
+            assert_eq!(entry.modified, metadata.modified().ok());
+            assert_eq!(entry.created, metadata.created().ok());
+            assert_eq!(entry.entry_path, listing.path.join(&entry.name));
+        }
+        assert_eq!(listing.entries[0].size, None);
+        assert_eq!(listing.entries[1].size, Some(13));
+        assert_eq!(listing.entries[2].size, Some(11));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn directory_browser_aliases_keep_distinct_native_entry_paths() {
+        use std::os::unix::fs::symlink;
+        let temp = tempdir().unwrap();
+        let target = temp.path().join("target.png");
+        fs::write(&target, b"target").unwrap();
+        for alias in ["alias1.png", "alias2.png"] {
+            symlink(&target, temp.path().join(alias)).unwrap();
+        }
+        let listing = browse_directory(temp.path()).unwrap();
+        assert_eq!(listing.entries.len(), 3);
+        let canonical_target = fs::canonicalize(&target).unwrap();
+        assert!(
+            listing
+                .entries
+                .iter()
+                .all(|entry| entry.path == canonical_target)
+        );
+        let identities: HashSet<_> = listing
+            .entries
+            .iter()
+            .map(|entry| &entry.entry_path)
+            .collect();
+        assert_eq!(identities.len(), 3);
+        assert_eq!(
+            listing.entries[0].entry_path,
+            listing.path.join("alias1.png")
+        );
+        assert_eq!(
+            listing.entries[1].entry_path,
+            listing.path.join("alias2.png")
+        );
     }
 
     #[test]

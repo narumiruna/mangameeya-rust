@@ -58,6 +58,9 @@ cargo run --locked -- /path/to/book.cbz
 | --- | --- |
 | Open comic / folder | `Ctrl+O` / `Ctrl+Shift+O` |
 | Save original image / close comic | `Ctrl+S` / `Ctrl+W` |
+| Browse files / go to parent folder | `Backspace` |
+| Open selected file or folder | `Enter`, double-click |
+| Refresh the file browser | `F5` |
 | Next page / previous page | `Space`, `PageDown` / `PageUp` |
 | Turn pages in the reading direction | `←`, `→` |
 | Scroll the reading area | `↑`, `↓`, mouse wheel |
@@ -73,6 +76,16 @@ cargo run --locked -- /path/to/book.cbz
 macOS also supports `Command+O`, `Command+Shift+O`, `Command+S`, `Command+W`, `Command+Q`, `Command+,`, and `Control+Command+F`.
 The mouse wheel scrolls without directly turning pages. Hold `Ctrl` while using the wheel to zoom. In single-page and two-page layouts, click the left or right edge of the reading area to turn pages.
 
+### File browser
+
+Press `Backspace` while reading to replace only the central canvas with a black cover grid. The toolbar, side panels, and status bar stay in place. Select a file, then press `Enter` or double-click it to read. Folders open in the browser; **Open this folder** reads its images. `Escape` closes a popup first, then returns to the current book before it exits fullscreen. Search inputs keep their normal text-editing keys.
+
+The browser keeps the query, sort, selection, and scroll position when you return from reading. Reading retains the page, zoom, filters, and scroll position. Browsing pauses the slideshow and disables reading controls. The **Browser** tools tab controls cover size, file names, and metadata. These browser preferences are not saved between launches.
+
+Sort by natural or literal name, modified or created time, size, type, known page count, known reading progress, recent-open order, or a fixed random order. Folder grouping is independent of sort direction; unknown values stay last. Counts come only from opened books or visible cover reads. Sorting does not scan all archives. Recent-open order is not a last-read timestamp.
+
+Covers load only near the viewport, with at most two jobs and a 32 MiB pixel cache. Dense high-DPI grids use a lower cover resolution so the visible and nearby rows fit that budget. Folder covers use the first image at the top level. Automatic ZIP/CBZ covers require a classic single-volume Stored/Deflated archive within 64 MiB, 4096 entries, and 2 MiB of metadata. RAR/CBR, ZIP64, unsupported layouts, and over-limit sources show a format icon and a reason. Manual book opening is unchanged. Press `F5` to retry and discard stale covers and counts. Source comics are never changed.
+
 ### Toolbar and panels
 
 The toolbar groups file commands, panels, reading modes, zoom, reading direction, bookmarks, reading tools, and fullscreen.
@@ -84,7 +97,8 @@ The interface continues to use GPUI Kit, ActiveTheme, and Lucide icons.
 You can hide each side panel independently and drag its edge to change its width. Panel visibility and preferred widths are saved and restored.
 
 - The left panel keeps the **File / Thumbnails / Recent** tabs. Thumbnails keep their aspect ratio. Page numbers and file names are separate; tooltips show full file names.
-- The right **Reading tools** panel has only two tabs:
+- The right **Reading tools** panel has three tabs:
+  - **Browser**: cover size, file-name display and line count, and metadata display.
   - **Image**: brightness, contrast, grayscale, rotation, and **Reset filters**. Reset filters changes only brightness, contrast, and grayscale, not rotation or reading preferences.
   - **Playback**: slideshow playback and a 1–120 second interval.
 

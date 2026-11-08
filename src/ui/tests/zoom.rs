@@ -780,6 +780,7 @@ fn pending_geometry_disables_only_manual_controls_and_book_lifecycle_closes_pane
         fixture.view.update(cx, |view, cx| {
             view.reader
                 .set_book(Arc::new(Book::open(&first, false).unwrap()), None);
+            view.content_mode = ContentMode::Reading;
             cx.notify();
         });
         window.render_frame(cx);

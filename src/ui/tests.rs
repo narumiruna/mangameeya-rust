@@ -3,6 +3,8 @@ use crate::i18n::Language;
 use gpui_kit::{AnyWindowHandle, TestAppContext, test::TestWindowExt};
 use tempfile::TempDir;
 
+mod browser;
+mod browser_lifecycle;
 mod desktop;
 mod i18n;
 mod preferences;
@@ -599,6 +601,7 @@ fn visible_animated_thumbnails_remain_cached_above_the_budget(cx: &mut TestAppCo
     fixture.view.update(cx, |view, cx| {
         view.reader
             .set_book(Arc::new(Book::open(&folder, false).unwrap()), None);
+        view.content_mode = ContentMode::Reading;
         for index in 0..3 {
             view.thumbs.insert(index, animated_thumbnail());
         }

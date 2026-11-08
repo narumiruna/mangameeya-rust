@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="color-scheme" content="dark light">
+  <link rel="icon" href="data:,">
+  <link rel="stylesheet" href="shared.css">
+  <title>01 把資料夾，變成書架。 — MangaMeeya 檔案瀏覽提案</title>
+  <script src="prototype.js" defer></script>
+</head>
+<body class="grid" data-variant="grid">
+  <header class="study">
+    <div><div class="eyebrow">01 / COVER FIRST / 封面優先</div><h1>把資料夾，變成書架。</h1><p>全畫面黑底封面網格。最接近參考圖，讓找書與閱讀成為兩個清楚的模式。</p></div>
+    <nav aria-label="方案切換"><a class="compare-link" href="index.html">← 比較方案</a><a href="01-grid.html" aria-current="page">方案 01</a><a href="02-explorer.html">方案 02</a><a href="03-switcher.html">方案 03</a></nav>
+  </header>
+  <main class="app mode-browser" id="app">
+    <div class="titlebar"><div class="brand"><span class="brand-mark" aria-hidden="true"></span>MangaMeeya <small>FILE BROWSER CONCEPT 01</small></div><span class="title-note">互動原型 · 示範檔案</span></div>
+    <div class="stage">
+        <section class="browser" id="browser" role="region" aria-label="01 檔案瀏覽" tabindex="-1">
+          <header class="browser-heading">
+            <div class="heading-copy"><h2>檔案瀏覽</h2><nav class="breadcrumbs" aria-label="目前資料夾"></nav></div>
+            <div class="sort-group"><button class="action" data-action="resume"><span data-icon="back" aria-hidden="true"></span>繼續閱讀</button>
+              <button class="action primary" data-action="open"><span data-icon="play" aria-hidden="true"></span>開啟選取<kbd>Enter</kbd></button></div>
+          </header>
+          <div class="toolbar"><label class="search"><span data-icon="search" aria-hidden="true"></span><input id="search" type="search" aria-label="搜尋目前資料夾" placeholder="搜尋目前資料夾…" autocomplete="off"></label><span class="toolbar-spacer"></span><div class="sort-group"><label for="sort">排序</label><select id="sort">
+                <option value="natural">名稱（自然排序）</option>
+                <option value="name">名稱（文字排序）</option>
+                <option value="modified">修改日期</option><option value="created">建立日期</option>
+                <option value="size">檔案大小</option><option value="type">檔案類型</option>
+                <option value="pages">頁數</option><option value="progress">閱讀進度</option>
+                <option value="lastRead">最近閱讀</option><option value="random">隨機排序</option>
+              </select>
+              <button class="icon-button" data-action="reverse" aria-label="目前為升冪；切換為降冪" title="切換升冪／降冪"><span data-icon="ascending" aria-hidden="true"></span></button>
+              <button class="icon-button" data-action="shuffle" aria-label="重新隨機排序" title="重新洗牌" hidden><span data-icon="shuffle" aria-hidden="true"></span></button></div>
+            <label class="check-label"><input id="folders-first" type="checkbox" checked>資料夾優先</label>
+            <label class="size-control" for="tile-size"><span data-icon="grid" aria-hidden="true"></span><input id="tile-size" type="range" min="115" max="215" value="157" aria-label="封面尺寸"></label></div>
+          <div class="results-line"><span data-results aria-live="polite"></span><span class="interaction-note">單擊選取 · 雙擊或 Enter 開啟</span></div><div class="browser-scroll" id="browser-scroll"><div class="cover-grid" id="entries" role="listbox" aria-label="示範檔案與資料夾"></div></div><footer class="statusbar"><span class="selection-status" data-selection-status></span>
+            <div class="key-hints"><span><kbd>↑ ↓ ← →</kbd>選取</span><span><kbd>Enter</kbd>開啟</span><span><kbd>Backspace</kbd>上一層</span></div></footer>
+        </section>
+        <section class="reader" id="reader" aria-label="示範閱讀模式" tabindex="-1">
+          <header class="reader-toolbar"><button class="action" data-action="browse"><span data-icon="back" aria-hidden="true"></span>檔案瀏覽<kbd>Backspace</kbd></button>
+            <div class="reader-title"><strong data-reader-title></strong><small>原創示意漫畫 · 模擬閱讀，不讀取磁碟</small></div><span class="reader-tag">READING MODE</span></header>
+          <div class="reader-scroll" id="reader-scroll"><img class="reader-page" id="reading-page" alt="原創示意漫畫"></div>
+          <footer class="reader-footer"><button class="icon-button" data-action="previous" aria-label="上一頁"><span data-icon="left" aria-hidden="true"></span></button>
+            <span class="page-count" data-page-count></span><button class="icon-button" data-action="next" aria-label="下一頁"><span data-icon="right" aria-hidden="true"></span></button></footer>
+        </section>
+      <div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
+    </div>
+  </main>
+  <footer class="caption"><span>模式明確，封面優先。<strong>Backspace 返回同一個資料夾與捲動位置。</strong></span><span class="scope">僅 HTML 提案 · 尚未實作於 Rust</span></footer>
+  <noscript>此互動原型需要 JavaScript。原型不會讀取本機檔案或連線外部服務。</noscript>
+</body>
+</html>

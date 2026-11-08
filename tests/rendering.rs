@@ -1016,6 +1016,274 @@ fn capture_preferences_errors(cx: &mut HeadlessAppContext, temporary: &Path, fol
     }
 }
 
+fn browser_shell_bounds(window: &Window) -> Vec<Option<Bounds<gpui_kit::Pixels>>> {
+    let mut bounds: Vec<_> = [
+        "reader-toolbar",
+        "reader-status",
+        "sidebar",
+        "inspector",
+        "viewer",
+    ]
+    .into_iter()
+    .map(|id| window.try_find(id).map(|node| node.bounds()))
+    .collect();
+    bounds.extend((0..7usize).map(|index| Some(window.find(("menu", index)).bounds())));
+    bounds
+}
+
+fn browser_controls_in_bounds(window: &Window, language: Language) {
+    assert_desktop_geometry(window, language);
+    let disjoint = |a: Bounds<_>, b: Bounds<_>| {
+        assert!(
+            a.right() <= b.left() + px(0.5)
+                || b.right() <= a.left() + px(0.5)
+                || a.bottom() <= b.top() + px(0.5)
+                || b.bottom() <= a.top() + px(0.5),
+            "browser controls overlap: {a:?}, {b:?}"
+        );
+    };
+    let toolbar = window.find("reader-toolbar").bounds();
+    let toggle = window.find("browser-toggle");
+    assert!(contains_bounds(toolbar, toggle.bounds()));
+    assert!(!toggle.label().unwrap_or_default().is_empty());
+    for id in [
+        "open",
+        "sidebar-toggle",
+        "mode-single",
+        "mode-spread",
+        "mode-continuous",
+        "zoom-trigger",
+        "direction",
+        "bookmark",
+        "inspector-toggle",
+        "fullscreen",
+        "preferences",
+    ] {
+        disjoint(toggle.bounds(), window.find(id).bounds());
+    }
+    let central = window.find("viewer").bounds();
+    let grid = window.find("browser-grid").bounds();
+    assert!(contains_bounds(central, grid));
+    let ids = [
+        "browser-search",
+        "browser-parent",
+        "browser-sort",
+        "browser-reverse",
+        "browser-folders-first",
+        "browser-shuffle",
+        "browser-refresh",
+        "browser-open",
+        "browser-resume",
+    ];
+    for (index, id) in ids.iter().enumerate() {
+        let control = window.find(*id);
+        assert!(control.visible(), "browser control: {language:?}, {id}");
+        assert!(
+            !control.label().unwrap_or_default().is_empty(),
+            "{id} needs a name"
+        );
+        assert!(
+            contains_bounds(central, control.bounds()),
+            "{id} must stay in the central slot"
+        );
+        disjoint(control.bounds(), grid);
+        for other in &ids[index + 1..] {
+            disjoint(control.bounds(), window.find(*other).bounds());
+        }
+    }
+    if let Some(inspector) = window.try_find("inspector") {
+        let tab = window.find("inspector-browser");
+        assert!(contains_bounds(inspector.bounds(), tab.bounds()));
+        for id in ["inspector-image", "inspector-playback"] {
+            disjoint(tab.bounds(), window.find(id).bounds());
+        }
+    }
+}
+
+// Use separate windows and settings files. Do not change the existing reader workflow.
+fn capture_browser_states(cx: &mut HeadlessAppContext, temporary: &Path, folder: &Path) {
+    let source = folder.join("2.png").canonicalize().unwrap();
+    let original_bytes = std::fs::read(&source).unwrap();
+    let original_windows = cx.update(|cx| cx.windows().len());
+    for language in Language::ALL {
+        let mut settings = AppSettings::default();
+        settings.preferences.language = language;
+        settings.preferences.panel_layout.sidebar_width = 272;
+        settings.preferences.panel_layout.inspector_width = 300;
+        let (sender, launches) = mpsc::channel();
+        let (reader, view) = open_reader_fixture(
+            cx,
+            temporary.join(format!("browser-{}.json", language.code())),
+            settings,
+            None,
+            launches,
+        );
+        settle(cx, reader);
+        cx.update_window(reader, |_, window, cx| {
+            assert!(window.find("browser-grid").visible());
+            assert_eq!(window.find("browser-resume").disabled(), Some(true));
+            window.press("escape", cx);
+            assert!(window.find("browser-grid").visible());
+        })
+        .unwrap();
+        sender.send(vec![source.clone()]).unwrap();
+        settle(cx, reader);
+        assert_eq!(page(cx, reader), "2");
+        for (width, height, suffix) in [
+            (1280., 800., "1280x800"),
+            (960., 640., "960x640"),
+            (800., 540., "800x540"),
+        ] {
+            cx.update_window(reader, |_, window, cx| {
+                window.resize(size(px(width), px(height)));
+                window.bounds_changed(cx);
+            })
+            .unwrap();
+            settle(cx, reader);
+            for (toggle, panels) in [
+                (None, "both"),
+                (Some("sidebar-toggle"), "right"),
+                (Some("inspector-toggle"), "neither"),
+                (Some("sidebar-toggle"), "left"),
+            ] {
+                if let Some(toggle) = toggle {
+                    cx.update_window(reader, |_, window, cx| window.click(toggle, cx))
+                        .unwrap();
+                    settle(cx, reader);
+                }
+                let before = cx
+                    .update_window(reader, |_, window, cx| {
+                        window.click("viewer", cx);
+                        assert_desktop_geometry(window, language);
+                        assert_eq!(window.find("page-input").value(), Some("2"));
+                        browser_shell_bounds(window)
+                    })
+                    .unwrap();
+                snapshot(
+                    cx,
+                    reader,
+                    &format!("browser-{}-{suffix}-{panels}-reading", language.code()),
+                );
+                cx.update_window(reader, |_, window, cx| window.press("backspace", cx))
+                    .unwrap();
+                settle(cx, reader);
+                cx.update_window(reader, |_, window, _| {
+                    assert_eq!(
+                        browser_shell_bounds(window),
+                        before,
+                        "only central content can change"
+                    );
+                    browser_controls_in_bounds(window, language);
+                    assert_eq!(window.find("browser-search").value(), Some(""));
+                    assert_eq!(
+                        window
+                            .within("browser-grid")
+                            .find_by_label("2.png")
+                            .checked(),
+                        Some(true)
+                    );
+                    assert_eq!(window.find("next").disabled(), Some(true));
+                    assert_eq!(window.find("zoom-trigger").disabled(), Some(true));
+                })
+                .unwrap();
+                snapshot(
+                    cx,
+                    reader,
+                    &format!("browser-{}-{suffix}-{panels}-browsing", language.code()),
+                );
+                // Text editing must not run the browser Backspace or Enter commands.
+                cx.update_window(reader, |_, window, cx| {
+                    window.click("browser-search", cx);
+                    window.input("2.pngx", cx);
+                    window.press("backspace", cx);
+                    window.press("enter", cx);
+                    assert_eq!(window.find("browser-search").value(), Some("2.png"));
+                    assert!(window.find("browser-grid").visible());
+                    window.press(
+                        if cfg!(target_os = "macos") {
+                            "cmd-a"
+                        } else {
+                            "ctrl-a"
+                        },
+                        cx,
+                    );
+                    window.press("backspace", cx);
+                    // Resume explicitly. Clicking the grid's center can select
+                    // a different tile and is not a neutral way to blur search.
+                    window.click("browser-resume", cx);
+                })
+                .unwrap();
+                settle(cx, reader);
+                cx.update_window(reader, |_, window, _| {
+                    assert!(window.try_find("browser-grid").is_none());
+                    assert_eq!(window.find("page-input").value(), Some("2"));
+                    assert_eq!(browser_shell_bounds(window), before);
+                })
+                .unwrap();
+            }
+            cx.update_window(reader, |_, window, cx| window.click("inspector-toggle", cx))
+                .unwrap();
+            settle(cx, reader);
+        }
+        // Browser tools use the existing inspector, not a new window or overlay.
+        cx.update_window(reader, |_, window, cx| {
+            window.click("browser-toggle", cx);
+            window.click("inspector-browser", cx);
+            assert!(window.find("browser-tools").visible());
+            assert_eq!(window.find("inspector-browser").checked(), Some(true));
+            assert!(contains_bounds(
+                window.find("inspector").bounds(),
+                window.find("inspector-content").bounds()
+            ));
+        })
+        .unwrap();
+        // The existing inspector is scrollable. At minimum window height its
+        // content may be taller than the pane; each control must be reachable.
+        for id in [
+            "browser-tile-width",
+            "browser-show-names",
+            "browser-metadata",
+        ] {
+            let mut reached = false;
+            for _ in 0..16 {
+                reached = cx
+                    .update_window(reader, |_, window, _| {
+                        contains_bounds(
+                            window.find("inspector-content").bounds(),
+                            window.find(id).bounds(),
+                        )
+                    })
+                    .unwrap();
+                if reached {
+                    break;
+                }
+                cx.update_window(reader, |_, window, cx| {
+                    window.scroll(
+                        "inspector-content",
+                        ScrollDelta::Pixels(point(px(0.), px(-64.))),
+                        cx,
+                    );
+                })
+                .unwrap();
+                settle(cx, reader);
+            }
+            assert!(reached, "browser tool must be scroll-reachable: {id}");
+        }
+        cx.update_window(reader, |_, window, cx| window.click("browser-resume", cx))
+            .unwrap();
+        settle(cx, reader);
+        assert_eq!(page(cx, reader), "2");
+        assert_eq!(cx.update(|cx| cx.windows().len()), original_windows + 1);
+        cx.update_window(reader, |_, window, _| window.remove_window())
+            .unwrap();
+        cx.run_until_parked();
+        drop(view);
+        drop(sender);
+        assert_eq!(cx.update(|cx| cx.windows().len()), original_windows);
+    }
+    assert_eq!(std::fs::read(source).unwrap(), original_bytes);
+}
+
 fn open_reader(
     cx: &mut HeadlessAppContext,
     settings_path: PathBuf,
@@ -1095,6 +1363,7 @@ fn main() {
             .save(folder.join(format!("{}.png", index + 1)))
             .unwrap();
     }
+    capture_browser_states(&mut cx, temporary.path(), &folder);
     let settings_path = temporary.path().join("settings.json");
     let (sender, launches) = mpsc::channel();
     let (window, view) = open_reader(&mut cx, settings_path.clone(), launches);
