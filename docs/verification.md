@@ -619,8 +619,9 @@ that documentation-only head before the PR is marked ready.
 
 Implementation started on 2026-11-09 from `798ce33`, the current `origin/main`, on
 `narumi/feat/expandable-files-tree`. The selected reference is design 02 under
-`docs/files-sidebar-concepts/`. The execution plan is
-`docs/plans/2026-11-09_expandable-files-tree-plan.md`.
+`docs/files-sidebar-concepts/`. The completed execution plan at
+`docs/plans/2026-11-09_expandable-files-tree-plan.md` was removed after verification.
+This section retains its results, external handoff, and recovery instructions.
 
 ### Scope and native behavior
 
@@ -677,6 +678,7 @@ repository build configuration were changed.
 | Release/version/DMG mock tests with the pinned CLI | 21 passed; GitHub and packaging actions are mocked |
 | Local HTML prototype verification | 459 checks passed in Chromium 156.0.8078.4, offline |
 | Diff and intended-path whitespace checks | Passed |
+| Normal CI on source head `bb21149` | All five jobs passed; Windows 333 tests, Linux and each macOS architecture 335 tests; no failures or ignored tests |
 
 The Windows full-suite failure is
 `instance::tests::queue_is_bounded_and_rejects_overflow`, which reports Winsock
@@ -685,7 +687,7 @@ change and in an isolated rerun. The baseline additionally failed
 `forwards_paths_and_empty_focus_requests` and
 `rejects_oversized_payloads_and_path_counts`. No IPC source, assertions, test
 parallelism, or workflow was changed. The Linux pass does not replace Windows
-execution evidence. **The Windows full suite is not reported as passing, and the
+execution evidence. **The local Windows full suite is not reported as passing, and the
 existing required CI gates still apply before merge or release.**
 
 Logs are under ignored `target/files-tree/`: `baseline-*`, `model-final-tests.log`,
@@ -747,35 +749,63 @@ in an OS temporary directory. These files are local evidence, not tracked source
   reader bundle now embeds them. The asset test checks all Files control and
   entry icons, and failed on the missing archive asset before the fix. Local full
   suites then passed all changed code; the same Windows IPC failure remained.
-  Post-fix macOS capture verification is pending normal CI.
+  Post-fix Metal captures from both macOS architectures show the Locate and image
+  icons. Archive-icon bytes are covered by the asset test.
 - Existing reader and central-browser rendering workflows remain unchanged. Local
   Windows and Linux rendering verifies native events and geometry, not Metal
-  pixels. The rendering test emits `target/ui-smoke/files-*.png` on macOS; those
-  platform captures were not produced locally and are not claimed as local visual
-  evidence. The HTML screenshots are not native evidence.
+  pixels. Normal CI produced the Metal captures reviewed below. These remote
+  captures are native evidence; the HTML screenshots are not.
 
-The initial implementation at `6b157bc` passed all five jobs in
-[CI run 42520274379](https://github.com/narumiruna/mangameeya-rust/actions/runs/42520274379),
-including normal Windows tests, both macOS architectures, Linux, release checks,
-and production rendering. This demonstrates a clean CI Windows execution; it does
-not change the local Windows failure into a pass. The subsequent path/focus and
-embedded-icon fixes require their own normal CI evidence before plan retirement.
+Source head `bb21149` passed all five jobs in
+[CI run 42525195253](https://github.com/narumiruna/mangameeya-rust/actions/runs/42525195253):
+Windows MSVC, Linux, arm64 macOS, Intel macOS, and release configuration/recovery.
+The normal parallel full suites passed 333 Windows tests and 335 tests on each
+other target, with none ignored. Formatting, production rendering, all-target
+Clippy, note validation, packaging, and installer checks also passed. The release
+mock suite passed 21 tests. This provides clean CI Windows evidence without
+changing the disclosed local Windows failure into a pass. No gate was waived.
+The downloaded log is `target/files-tree/ci-source.log`.
 
 The complete change was reviewed for correctness, security, lifecycle safety,
 compatibility, regressions, and scope. The Windows baseline failure remains disclosed;
 no assertion or required CI gate was removed to hide it.
 
+### Native capture review
+
+- Before: the [supplied Windows screenshot](https://sharex.narumi.dev/2026/11/09/SNbdxfuJb7LvraT2.png)
+  is retained locally as `target/files-tree/review-before.png`. It shows the flat
+  centered rows, disclosure-like text, duplicate verbatim paths, and page count in
+  the Files header.
+- After: source CI run 42525195253 provides
+  `mangameeya-rust-ui-smoke-aarch64-apple-darwin` and
+  `mangameeya-rust-ui-smoke-x86_64-apple-darwin`. Each artifact has 108 Files images
+  for the 54 matrix cases and their End-key states. Downloads are under ignored
+  `target/files-tree/ci-source-arm64/` and `ci-source-intel/`.
+- Inspected arm64 captures:
+  - `files-zh-Hant-1280x800-w224-reading.png`
+  - `files-ja-800x540-w216-browsing-end.png`
+  - `files-en-960x640-w320-browsing.png`
+- Inspected Intel captures:
+  - `files-zh-Hant-800x540-w216-reading-end.png`
+  - `files-en-1280x800-w320-browsing.png`
+- The inspected captures show separate disclosures, fixed icon columns, readable
+  left-aligned names, Locate and image icons, a current-book marker, and separate
+  reading actions. Controls remain visible at the smallest inspected size; the
+  End-key state reaches the truncated long name. These checks supplement native
+  geometry assertions; they do not establish full accessibility or usability
+  acceptance. The source screenshot and CI fixtures use different platforms and
+  content, so this is a structural comparison, not a pixel-diff test.
+
 ### Retained Files handoff and recovery
 
-- **Platform maintainer:** Prerequisites: the PR head, normal required CI results,
-  native toolchains, and a desktop at the intended scaling. Run the macOS arm64 and
-  Intel suites and inspect their Files captures; assess the disclosed Windows IPC
-  baseline failure under normal CI. Inspect physical shortcuts, IME composition,
+- **Platform maintainer:** Prerequisites: the PR head, the recorded CI results and
+  captures, and a desktop at the intended scaling. CI covers all four native
+  targets and macOS Metal output. Inspect physical shortcuts, IME composition,
   assistive-technology announcements, native fonts, high-DPI layout, and real UNC
-  shares. Expected result: platform-specific execution and visual evidence. Local
-  headless Windows/WSL checks do not establish these physical paths or macOS pixels.
-  Keep all existing merge/release gates; do not call the Windows local suite or
-  unexecuted platforms verified.
+  shares. Expected result: physical desktop and platform-specific evidence for
+  these still-unverified paths. Headless tests and inspected captures do not
+  establish these behaviors. Keep all existing merge/release gates; do not call
+  the Windows local suite or unexecuted physical checks verified.
 - **Product maintainer:** With native captures available from supported platform
   execution, compare design 02 for hierarchy clarity, loaded-only search wording,
   and reading comfort. Expected result: a visual/usability assessment. This
