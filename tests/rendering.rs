@@ -13,19 +13,351 @@ use mangameeya_rust::{
 };
 use std::{
     io::Write,
-    path::PathBuf,
+    path::{Path, PathBuf},
     sync::{Arc, mpsc},
     time::Duration,
 };
 
 fn settle(cx: &mut HeadlessAppContext, window: AnyWindowHandle) {
+    settle_windows(cx, &[window]);
+}
+
+fn settle_windows(cx: &mut HeadlessAppContext, windows: &[AnyWindowHandle]) {
     for _ in 0..8 {
         cx.advance_clock(Duration::from_millis(100));
         cx.run_until_parked();
-        cx.update_window(window, |_, window, cx| window.render_frame(cx))
-            .unwrap();
+        for window in windows {
+            cx.update_window(*window, |_, window, cx| window.render_frame(cx))
+                .unwrap();
+        }
     }
     cx.run_until_parked();
+}
+
+fn open_preferences(
+    cx: &mut HeadlessAppContext,
+    reader: AnyWindowHandle,
+    view: &Entity<ReaderView>,
+) -> AnyWindowHandle {
+    let geometry = |window: &mut Window| {
+        (
+            window.find("viewer").bounds(),
+            window.try_find("sidebar").map(|node| node.bounds()),
+            window.try_find("inspector").map(|node| node.bounds()),
+            window
+                .try_find("inspector-image")
+                .map(|node| node.checked()),
+            window
+                .try_find("inspector-playback")
+                .map(|node| node.checked()),
+            window.find("page-input").value().unwrap().to_owned(),
+        )
+    };
+    let before = cx
+        .update_window(reader, |_, window, _| geometry(window))
+        .unwrap();
+    cx.update_window(reader, |_, window, cx| window.click("preferences", cx))
+        .unwrap();
+    cx.run_until_parked();
+    let preferences = cx.update(|cx| view.read(cx).preferences_window().unwrap());
+    assert_ne!(reader, preferences);
+    settle_windows(cx, &[reader, preferences]);
+    let after = cx
+        .update_window(reader, |_, window, _| geometry(window))
+        .unwrap();
+    assert_eq!(
+        before, after,
+        "Preferences must not change reader geometry or state"
+    );
+    cx.update_window(reader, |_, window, cx| window.click("preferences", cx))
+        .unwrap();
+    settle_windows(cx, &[reader, preferences]);
+    assert_eq!(
+        cx.update(|cx| view.read(cx).preferences_window()),
+        Some(preferences)
+    );
+    preferences
+}
+
+fn contains_bounds(outer: Bounds<gpui_kit::Pixels>, inner: Bounds<gpui_kit::Pixels>) -> bool {
+    inner.size.width > px(0.)
+        && inner.size.height > px(0.)
+        && inner.left() >= outer.left() - px(0.5)
+        && inner.top() >= outer.top() - px(0.5)
+        && inner.right() <= outer.right() + px(0.5)
+        && inner.bottom() <= outer.bottom() + px(0.5)
+}
+
+fn preference_in_view(window: &Window, id: &str) -> bool {
+    let control = window.find(id.to_owned());
+    control.visible()
+        && contains_bounds(
+            window.find("preferences-content").bounds(),
+            control.bounds(),
+        )
+}
+
+fn scroll_preferences(
+    cx: &mut HeadlessAppContext,
+    reader: AnyWindowHandle,
+    preferences: AnyWindowHandle,
+    delta: f32,
+) {
+    cx.update_window(preferences, |_, window, cx| {
+        window.scroll(
+            "preferences-content",
+            ScrollDelta::Pixels(point(px(0.), px(delta))),
+            cx,
+        );
+    })
+    .unwrap();
+    settle_windows(cx, &[reader, preferences]);
+}
+
+fn reach_preference(
+    cx: &mut HeadlessAppContext,
+    reader: AnyWindowHandle,
+    preferences: AnyWindowHandle,
+    id: &str,
+) {
+    scroll_preferences(cx, reader, preferences, 10_000.);
+    for _ in 0..24 {
+        if cx
+            .update_window(preferences, |_, window, _| preference_in_view(window, id))
+            .unwrap()
+        {
+            return;
+        }
+        scroll_preferences(cx, reader, preferences, -64.);
+    }
+    panic!("Preferences control must be scroll-reachable: {id}");
+}
+
+fn assert_preferences_hierarchy(window: &mut Window, language: Language, error: bool) {
+    let viewport = Bounds::new(Default::default(), window.viewport_size());
+    let root = window.find("preferences-window");
+    assert_eq!(root.label(), Some(language.text(Text::Preferences)));
+    assert!(contains_bounds(viewport, root.bounds()));
+    let content = window
+        .within("preferences-window")
+        .find("preferences-content");
+    let tip = window
+        .within("preferences-window")
+        .find("settings-save-tip");
+    assert_eq!(tip.label(), Some(language.text(Text::PreferencesAutosave)));
+    assert!(tip.visible() && contains_bounds(viewport, tip.bounds()));
+    assert!(content.bounds().bottom() <= tip.bounds().top() + px(0.5));
+    let reading = window
+        .within("preferences-content")
+        .find("reading-preferences");
+    let general = window
+        .within("preferences-content")
+        .find("general-preferences");
+    assert_eq!(reading.label(), Some(language.text(Text::ReadingTab)));
+    assert_eq!(general.label(), Some(language.text(Text::GeneralSettings)));
+    assert!(reading.bounds().bottom() < general.bounds().top());
+    for id in [
+        "remember-position",
+        "reading-direction-rtl",
+        "reading-direction-ltr",
+        "黑色",
+        "深灰",
+        "紙色",
+    ] {
+        let control = window.within("reading-preferences").find(id);
+        assert!(
+            contains_bounds(reading.bounds(), control.bounds()),
+            "Reading child: {id}"
+        );
+    }
+    for choice in Language::ALL {
+        let id = format!("language-{}", choice.code());
+        let control = window.within("general-preferences").find(id);
+        assert_eq!(control.label(), Some(choice.native_name()));
+        assert_eq!(control.checked(), Some(choice == language));
+        assert!(contains_bounds(general.bounds(), control.bounds()));
+    }
+    for (id, text) in [
+        ("remember-position", Text::RememberPosition),
+        ("reading-direction-rtl", Text::DirectionRtl),
+        ("reading-direction-ltr", Text::DirectionLtr),
+        ("黑色", Text::Black),
+        ("深灰", Text::Gray),
+        ("紙色", Text::Paper),
+    ] {
+        assert_eq!(window.find(id).label(), Some(language.text(text)));
+    }
+    assert_eq!(window.try_find("reset-corrupt-settings").is_some(), error);
+    if error {
+        let warning = window.find("settings-save-error");
+        assert_eq!(warning.role(), Some(gpui_kit::Role::Alert));
+        assert!(warning.label().unwrap().contains("settings.json"));
+        assert_eq!(
+            window.find("reset-corrupt-settings").label(),
+            Some(language.text(Text::BackupReset))
+        );
+    }
+    assert!(window.try_find("inspector-image").is_none());
+    assert!(window.try_find("page-input").is_none());
+}
+
+fn capture_preferences_sizes(
+    cx: &mut HeadlessAppContext,
+    reader: AnyWindowHandle,
+    preferences: AnyWindowHandle,
+    language: Language,
+    error: bool,
+) {
+    let mut controls = vec![
+        "remember-position",
+        "reading-direction-rtl",
+        "reading-direction-ltr",
+        "黑色",
+        "深灰",
+        "紙色",
+        "language-en",
+        "language-ja",
+        "language-zh-Hant",
+    ];
+    if error {
+        controls.extend(["settings-save-error", "reset-corrupt-settings"]);
+    }
+    for (width, height, suffix) in [(560., 520., "560x520"), (440., 360., "440x360")] {
+        cx.update_window(preferences, |_, window, cx| {
+            window.resize(size(px(width), px(height)));
+            window.bounds_changed(cx);
+        })
+        .unwrap();
+        scroll_preferences(cx, reader, preferences, 10_000.);
+        let name = format!(
+            "preferences-{}-{suffix}-{}",
+            language.code(),
+            if error { "error" } else { "healthy" }
+        );
+        cx.update_window(preferences, |_, window, _| {
+            assert_eq!(window.viewport_size(), size(px(width), px(height)));
+            assert_preferences_hierarchy(window, language, error);
+        })
+        .unwrap();
+        snapshot(cx, preferences, &name);
+        let mut reached = vec![false; controls.len()];
+        for _ in 0..24 {
+            cx.update_window(preferences, |_, window, _| {
+                for (index, id) in controls.iter().enumerate() {
+                    reached[index] |= preference_in_view(window, id);
+                    let a = window.find(*id).bounds();
+                    for other in &controls[index + 1..] {
+                        let b = window.find(*other).bounds();
+                        assert!(
+                            a.right() <= b.left() + px(0.5)
+                                || b.right() <= a.left() + px(0.5)
+                                || a.bottom() <= b.top() + px(0.5)
+                                || b.bottom() <= a.top() + px(0.5),
+                            "Preferences controls overlap: {id}, {other}"
+                        );
+                    }
+                }
+            })
+            .unwrap();
+            if reached.iter().all(|reached| *reached) {
+                break;
+            }
+            scroll_preferences(cx, reader, preferences, -64.);
+        }
+        for (id, reached) in controls.iter().zip(reached) {
+            assert!(
+                reached,
+                "{language:?} {suffix}: control must be fully visible or scroll-reachable: {id}"
+            );
+        }
+        scroll_preferences(cx, reader, preferences, -10_000.);
+        snapshot(cx, preferences, &format!("{name}-scrolled"));
+    }
+}
+
+fn capture_preferences_states(
+    cx: &mut HeadlessAppContext,
+    reader: AnyWindowHandle,
+    view: &Entity<ReaderView>,
+) {
+    let preferences = open_preferences(cx, reader, view);
+    // Exercise selected states through production callbacks, not direct model mutation.
+    for (id, selected) in [
+        ("remember-position", false),
+        ("remember-position", true),
+        ("reading-direction-ltr", true),
+        ("reading-direction-ltr", true),
+        ("reading-direction-rtl", true),
+        ("深灰", true),
+        ("紙色", true),
+        ("黑色", true),
+    ] {
+        reach_preference(cx, reader, preferences, id);
+        cx.update_window(preferences, |_, window, cx| window.click(id, cx))
+            .unwrap();
+        settle_windows(cx, &[reader, preferences]);
+        cx.update_window(preferences, |_, window, _| {
+            assert_eq!(window.find(id).checked(), Some(selected))
+        })
+        .unwrap();
+    }
+    for language in Language::ALL {
+        let id = format!("language-{}", language.code());
+        reach_preference(cx, reader, preferences, &id);
+        cx.update_window(preferences, |_, window, cx| window.click(id, cx))
+            .unwrap();
+        settle_windows(cx, &[reader, preferences]);
+        cx.update_window(preferences, |_, window, _| {
+            assert_eq!(window.find("remember-position").checked(), Some(true));
+            assert_eq!(window.find("reading-direction-rtl").checked(), Some(true));
+            assert_eq!(window.find("reading-direction-ltr").checked(), Some(false));
+            for id in ["黑色", "深灰", "紙色"] {
+                assert_eq!(window.find(id).checked(), Some(id == "黑色"));
+            }
+        })
+        .unwrap();
+        capture_preferences_sizes(cx, reader, preferences, language, false);
+    }
+    // Reader input remains live while Preferences is open, and updates both views.
+    for rtl in [false, true] {
+        cx.update_window(reader, |_, window, cx| window.click("direction", cx))
+            .unwrap();
+        settle_windows(cx, &[reader, preferences]);
+        cx.update_window(preferences, |_, window, _| {
+            assert_eq!(window.find("reading-direction-rtl").checked(), Some(rtl));
+            assert_eq!(window.find("reading-direction-ltr").checked(), Some(!rtl));
+        })
+        .unwrap();
+    }
+    let before = page(cx, reader);
+    cx.update_window(preferences, |_, window, cx| {
+        for key in ["space", "right", "left", "+", "b"] {
+            window.press(key, cx);
+        }
+    })
+    .unwrap();
+    settle_windows(cx, &[reader, preferences]);
+    assert_eq!(
+        page(cx, reader),
+        before,
+        "Preferences keys must not navigate the reader"
+    );
+    // Native Preferences close must leave the reader geometry and book intact.
+    let viewport = cx
+        .update_window(reader, |_, window, _| window.find("viewer").bounds())
+        .unwrap();
+    cx.update_window(preferences, |_, window, cx| window.press("escape", cx))
+        .unwrap();
+    settle(cx, reader);
+    assert_eq!(page(cx, reader), before);
+    assert_eq!(
+        cx.update_window(reader, |_, window, _| window.find("viewer").bounds())
+            .unwrap(),
+        viewport
+    );
+    assert!(cx.update_window(preferences, |_, _, _| ()).is_err());
+    let reopened = open_preferences(cx, reader, view);
+    assert_ne!(reopened, preferences);
 }
 
 fn page(cx: &mut HeadlessAppContext, window: AnyWindowHandle) -> String {
@@ -202,7 +534,11 @@ fn assert_sidebar_tabs_in_bounds(window: &Window, language: Language) {
     }
 }
 
-fn capture_language_states(cx: &mut HeadlessAppContext, window: AnyWindowHandle) {
+fn capture_language_states(
+    cx: &mut HeadlessAppContext,
+    window: AnyWindowHandle,
+    view: &Entity<ReaderView>,
+) {
     const LANGUAGES: [(Language, &str, &str, &str); 3] = [
         (Language::English, "language-en", "English", "en"),
         (Language::Japanese, "language-ja", "日本語", "ja"),
@@ -213,16 +549,21 @@ fn capture_language_states(cx: &mut HeadlessAppContext, window: AnyWindowHandle)
             "zh-TW",
         ),
     ];
-    cx.update_window(window, |_, window, cx| window.click("preferences", cx))
-        .unwrap();
+    let preferences = open_preferences(cx, window, view);
     for (language, id, _, component_locale) in LANGUAGES {
-        cx.update_window(window, |_, window, cx| {
-            window.click(id, cx);
+        reach_preference(cx, window, preferences, id);
+        cx.update_window(preferences, |_, window, cx| window.click(id, cx))
+            .unwrap();
+        settle_windows(cx, &[window, preferences]);
+        cx.update_window(preferences, |_, window, _| {
             assert_eq!(&*gpui_kit::component::locale(), component_locale);
             for (choice, choice_id, label, _) in LANGUAGES {
                 assert_eq!(window.find(choice_id).label(), Some(label));
                 assert_eq!(window.find(choice_id).checked(), Some(choice == language));
             }
+        })
+        .unwrap();
+        cx.update_window(window, |_, window, cx| {
             assert_eq!(
                 window.find("preferences").label(),
                 Some(language.text(Text::Preferences))
@@ -381,7 +722,8 @@ fn assert_desktop_geometry(window: &Window, language: Language) {
     if let Some(inspector) = window.try_find("inspector") {
         inside(inspector.bounds(), viewport);
         disjoint(inspector.bounds(), viewer);
-        let tabs = ["inspector-image", "inspector-reading", "inspector-playback"];
+        assert!(window.try_find("inspector-reading").is_none());
+        let tabs = ["inspector-image", "inspector-playback"];
         for (index, id) in tabs.iter().enumerate() {
             inside(window.find(*id).bounds(), inspector.bounds());
             for other in &tabs[index + 1..] {
@@ -418,6 +760,7 @@ fn assert_info_in_viewport(window: &Window) {
 fn capture_desktop_states(
     cx: &mut HeadlessAppContext,
     window: AnyWindowHandle,
+    view: &Entity<ReaderView>,
     sender: &mpsc::Sender<Vec<PathBuf>>,
     folder: &std::path::Path,
 ) {
@@ -426,11 +769,11 @@ fn capture_desktop_states(
         (Language::Japanese, "language-ja"),
         (Language::TraditionalChinese, "language-zh-Hant"),
     ] {
-        cx.update_window(window, |_, window, cx| {
-            window.click("preferences", cx);
-            window.click(language_id, cx);
-        })
-        .unwrap();
+        let preferences = open_preferences(cx, window, view);
+        reach_preference(cx, window, preferences, language_id);
+        cx.update_window(preferences, |_, window, cx| window.click(language_id, cx))
+            .unwrap();
+        settle_windows(cx, &[window, preferences]);
         for (width, height, suffix) in [
             (1280., 800., "1280x800"),
             (960., 640., "960x640"),
@@ -444,20 +787,17 @@ fn capture_desktop_states(
             settle(cx, window);
             for (id, name) in [
                 ("inspector-image", "image"),
-                ("inspector-reading", "reading"),
                 ("inspector-playback", "playback"),
             ] {
                 cx.update_window(window, |_, window, cx| {
                     window.click(id, cx);
                     assert_desktop_geometry(window, language);
-                    for choice in ["inspector-image", "inspector-reading", "inspector-playback"] {
+                    assert!(window.try_find("inspector-reading").is_none());
+                    for choice in ["inspector-image", "inspector-playback"] {
                         assert_eq!(window.find(choice).checked(), Some(choice == id));
                     }
                     assert_eq!(window.try_find("reset-filters").is_some(), name == "image");
-                    assert_eq!(
-                        window.try_find("remember-position").is_some(),
-                        name == "reading"
-                    );
+                    assert!(window.try_find("remember-position").is_none());
                     assert_eq!(
                         window.try_find("interval-input").is_some(),
                         name == "playback"
@@ -600,9 +940,97 @@ fn capture_desktop_states(
     settle(cx, window);
 }
 
+fn capture_preferences_errors(cx: &mut HeadlessAppContext, temporary: &Path, folder: &Path) {
+    const INVALID: &[u8] = b"{broken\n";
+    for language in Language::ALL {
+        let directory = temporary.join(format!("preferences-error-{}", language.code()));
+        std::fs::create_dir(&directory).unwrap();
+        let settings_path = directory.join("settings.json");
+        std::fs::write(&settings_path, INVALID).unwrap();
+        let warning = AppSettings::load_from(&settings_path).unwrap_err();
+        let mut settings = AppSettings::default();
+        settings.preferences.language = language;
+        let (sender, launches) = mpsc::channel();
+        let expected_warning = language.format(Text::SettingsError, &[("error", warning.clone())]);
+        let (reader, view) =
+            open_reader_fixture(cx, settings_path.clone(), settings, Some(warning), launches);
+        sender.send(vec![folder.to_path_buf()]).unwrap();
+        settle(cx, reader);
+        assert_eq!(page(cx, reader), "1");
+        let preferences = open_preferences(cx, reader, &view);
+        cx.update_window(preferences, |_, window, _| {
+            assert_eq!(
+                window.find("settings-save-error").label(),
+                Some(expected_warning.as_str())
+            );
+        })
+        .unwrap();
+        capture_preferences_sizes(cx, reader, preferences, language, true);
+        assert_eq!(
+            std::fs::read(&settings_path).unwrap(),
+            INVALID,
+            "rendering and navigation must not replace corrupt settings"
+        );
+        reach_preference(cx, reader, preferences, "reset-corrupt-settings");
+        cx.update_window(preferences, |_, window, cx| {
+            window.click("reset-corrupt-settings", cx)
+        })
+        .unwrap();
+        settle_windows(cx, &[reader, preferences]);
+        let backups: Vec<_> = std::fs::read_dir(&directory)
+            .unwrap()
+            .map(|entry| entry.unwrap().path())
+            .filter(|path| path != &settings_path)
+            .collect();
+        assert_eq!(
+            backups.len(),
+            1,
+            "explicit reset must create exactly one backup"
+        );
+        assert_eq!(
+            std::fs::read(&backups[0]).unwrap(),
+            INVALID,
+            "backup must preserve the exact original bytes"
+        );
+        assert_eq!(
+            AppSettings::load_from(&settings_path).unwrap(),
+            AppSettings::default()
+        );
+        cx.update_window(preferences, |_, window, _| {
+            assert!(window.try_find("reset-corrupt-settings").is_none())
+        })
+        .unwrap();
+        scroll_preferences(cx, reader, preferences, 10_000.);
+        snapshot(
+            cx,
+            preferences,
+            &format!("preferences-{}-reset", language.code()),
+        );
+        // Remove fixture windows directly. Do not dispatch the application Quit command.
+        for handle in [preferences, reader] {
+            cx.update_window(handle, |_, window, _| window.remove_window())
+                .unwrap();
+        }
+        cx.run_until_parked();
+        drop(view);
+    }
+}
+
 fn open_reader(
     cx: &mut HeadlessAppContext,
     settings_path: PathBuf,
+    launches: mpsc::Receiver<Vec<PathBuf>>,
+) -> (AnyWindowHandle, Entity<ReaderView>) {
+    let mut settings = AppSettings::default();
+    settings.preferences.language = Language::TraditionalChinese;
+    open_reader_fixture(cx, settings_path, settings, None, launches)
+}
+
+fn open_reader_fixture(
+    cx: &mut HeadlessAppContext,
+    settings_path: PathBuf,
+    settings: AppSettings,
+    warning: Option<String>,
     launches: mpsc::Receiver<Vec<PathBuf>>,
 ) -> (AnyWindowHandle, Entity<ReaderView>) {
     cx.update(|cx| {
@@ -619,19 +1047,7 @@ fn open_reader(
             cx,
             |window, cx| {
                 cx.new(|cx| {
-                    ReaderView::new(
-                        {
-                            let mut settings = AppSettings::default();
-                            settings.preferences.language = Language::TraditionalChinese;
-                            settings
-                        },
-                        settings_path,
-                        None,
-                        None,
-                        launches,
-                        window,
-                        cx,
-                    )
+                    ReaderView::new(settings, settings_path, warning, None, launches, window, cx)
                 })
             },
         )
@@ -712,8 +1128,10 @@ fn main() {
         );
     }
     capture_zoom_states(&mut cx, window);
-    capture_language_states(&mut cx, window);
-    capture_desktop_states(&mut cx, window, &sender, &folder);
+    capture_preferences_states(&mut cx, window, &view);
+    capture_preferences_errors(&mut cx, temporary.path(), &folder);
+    capture_language_states(&mut cx, window, &view);
+    capture_desktop_states(&mut cx, window, &view, &sender, &folder);
 
     // Cover archive indexing, natural order, extraction, decoding, and Metal in
     // one workflow, with central-directory order different from reading order.
@@ -848,13 +1266,22 @@ fn main() {
         assert_eq!(window.find("page-input").value(), Some("6"));
         window.press("home", cx);
         window.press("]", cx);
-        window.click("preferences", cx);
-        assert!(window.find("remember-position").visible());
-        window.click("remember-position", cx);
-        window.click("remember-position", cx);
     })
     .unwrap();
-    settle(&mut cx, window);
+    let preferences = open_preferences(&mut cx, window, &view);
+    reach_preference(&mut cx, window, preferences, "remember-position");
+    for selected in [false, true] {
+        cx.update_window(preferences, |_, window, cx| {
+            assert!(window.find("remember-position").visible());
+            window.click("remember-position", cx);
+        })
+        .unwrap();
+        settle_windows(&mut cx, &[window, preferences]);
+        cx.update_window(preferences, |_, window, _| {
+            assert_eq!(window.find("remember-position").checked(), Some(selected));
+        })
+        .unwrap();
+    }
     for _ in 0..2 {
         cx.update_window(window, |_, window, cx| window.click(("menu", 0usize), cx))
             .unwrap();
@@ -869,10 +1296,15 @@ fn main() {
         .unwrap();
         settle(&mut cx, window);
     }
-    cx.update_window(window, |_, window, cx| {
+    cx.update_window(window, |_, window, _| {
         assert!(window.try_find("recursive-folder").is_none());
-        window.scroll("inspector-content", ScrollDelta::Lines(point(0., 100.)), cx);
-        window.click("紙色", cx);
+    })
+    .unwrap();
+    reach_preference(&mut cx, window, preferences, "紙色");
+    cx.update_window(preferences, |_, window, cx| window.click("紙色", cx))
+        .unwrap();
+    settle_windows(&mut cx, &[window, preferences]);
+    cx.update_window(window, |_, window, cx| {
         window.click("inspector-playback", cx);
         window.click("interval-input", cx);
         window.press(
@@ -1009,12 +1441,18 @@ fn main() {
             (f32::from(bounds.center().x), f32::from(bounds.top()) + 60.)
         })
         .unwrap();
-    let before_animation = snapshot(&mut cx, window, "08-animation-first");
-    std::thread::sleep(Duration::from_millis(550));
-    cx.update_window(window, |_, window, cx| window.render_frame(cx))
+    cx.update_window(window, |_, window, _| window.activate_window())
         .unwrap();
-    let after_animation = snapshot(&mut cx, window, "09-animation-next");
-    if let (Some(before), Some(after)) = (before_animation, after_animation) {
+    cx.run_until_parked();
+    cx.update_window(window, |_, window, _| {
+        assert!(
+            window.is_window_active(),
+            "animation requires an active reader"
+        );
+    })
+    .unwrap();
+    let before_animation = snapshot(&mut cx, window, "08-animation-first");
+    if let Some(before) = before_animation {
         let sample = |image: &image::RgbaImage| {
             let scale = image.width() as f32 / 1280.;
             image
@@ -1024,14 +1462,34 @@ fn main() {
                 )
                 .0
         };
+        let colors = [[220u8, 40, 50, 255], [40u8, 80, 220, 255]];
+        let source_frame = |pixel: [u8; 4]| {
+            colors
+                .iter()
+                .position(|color| color.iter().zip(pixel).all(|(a, b)| a.abs_diff(b) <= 2))
+        };
         let first = sample(&before);
-        let next = sample(&after);
+        let first_frame = source_frame(first).expect("animated source color must reach the scene");
+        // A fixed sleep can sample the same phase when rendering or animation
+        // callbacks are delayed. Render and observe a different decoded source
+        // frame within a fixed bound instead of assuming one exact phase.
+        let deadline = std::time::Instant::now() + Duration::from_secs(5);
+        let mut advanced = false;
+        while std::time::Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(73));
+            cx.update_window(window, |_, window, cx| window.render_frame(cx))
+                .unwrap();
+            let after = snapshot(&mut cx, window, "09-animation-next").unwrap();
+            let next = sample(&after);
+            let next_frame =
+                source_frame(next).expect("animation must keep painting decoded source colors");
+            if next_frame != first_frame {
+                advanced = true;
+                break;
+            }
+        }
         assert!(
-            first[0].abs_diff(220) <= 2 || first[2].abs_diff(220) <= 2,
-            "animated source color must reach the scene: {first:?}"
-        );
-        assert_ne!(
-            first, next,
+            advanced,
             "animated page source pixels must advance in the real Metal renderer"
         );
     }

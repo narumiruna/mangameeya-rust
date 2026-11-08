@@ -9,9 +9,8 @@ const MODES: [(&str, ReadingMode); 3] = [
     ("mode-spread", ReadingMode::Spread),
     ("mode-continuous", ReadingMode::Continuous),
 ];
-const TABS: [(&str, InspectorTab); 3] = [
+const TABS: [(&str, InspectorTab); 2] = [
     ("inspector-image", InspectorTab::Image),
-    ("inspector-reading", InspectorTab::Reading),
     ("inspector-playback", InspectorTab::Playback),
 ];
 
@@ -141,7 +140,7 @@ fn assert_layout(window: &Window) {
         disjoint(inspector.bounds(), viewer);
         distinct_controls(
             window,
-            &["inspector-image", "inspector-reading", "inspector-playback"],
+            &["inspector-image", "inspector-playback"],
             inspector.bounds(),
         );
         if let Some(sidebar) = window.try_find("sidebar") {
@@ -198,12 +197,20 @@ fn desktop_all_locales_sizes_and_tabs_keep_controls_and_reader_separate(cx: &mut
     pump(&fixture, cx);
     for language in Language::ALL {
         resize(&fixture, 1280., 800., cx);
-        cx.update_window(fixture.window, |_, window, cx| {
-            window.click("preferences", cx);
-            window.click(
-                SharedString::from(format!("language-{}", language.code())),
-                cx,
-            );
+        let preferences = open_preferences(&fixture, cx);
+        click_preference(
+            &fixture,
+            SharedString::from(format!("language-{}", language.code())),
+            cx,
+        );
+        cx.update_window(preferences, |_, window, _| {
+            for choice in Language::ALL {
+                assert!(
+                    window
+                        .find(SharedString::from(format!("language-{}", choice.code())))
+                        .visible()
+                );
+            }
         })
         .unwrap();
         for (width, height) in SIZES {
@@ -215,17 +222,6 @@ fn desktop_all_locales_sizes_and_tabs_keep_controls_and_reader_separate(cx: &mut
                     assert_eq!(fixture.view.read(cx).inspector_tab, tab);
                     for (choice, selected) in TABS {
                         assert_eq!(window.find(choice).checked(), Some(selected == tab));
-                    }
-                    if tab == InspectorTab::Reading {
-                        window.scroll("inspector", ScrollDelta::Lines(point(0., -100.)), cx);
-                        for choice in Language::ALL {
-                            assert!(
-                                window
-                                    .find(SharedString::from(format!("language-{}", choice.code())))
-                                    .visible()
-                            );
-                        }
-                        assert_layout(window);
                     }
                     for (choice, mode) in MODES {
                         assert_eq!(window.find(choice).role(), Some(gpui_kit::Role::Tab));
@@ -645,7 +641,7 @@ fn desktop_tabs_preserve_input_slider_entities_values_and_filter_reset_scope(
         window.click("rotate-right", cx);
         window.click("inspector-playback", cx);
         replace_input(window, "interval-input", "017", cx);
-        window.click("inspector-reading", cx);
+        window.click("inspector-image", cx);
     })
     .unwrap();
     pump(&fixture, cx);
@@ -681,14 +677,8 @@ fn desktop_tabs_preserve_input_slider_entities_values_and_filter_reset_scope(
                 window.try_find("reset-filters").is_some(),
                 tab == InspectorTab::Image
             );
-            assert_eq!(
-                window.try_find("remember-position").is_some(),
-                tab == InspectorTab::Reading
-            );
-            assert_eq!(
-                window.try_find("language-en").is_some(),
-                tab == InspectorTab::Reading
-            );
+            assert!(window.try_find("remember-position").is_none());
+            assert!(window.try_find("language-en").is_none());
             assert_eq!(
                 window.try_find("slideshow").is_some(),
                 tab == InspectorTab::Playback
@@ -717,28 +707,53 @@ fn desktop_preferences_is_idempotent_and_hiding_focused_tools_returns_focus(
     cx.update_window(fixture.window, |_, window, cx| {
         window.click("inspector-toggle", cx);
         assert!(window.try_find("inspector").is_none());
-        for _ in 0..2 {
-            window.click("preferences", cx);
-            assert!(window.find("remember-position").visible());
-            assert_eq!(fixture.view.read(cx).inspector_tab, InspectorTab::Reading);
+    })
+    .unwrap();
+    let selected = fixture.view.read_with(cx, |view, _| view.inspector_tab);
+    let preferences = open_preferences(&fixture, cx);
+    for _ in 0..2 {
+        assert_eq!(open_preferences(&fixture, cx), preferences);
+        fixture.view.read_with(cx, |view, _| {
+            assert_eq!(view.inspector_tab, selected);
             assert!(
-                fixture
-                    .view
-                    .read(cx)
+                !view
                     .reader
                     .settings
                     .preferences
                     .panel_layout
                     .inspector_visible
             );
-        }
+        });
+        cx.update_window(preferences, |_, window, cx| {
+            assert!(window.find("remember-position").visible());
+            assert!(window.find("language-en").visible());
+            assert_eq!(cx.windows().len(), 2);
+        })
+        .unwrap();
+    }
+    cx.update_window(fixture.window, |_, window, cx| {
         window.click(("menu", 5usize), cx);
         let item = window
             .within("popup-menu")
             .find_by_label(Language::TraditionalChinese.text(Text::Preferences));
         let bounds = window.find("popup-menu").bounds();
         window.click_at("popup-menu", item.bounds().center() - bounds.origin, cx);
-        assert_eq!(fixture.view.read(cx).inspector_tab, InspectorTab::Reading);
+        assert_eq!(
+            fixture.view.read(cx).preferences_window(),
+            Some(preferences)
+        );
+        assert_eq!(fixture.view.read(cx).inspector_tab, selected);
+        assert!(
+            !fixture
+                .view
+                .read(cx)
+                .reader
+                .settings
+                .preferences
+                .panel_layout
+                .inspector_visible
+        );
+        window.click("inspector-toggle", cx);
         window.click("inspector-playback", cx);
         window.click("interval-input", cx);
         assert_eq!(window.find("interval-input").focused(), Some(true));
@@ -761,7 +776,9 @@ fn desktop_preferences_is_idempotent_and_hiding_focused_tools_returns_focus(
 }
 
 #[gpui_kit::test]
-fn desktop_native_preferences_moves_focus_out_of_hidden_playback_input(cx: &mut TestAppContext) {
+fn desktop_native_preferences_commits_focused_playback_input_without_hiding_tools(
+    cx: &mut TestAppContext,
+) {
     let fixture = fixture(cx);
     pump(&fixture, cx);
     cx.update_window(fixture.window, |_, window, cx| {
@@ -773,7 +790,16 @@ fn desktop_native_preferences_moves_focus_out_of_hidden_playback_input(cx: &mut 
     pump(&fixture, cx);
     cx.update_window(fixture.window, |_, window, cx| {
         let view = fixture.view.read(cx);
-        assert_eq!(view.inspector_tab, InspectorTab::Reading);
+        assert_eq!(view.inspector_tab, InspectorTab::Playback);
+        assert!(window.find("interval-input").visible());
+        assert!(
+            view.reader
+                .settings
+                .preferences
+                .panel_layout
+                .inspector_visible
+        );
+        assert!(view.preferences_window().is_some());
         assert!(
             !view
                 .interval_input
@@ -781,7 +807,6 @@ fn desktop_native_preferences_moves_focus_out_of_hidden_playback_input(cx: &mut 
                 .focus_handle(cx)
                 .is_focused(window)
         );
-        assert!(view.focus.is_focused(window));
     })
     .unwrap();
     pump(&fixture, cx);
@@ -805,8 +830,18 @@ fn desktop_recursive_option_is_in_file_menu_only_and_applies_on_next_open(cx: &m
     let revision = fixture
         .view
         .read_with(cx, |view, _| (view.book_revision, view.open_revision));
+    let preferences = open_preferences(&fixture, cx);
+    cx.update_window(preferences, |_, window, _| {
+        assert!(window.try_find("recursive-folder").is_none());
+        assert!(
+            window
+                .within("preferences-window")
+                .try_find_by_label(Language::TraditionalChinese.text(Text::IncludeSubfolders))
+                .is_none()
+        );
+    })
+    .unwrap();
     cx.update_window(fixture.window, |_, window, cx| {
-        window.click("preferences", cx);
         assert!(window.try_find("recursive-folder").is_none());
         assert!(
             window
@@ -1225,7 +1260,7 @@ fn desktop_text_inputs_isolate_reading_keys_and_playback_interval_clamps_on_ente
             if enter {
                 window.press("enter", cx);
             } else {
-                window.click("inspector-reading", cx);
+                window.click("inspector-image", cx);
             }
         })
         .unwrap();

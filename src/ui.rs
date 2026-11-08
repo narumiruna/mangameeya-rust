@@ -1,6 +1,7 @@
 //! Native reader window, commands, and asynchronous image loading.
 
 mod assets;
+mod preferences;
 pub use assets::ReaderAssets;
 
 use crate::{
@@ -16,7 +17,6 @@ use gpui_kit::base::TestTextExt;
 use gpui_kit::component::{
     ActiveTheme, Disableable, Icon, Selectable, Sizable, WindowExt,
     button::{Button, ButtonVariants},
-    checkbox::Checkbox,
     input::{Input, InputEvent, InputState},
     menu::{DropdownMenu, PopupMenu},
     popover::Popover,
@@ -26,11 +26,12 @@ use gpui_kit::component::{
     theme::Theme,
 };
 use gpui_kit::{
-    App, AppContext, Bounds, Context, Entity, ExternalPaths, FocusHandle, Focusable,
-    InteractiveElement, IntoElement, KeyBinding, ListAlignment, ListOffset, ListState, Menu,
-    MenuItem, MouseButton, ObjectFit, ParentElement, Pixels, Render, RenderImage, SharedString,
-    Size, StatefulInteractiveElement, Styled, StyledImage, Subscription, TestSupportExt, Window,
-    WindowBounds, WindowOptions, canvas, div, img, list, point, prelude::FluentBuilder, px, size,
+    AnyWindowHandle, App, AppContext, Bounds, Context, Entity, ExternalPaths, FocusHandle,
+    Focusable, InteractiveElement, IntoElement, KeyBinding, ListAlignment, ListOffset, ListState,
+    Menu, MenuItem, MouseButton, ObjectFit, ParentElement, Pixels, Render, RenderImage,
+    SharedString, Size, StatefulInteractiveElement, Styled, StyledImage, Subscription,
+    TestSupportExt, Window, WindowBounds, WindowOptions, canvas, div, img, list, point,
+    prelude::FluentBuilder, px, size,
 };
 use std::{
     cell::RefCell,
@@ -97,7 +98,6 @@ enum Command {
 enum InspectorTab {
     #[default]
     Image,
-    Reading,
     Playback,
 }
 
@@ -273,6 +273,8 @@ pub struct ReaderView {
     reader: Reader,
     settings_path: PathBuf,
     focus: FocusHandle,
+    preferences_window: Option<AnyWindowHandle>,
+    closing: bool,
     pages: HashMap<usize, CachedPage>,
     thumbs: HashMap<usize, CachedPage>,
     geometry: HashMap<usize, PageGeometry>,
@@ -432,7 +434,9 @@ impl ReaderView {
                 }),
             );
         }
-        subscriptions.push(cx.on_app_quit(|this, _| {
+        subscriptions.push(cx.on_app_quit(|this, cx| {
+            this.closing = true;
+            this.close_preferences(cx);
             let result = this.flush_settings();
             async move {
                 if let Err(error) = result {
@@ -443,7 +447,9 @@ impl ReaderView {
         let weak = cx.entity().downgrade();
         window.on_window_should_close(cx, move |window, cx| {
             if let Some(view) = weak.upgrade() {
-                view.update(cx, |this, _| {
+                view.update(cx, |this, cx| {
+                    this.closing = true;
+                    this.close_preferences(cx);
                     if let Err(error) = this.flush_settings() {
                         eprintln!("{error}");
                     }
@@ -459,6 +465,8 @@ impl ReaderView {
             reader: Reader::new(settings),
             settings_path,
             focus,
+            preferences_window: None,
+            closing: false,
             pages: HashMap::new(),
             thumbs: HashMap::new(),
             geometry: HashMap::new(),
@@ -531,6 +539,98 @@ impl ReaderView {
         })
         .detach();
         view
+    }
+
+    /// Last opened Preferences handle. A closed window is recreated on the next request.
+    pub fn preferences_window(&self) -> Option<AnyWindowHandle> {
+        self.preferences_window
+    }
+
+    fn open_preferences(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.closing {
+            return;
+        }
+        self.commit_focused_interval(window, cx);
+        self.focus.focus(window, cx);
+        let reader = cx.entity().downgrade();
+        let reader_window = window.window_handle();
+        let display = window.display(cx).map(|display| display.id());
+        // GPUI draws a new window before open_window returns. Do not hold a
+        // mutable ReaderView borrow while Preferences reads its settings.
+        cx.defer(move |cx| {
+            let Some(entity) = reader.upgrade() else {
+                return;
+            };
+            if entity.read(cx).closing || !cx.windows().contains(&reader_window) {
+                return;
+            }
+            if let Some(handle) = entity.read(cx).preferences_window
+                && handle
+                    .update(cx, |_, window, _| window.activate_window())
+                    .is_ok()
+            {
+                return;
+            }
+            let language = entity.read(cx).language();
+            let result = preferences::open(reader, reader_window, language, display, cx);
+            entity.update(cx, |reader, cx| reader.preferences_opened(result, cx));
+        });
+    }
+
+    fn preferences_opened(
+        &mut self,
+        result: anyhow::Result<AnyWindowHandle>,
+        cx: &mut Context<Self>,
+    ) {
+        match result {
+            Ok(handle) => self.preferences_window = Some(handle),
+            Err(error) => {
+                self.preferences_window = None;
+                self.set_localized_message(
+                    Text::PreferencesOpenFailed,
+                    vec![("error", error.to_string())],
+                    true,
+                    cx,
+                );
+            }
+        }
+    }
+
+    fn close_preferences(&mut self, cx: &mut App) {
+        if let Some(handle) = self.preferences_window.take() {
+            _ = handle.update(cx, |_, window, _| window.remove_window());
+        }
+    }
+
+    fn apply_preference(
+        &mut self,
+        change: preferences::Change,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        use preferences::Change;
+        match change {
+            Change::Language(language) => self.set_language(language, window, cx),
+            Change::Reset => self.reset_corrupt_settings(window, cx),
+            Change::Remember(value)
+                if self.reader.settings.preferences.remember_position != value =>
+            {
+                self.reader.settings.preferences.remember_position = value;
+                self.dirty = true;
+                cx.notify();
+            }
+            Change::Direction(value) if self.reader.settings.preferences.rtl != value => {
+                self.reader.settings.preferences.rtl = value;
+                self.dirty = true;
+                self.relayout(cx);
+            }
+            Change::Background(value) if self.reader.settings.preferences.background != value => {
+                self.reader.settings.preferences.background = value;
+                self.dirty = true;
+                cx.notify();
+            }
+            _ => {}
+        }
     }
 
     fn clear_images(&mut self, mut window: Option<&mut Window>, cx: &mut Context<Self>) {
@@ -1043,7 +1143,11 @@ impl ReaderView {
             OpenFile => self.request_dialog(false, window, cx),
             OpenFolder => self.request_dialog(true, window, cx),
             SavePage => self.save_page(window, cx),
-            Quit => cx.quit(),
+            Quit => {
+                self.closing = true;
+                self.close_preferences(cx);
+                cx.quit();
+            }
             Close => {
                 self.info_open = false;
                 self.zoom_open = false;
@@ -1238,23 +1342,7 @@ impl ReaderView {
                 }
                 self.relayout(cx);
             }
-            Settings => {
-                self.commit_focused_interval(window, cx);
-                self.focus.focus(window, cx);
-                self.inspector_tab = InspectorTab::Reading;
-                self.dirty |= !self
-                    .reader
-                    .settings
-                    .preferences
-                    .panel_layout
-                    .inspector_visible;
-                self.reader
-                    .settings
-                    .preferences
-                    .panel_layout
-                    .inspector_visible = true;
-                self.relayout(cx);
-            }
+            Settings => self.open_preferences(window, cx),
             About => window.open_dialog(cx, move |dialog, _, _| {
                 dialog
                     .title(language.text(Text::AboutTitle))
@@ -1626,7 +1714,9 @@ impl ReaderView {
             .accessibility_label(label)
             .on_click(cx.listener(move |this, _, window, cx| {
                 this.perform(command, window, cx);
-                this.focus.focus(window, cx);
+                if command != Command::Settings {
+                    this.focus.focus(window, cx);
+                }
             }))
     }
 
@@ -2821,154 +2911,6 @@ impl ReaderView {
         content.into_any_element()
     }
 
-    fn render_reading_preferences(&self, cx: &mut Context<Self>) -> gpui_kit::AnyElement {
-        let language = self.language();
-        let prefs = &self.reader.settings.preferences;
-        let mut content = div().flex().flex_col().gap_6().flex_none();
-        content = content
-            .child(
-                Checkbox::new("remember-position")
-                    .label(language.text(Text::RememberPosition))
-                    .checked(prefs.remember_position)
-                    .on_change(cx.listener(|this, value, _, cx| {
-                        this.reader.settings.preferences.remember_position = *value;
-                        this.dirty = true;
-                        cx.notify();
-                    })),
-            )
-            .child(
-                div()
-                    .flex()
-                    .flex_col()
-                    .gap_2()
-                    .child(language.text(Text::ReadingDirection))
-                    .child(
-                        self.command_button(
-                            "reading-direction",
-                            language.text(Text::ReadingDirection),
-                            Command::Direction,
-                            cx,
-                        )
-                        .child(
-                            direction_label(language, prefs.rtl)
-                                .test_text(direction_label(language, prefs.rtl)),
-                        )
-                        .icon(IconName::ArrowLeftRight)
-                        .outline()
-                        .border_color(cx.theme().border)
-                        .h(px(CONTROL_HEIGHT))
-                        .w_full()
-                        .tooltip(language.text(if prefs.rtl {
-                            Text::RightToLeft
-                        } else {
-                            Text::LeftToRight
-                        })),
-                    ),
-            )
-            .child(language.text(Text::ReadingBackground));
-        let mut backgrounds = div().flex().gap_2();
-        for (background, id, text) in [
-            (Background::Black, "黑色", Text::Black),
-            (Background::Gray, "深灰", Text::Gray),
-            (Background::Paper, "紙色", Text::Paper),
-        ] {
-            backgrounds = backgrounds.child(
-                Button::new(id)
-                    .small()
-                    .ghost()
-                    .accessibility_label(language.text(text))
-                    .tooltip(language.text(text))
-                    .flex_1()
-                    .min_w_0()
-                    .h_auto()
-                    .py_2()
-                    .child(
-                        div()
-                            .flex()
-                            .flex_col()
-                            .gap_2()
-                            .items_center()
-                            .w_full()
-                            .min_w_0()
-                            .child(
-                                div()
-                                    .w_full()
-                                    .h(px(24.))
-                                    .rounded_sm()
-                                    .bg(background_color(background))
-                                    .border_1()
-                                    .border_color(cx.theme().border),
-                            )
-                            .child(div().text_xs().child(language.text(text))),
-                    )
-                    .selected(prefs.background == background)
-                    .toggled(prefs.background == background)
-                    .when(prefs.background == background, |button| {
-                        button
-                            .bg(cx.theme().primary.opacity(0.1))
-                            .text_color(cx.theme().primary)
-                    })
-                    .on_click(cx.listener(move |this, _, _, cx| {
-                        this.reader.settings.preferences.background = background;
-                        this.dirty = true;
-                        cx.notify();
-                    })),
-            );
-        }
-        content = content
-            .child(backgrounds)
-            .child(
-                div()
-                    .border_t_1()
-                    .border_color(cx.theme().border)
-                    .pt_4()
-                    .font_weight(gpui_kit::FontWeight::SEMIBOLD)
-                    .child(language.text(Text::GeneralSettings)),
-            )
-            .child(language.text(Text::Language));
-        let mut languages = div().flex().flex_wrap().gap_1();
-        for choice in Language::ALL {
-            languages = languages.child(
-                Button::new(SharedString::from(format!("language-{}", choice.code())))
-                    .small()
-                    .ghost()
-                    .label(choice.native_name())
-                    .accessibility_label(choice.native_name())
-                    .selected(language == choice)
-                    .toggled(language == choice)
-                    .when(language == choice, |button| {
-                        button
-                            .bg(cx.theme().primary.opacity(0.1))
-                            .text_color(cx.theme().primary)
-                    })
-                    .on_click(cx.listener(move |this, _, window, cx| {
-                        this.set_language(choice, window, cx)
-                    })),
-            );
-        }
-        content = content
-            .child(languages)
-            .child(div().text_xs().child(language.text(Text::SettingsTip)));
-        if let Some(error) = &self.save_error {
-            content = content
-                .child(
-                    div()
-                        .text_xs()
-                        .text_color(cx.theme().danger)
-                        .child(language.format(Text::SettingsError, &[("error", error.clone())])),
-                )
-                .child(
-                    Button::new("reset-corrupt-settings")
-                        .small()
-                        .label(language.text(Text::BackupReset))
-                        .on_click(cx.listener(|this, _, window, cx| {
-                            this.reset_corrupt_settings(window, cx)
-                        })),
-                );
-        }
-        content.into_any_element()
-    }
-
     fn render_playback_tools(&self, cx: &mut Context<Self>) -> gpui_kit::AnyElement {
         let language = self.language();
         let mut content = div().flex().flex_col().gap_6().flex_none();
@@ -3013,7 +2955,6 @@ impl ReaderView {
             .aria_label(language.text(Text::ReadingTools));
         for (id, tab, text) in [
             ("inspector-image", InspectorTab::Image, Text::ImageTab),
-            ("inspector-reading", InspectorTab::Reading, Text::ReadingTab),
             (
                 "inspector-playback",
                 InspectorTab::Playback,
@@ -3068,7 +3009,6 @@ impl ReaderView {
             .overflow_y_scroll()
             .child(match self.inspector_tab {
                 InspectorTab::Image => self.render_image_tools(cx),
-                InspectorTab::Reading => self.render_reading_preferences(cx),
                 InspectorTab::Playback => self.render_playback_tools(cx),
             });
         div()
@@ -3876,16 +3816,18 @@ pub fn run() -> anyhow::Result<()> {
             .collect();
         _ = sender.send(paths);
     });
-    application.on_reopen(|cx| {
+    let reader_window = Rc::new(RefCell::new(None::<AnyWindowHandle>));
+    let reopen_window = reader_window.clone();
+    application.on_reopen(move |cx| {
         cx.activate(true);
-        if let Some(window) = cx.windows().first() {
+        if let Some(window) = *reopen_window.borrow() {
             _ = window.update(cx, |_, window, _| window.activate_window());
         }
     });
     application.run(move |cx| {
         init(cx);
         let bounds = Bounds::centered(None, size(px(1280.), px(800.)), cx);
-        gpui_kit::open_window(
+        let (handle, _) = gpui_kit::open_window(
             WindowOptions {
                 window_bounds: Some(WindowBounds::Windowed(bounds)),
                 window_min_size: Some(size(px(800.), px(540.))),
@@ -3911,6 +3853,7 @@ pub fn run() -> anyhow::Result<()> {
             },
         )
         .expect("Cannot open the native GPUI window");
+        *reader_window.borrow_mut() = Some(handle);
         cx.activate(true);
     });
     Ok(())

@@ -93,16 +93,62 @@ fn visual_direction_values_and_background_choices_are_visible_and_do_not_reset_p
             fixture
                 .view
                 .update(cx, |view, cx| view.set_language(language, window, cx));
-            window.click("preferences", cx);
-            for _ in 0..2 {
-                let rtl = fixture.view.read(cx).reader.settings.preferences.rtl;
-                painted_text(window, "reading-direction", direction_label(language, rtl));
+        })
+        .unwrap();
+        let preferences = open_preferences(&fixture, cx);
+        for (rtl, id, text) in [
+            (false, "reading-direction-ltr", Text::DirectionLtr),
+            (true, "reading-direction-rtl", Text::DirectionRtl),
+        ] {
+            click_preference(&fixture, id, cx);
+            cx.update_window(preferences, |_, window, cx| {
+                window.render_frame(cx);
+                painted_text(window, id, language.text(text));
+                assert_eq!(window.find("reading-direction-rtl").checked(), Some(rtl));
+                assert_eq!(window.find("reading-direction-ltr").checked(), Some(!rtl));
+            })
+            .unwrap();
+            let epoch = fixture.view.read_with(cx, |view, _| {
+                assert_eq!(view.reader.settings.preferences.rtl, rtl);
+                view.save_epoch.load(Ordering::SeqCst)
+            });
+            click_preference(&fixture, id, cx);
+            fixture.view.read_with(cx, |view, _| {
+                assert_eq!(view.reader.settings.preferences.rtl, rtl);
+                assert_eq!(view.save_epoch.load(Ordering::SeqCst), epoch);
+            });
+            cx.update_window(fixture.window, |_, window, _| {
                 painted_text(window, "direction", direction_label(language, rtl));
-                window.click("reading-direction", cx);
-                assert_ne!(fixture.view.read(cx).reader.settings.preferences.rtl, rtl);
-            }
-            assert_eq!(window.find("紙色").checked(), Some(true));
-            assert_eq!(window.find("黑色").checked(), Some(false));
+            })
+            .unwrap();
+        }
+        for (background, id, text) in [
+            (Background::Black, "黑色", Text::Black),
+            (Background::Gray, "深灰", Text::Gray),
+            (Background::Paper, "紙色", Text::Paper),
+        ] {
+            click_preference(&fixture, id, cx);
+            cx.update_window(preferences, |_, window, cx| {
+                window.render_frame(cx);
+                painted_text(window, id, language.text(text));
+                for (choice, value) in [
+                    ("黑色", Background::Black),
+                    ("深灰", Background::Gray),
+                    ("紙色", Background::Paper),
+                ] {
+                    assert_eq!(window.find(choice).checked(), Some(value == background));
+                }
+            })
+            .unwrap();
+            fixture.view.read_with(cx, |view, _| {
+                assert_eq!(view.reader.settings.preferences.background, background);
+                assert_eq!(
+                    view.reader.settings.preferences.sidebar_mode,
+                    SidebarMode::Recent
+                );
+            });
+        }
+        cx.update_window(fixture.window, |_, window, cx| {
             window.click("inspector-image", cx);
             painted_text(
                 window,

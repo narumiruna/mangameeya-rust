@@ -5,6 +5,7 @@ use tempfile::TempDir;
 
 mod desktop;
 mod i18n;
+mod preferences;
 mod visual;
 mod zoom;
 
@@ -79,6 +80,49 @@ fn animated_thumbnail() -> CachedPage {
     cached_page(frames, 1, 0).unwrap()
 }
 
+fn render_windows(fixture: &Fixture, cx: &mut TestAppContext) {
+    // Invalidate the reader and its observer before drawing both roots. A cached
+    // Preferences view does not repaint text when only its Root is refreshed.
+    fixture.view.update(cx, |_, cx| cx.notify());
+    cx.run_until_parked();
+    cx.update_window(fixture.window, |_, window, cx| window.render_frame(cx))
+        .unwrap();
+    if let Some(preferences) = fixture
+        .view
+        .read_with(cx, |view, _| view.preferences_window())
+    {
+        // A closed Preferences handle can remain stored until the next open request.
+        _ = cx.update_window(preferences, |_, window, cx| window.render_frame(cx));
+    }
+}
+
+fn open_preferences(fixture: &Fixture, cx: &mut TestAppContext) -> AnyWindowHandle {
+    cx.update_window(fixture.window, |_, window, cx| {
+        window.click("preferences", cx)
+    })
+    .unwrap();
+    cx.run_until_parked();
+    render_windows(fixture, cx);
+    fixture
+        .view
+        .read_with(cx, |view, _| view.preferences_window().unwrap())
+}
+
+fn click_preference(
+    fixture: &Fixture,
+    id: impl Into<gpui_kit::ElementId>,
+    cx: &mut TestAppContext,
+) {
+    let preferences = fixture
+        .view
+        .read_with(cx, |view, _| view.preferences_window().unwrap());
+    cx.update_window(preferences, |_, window, cx| window.click(id, cx))
+        .unwrap();
+    // Preference callbacks defer mutations to the reader window.
+    cx.run_until_parked();
+    render_windows(fixture, cx);
+}
+
 fn pump(fixture: &Fixture, cx: &mut TestAppContext) {
     for _ in 0..6 {
         cx.run_until_parked();
@@ -87,8 +131,10 @@ fn pump(fixture: &Fixture, cx: &mut TestAppContext) {
             window.render_frame(cx);
         })
         .unwrap();
+        render_windows(fixture, cx);
     }
     cx.run_until_parked();
+    render_windows(fixture, cx);
 }
 
 #[gpui_kit::test]
@@ -475,20 +521,32 @@ fn corrupt_settings_reset_is_explicit_and_preserves_original_bytes(cx: &mut Test
         view.save_error = Some("Invalid settings".into());
         cx.notify();
     });
-    cx.update_window(fixture.window, |_, window, cx| {
-        window.render_frame(cx);
-        window.click("preferences", cx);
-        assert_eq!(fixture.view.read(cx).inspector_tab, InspectorTab::Reading);
+    let preferences = open_preferences(&fixture, cx);
+    cx.update_window(preferences, |_, window, cx| {
         window.scroll(
-            "inspector",
+            "preferences-content",
             gpui_kit::ScrollDelta::Lines(point(0., -100.)),
             cx,
         );
+        assert!(window.find("settings-save-error").visible());
+        assert!(
+            window
+                .find("settings-save-error")
+                .label()
+                .unwrap()
+                .contains("Invalid settings")
+        );
+        assert_eq!(std::fs::read(&path).unwrap(), b"{broken");
         window.click("reset-corrupt-settings", cx);
     })
     .unwrap();
     pump(&fixture, cx);
     assert!(AppSettings::load_from(&path).is_ok());
+    cx.update_window(preferences, |_, window, _| {
+        assert!(window.try_find("settings-save-error").is_none());
+        assert!(window.try_find("reset-corrupt-settings").is_none());
+    })
+    .unwrap();
     let backups: Vec<_> = std::fs::read_dir(fixture.directory.path())
         .unwrap()
         .map(|entry| entry.unwrap().path())

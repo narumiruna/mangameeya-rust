@@ -9,6 +9,10 @@ const LANGUAGES: [(Language, &str, &str); 3] = [
 ];
 
 fn assert_language_choices(window: &Window, selected: Language) {
+    assert_eq!(
+        window.find("preferences-window").label(),
+        Some(selected.text(Text::Preferences))
+    );
     for (language, id, label) in LANGUAGES {
         let button = window.find(id);
         assert_eq!(button.label(), Some(label), "{id}");
@@ -71,19 +75,29 @@ fn new_reader_defaults_to_english_controls_and_ready_status(cx: &mut TestAppCont
         assert_eq!(window.find("preferences").label(), Some("Preferences"));
         assert_eq!(window.find("status-message").label(), Some("Ready"));
         assert_eq!(window.find("zoom-trigger").disabled(), Some(true));
-        window.click("preferences", cx);
-        assert_language_choices(window, Language::English);
         assert_native_menus(cx, Language::English);
-        for (language, id, _) in [LANGUAGES[1], LANGUAGES[2], LANGUAGES[0]] {
-            window.click(id, cx);
+    })
+    .unwrap();
+    let preferences = open_preferences(&fixture, cx);
+    cx.update_window(preferences, |_, window, _| {
+        assert_language_choices(window, Language::English);
+    })
+    .unwrap();
+    for (language, id, _) in [LANGUAGES[1], LANGUAGES[2], LANGUAGES[0]] {
+        click_preference(&fixture, id, cx);
+        cx.update_window(preferences, |_, window, _| {
+            assert_language_choices(window, language);
+        })
+        .unwrap();
+        cx.update_window(fixture.window, |_, window, _| {
             assert_controls(window, language);
             assert_eq!(
                 window.find("status-message").label(),
                 Some(language.text(Text::Ready))
             );
-        }
-    })
-    .unwrap();
+        })
+        .unwrap();
+    }
 }
 
 #[gpui_kit::test]
@@ -94,19 +108,19 @@ fn preference_clicks_translate_controls_status_and_both_menus_immediately(cx: &m
     let path = book(&fixture, "localized", 3);
     fixture.sender.send(vec![path]).unwrap();
     pump(&fixture, cx);
-    cx.update_window(fixture.window, |_, window, cx| {
-        window.click("preferences", cx)
-    })
-    .unwrap();
+    let preferences = open_preferences(&fixture, cx);
     for (language, id, _) in [LANGUAGES[1], LANGUAGES[2], LANGUAGES[0]] {
+        fixture.view.update(cx, |view, _| view.dirty = false);
+        click_preference(&fixture, id, cx);
+        cx.update_window(preferences, |_, window, _| {
+            assert_language_choices(window, language);
+        })
+        .unwrap();
         cx.update_window(fixture.window, |_, window, cx| {
-            fixture.view.update(cx, |view, _| view.dirty = false);
-            window.click(id, cx);
             fixture.view.read_with(cx, |view, _| {
                 assert_eq!(view.reader.settings.preferences.language, language);
                 assert!(view.dirty, "language changes must be saved");
             });
-            assert_language_choices(window, language);
             assert_controls(window, language);
             assert_eq!(
                 window.find("path-input").label(),
@@ -163,13 +177,10 @@ fn preference_clicks_translate_controls_status_and_both_menus_immediately(cx: &m
 fn native_open_dialog_prompts_follow_the_selected_language(cx: &mut TestAppContext) {
     let fixture = fixture_with_settings(cx, AppSettings::default());
     pump(&fixture, cx);
-    cx.update_window(fixture.window, |_, window, cx| {
-        window.click("preferences", cx)
-    })
-    .unwrap();
+    open_preferences(&fixture, cx);
     for (language, id, _) in [LANGUAGES[1], LANGUAGES[2], LANGUAGES[0]] {
+        click_preference(&fixture, id, cx);
         cx.update_window(fixture.window, |_, window, cx| {
-            window.click(id, cx);
             window.click("open", cx);
         })
         .unwrap();
@@ -270,6 +281,7 @@ fn language_changes_preserve_reader_state_history_and_input_drafts(cx: &mut Test
     let path = book(&fixture, "preserved", 5);
     fixture.sender.send(vec![path]).unwrap();
     pump(&fixture, cx);
+    open_preferences(&fixture, cx);
     cx.update_window(fixture.window, |_, window, cx| {
         fixture.view.update(cx, |view, cx| {
             view.navigate(2, window, cx);
@@ -283,68 +295,84 @@ fn language_changes_preserve_reader_state_history_and_input_drafts(cx: &mut Test
                 grayscale: 30.,
             };
             view.reader.set_bookmark();
-            view.inspector_tab = InspectorTab::Reading;
+            view.inspector_tab = InspectorTab::Playback;
             view.reader
                 .settings
                 .preferences
                 .panel_layout
                 .inspector_visible = true;
-            view.zoom_open = true;
-            view.controls_pending = false;
-            view.path_pending = false;
-            for (input, draft) in [
-                (&view.page_input, "004"),
-                (&view.path_input, "/draft/日本語/正體中文"),
-                (&view.interval_input, "17"),
-                (&view.zoom_input, "62."),
-            ] {
-                input.update(cx, |input, cx| input.set_value(draft, window, cx));
-            }
-            view.zoom_input.read(cx).focus_handle(cx).focus(window, cx);
-            let book = view.reader.book.clone().unwrap();
-            let filters = view.reader.filters;
-            let revision = (view.book_revision, view.image_revision, view.open_revision);
-            let mut expected = view.reader.settings.clone();
-            for (language, _, _) in [LANGUAGES[1], LANGUAGES[2], LANGUAGES[0]] {
-                view.dirty = false;
-                view.set_language(language, window, cx);
-                expected.preferences.language = language;
-                assert_eq!(view.reader.settings, expected);
-                assert!(Arc::ptr_eq(view.reader.book.as_ref().unwrap(), &book));
-                assert_eq!(view.reader.current, 2);
-                assert_eq!(view.reader.zoom, 1.75);
-                assert_eq!(view.reader.rotation, 90);
-                assert_eq!(view.reader.filters, filters);
-                assert_eq!(
-                    (view.book_revision, view.image_revision, view.open_revision),
-                    revision
-                );
-                assert!(view.dirty);
-                assert_eq!(view.inspector_tab, InspectorTab::Reading);
-                assert!(
-                    view.reader
-                        .settings
-                        .preferences
-                        .panel_layout
-                        .inspector_visible
-                );
+            cx.notify();
+        });
+        window.render_frame(cx);
+        window.click("zoom-trigger", cx);
+    })
+    .unwrap();
+    cx.run_until_parked();
+    let (book, filters, revision, mut expected) = cx
+        .update_window(fixture.window, |_, window, cx| {
+            fixture.view.update(cx, |view, cx| {
                 assert!(view.zoom_open);
-                assert!(!view.controls_pending && !view.path_pending);
+                view.controls_pending = false;
+                view.path_pending = false;
                 for (input, draft) in [
                     (&view.page_input, "004"),
                     (&view.path_input, "/draft/日本語/正體中文"),
                     (&view.interval_input, "17"),
                     (&view.zoom_input, "62."),
                 ] {
-                    assert_eq!(input.read(cx).value().as_ref(), draft);
+                    input.update(cx, |input, cx| input.set_value(draft, window, cx));
                 }
+                view.zoom_input.read(cx).focus_handle(cx).focus(window, cx);
+                (
+                    view.reader.book.clone().unwrap(),
+                    view.reader.filters,
+                    (view.book_revision, view.image_revision, view.open_revision),
+                    view.reader.settings.clone(),
+                )
+            })
+        })
+        .unwrap();
+    for (language, id, _) in [LANGUAGES[1], LANGUAGES[2], LANGUAGES[0]] {
+        fixture.view.update(cx, |view, _| view.dirty = false);
+        click_preference(&fixture, id, cx);
+        expected.preferences.language = language;
+        fixture.view.read_with(cx, |view, cx| {
+            assert_eq!(view.reader.settings, expected);
+            assert!(Arc::ptr_eq(view.reader.book.as_ref().unwrap(), &book));
+            assert_eq!(view.reader.current, 2);
+            assert_eq!(view.reader.zoom, 1.75);
+            assert_eq!(view.reader.rotation, 90);
+            assert_eq!(view.reader.filters, filters);
+            assert_eq!(
+                (view.book_revision, view.image_revision, view.open_revision),
+                revision
+            );
+            assert!(view.dirty);
+            assert_eq!(view.inspector_tab, InspectorTab::Playback);
+            assert!(
+                view.reader
+                    .settings
+                    .preferences
+                    .panel_layout
+                    .inspector_visible
+            );
+            assert!(view.zoom_open);
+            assert!(!view.controls_pending && !view.path_pending);
+            for (input, draft) in [
+                (&view.page_input, "004"),
+                (&view.path_input, "/draft/日本語/正體中文"),
+                (&view.interval_input, "17"),
+                (&view.zoom_input, "62."),
+            ] {
+                assert_eq!(input.read(cx).value().as_ref(), draft);
             }
         });
-        window.render_frame(cx);
-        assert_eq!(window.find("page-input").value(), Some("004"));
-        assert_eq!(window.find("zoom-input").value(), Some("62."));
-    })
-    .unwrap();
+        cx.update_window(fixture.window, |_, window, _| {
+            assert_eq!(window.find("page-input").value(), Some("004"));
+            assert_eq!(window.find("zoom-input").value(), Some("62."));
+        })
+        .unwrap();
+    }
 }
 
 #[gpui_kit::test]
@@ -358,10 +386,10 @@ fn language_selection_persists_and_is_applied_when_reopening(cx: &mut TestAppCon
             view.navigate(2, window, cx);
             view.perform(Command::Bookmark, window, cx);
         });
-        window.click("preferences", cx);
-        window.click("language-ja", cx);
     })
     .unwrap();
+    open_preferences(&fixture, cx);
+    click_preference(&fixture, "language-ja", cx);
     pump(&fixture, cx);
     let settings_path = fixture.directory.path().join("settings.json");
     let saved = AppSettings::load_from(&settings_path).unwrap();

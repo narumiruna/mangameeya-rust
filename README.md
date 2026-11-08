@@ -16,7 +16,7 @@ The GPU draws the interface directly. The application does not use Tauri, WebVie
 - A virtualized thumbnail strip, file browser, recent files, per-book reading positions, and bookmarks.
 - Native open and save dialogs, keyboard controls, mouse wheel, page turns at either edge, and drag and drop across the window.
 - Fullscreen, timed slideshows, and saving original images.
-- A single window: subsequent launches send new paths to the existing window. macOS also supports document-open events from Finder.
+- One primary reader window and a separate Preferences window. Subsequent launches send new paths to the existing reader, even when Preferences is active. macOS also supports document-open events from Finder.
 - Image and comic file associations in the Windows installer and macOS app bundle.
 
 Source images are not changed. The save operation refuses to overwrite source files in the current book. This protection also covers symbolic links and hard links.
@@ -84,15 +84,29 @@ The interface continues to use GPUI Kit, ActiveTheme, and Lucide icons.
 You can hide each side panel independently and drag its edge to change its width. Panel visibility and preferred widths are saved and restored.
 
 - The left panel keeps the **File / Thumbnails / Recent** tabs. Thumbnails keep their aspect ratio. Page numbers and file names are separate; tooltips show full file names.
-- The right **Reading tools** panel has three tabs:
+- The right **Reading tools** panel has only two tabs:
   - **Image**: brightness, contrast, grayscale, rotation, and **Reset filters**. Reset filters changes only brightness, contrast, and grayscale, not rotation or reading preferences.
-  - **Reading**: reading-position memory, reading direction, and background. **General settings** contains language selection and corrupt-settings recovery.
   - **Playback**: slideshow playback and a 1–120 second interval.
 
 Changing tool tabs does not reset values or unsubmitted input. The selected tool tab is not saved between launches.
-The **Tools → Preferences** menu and the native Preferences entry open the **Reading** tab.
 **File → Open options** contains **Include subfolders**, using the existing `recursive_folder` preference.
 Changes apply the next time you open a comic; they do not reload the current book.
+
+### Preferences window
+
+Open **Preferences** from the toolbar, **Tools → Preferences**, or the native Preferences entry. On macOS, `Command+,` also opens it.
+Only one Preferences window can be open. Repeated requests activate that window.
+It is a separate, resizable, nonmodal normal window: you can continue to use the reader while it is open.
+The initial size is 560 × 520 logical px, with a 440 × 360 minimum and vertical scrolling. Its size, position, and open state are not saved.
+Opening or closing it does not change reader panel visibility, widths, the selected tool tab, or the open book and reading state.
+
+- **Reading**: reading-position memory, reading direction, and Black, Dark gray, or Paper backgrounds. The background applies only to the reading area. Direction changes in either window update both controls; selecting the current direction does not change it.
+- **General settings**: language selection and corrupt-settings backup/reset.
+
+Changes apply immediately and use the existing automatic save. There are no Save or Apply buttons. Save errors appear in Preferences.
+While Preferences has focus, `Escape` or `Ctrl+W` closes only that window; macOS `Command+W` and Windows `Alt+F4` do the same. The book stays open, and the application keeps running.
+Reader navigation and zoom shortcuts do not act through Preferences. **File → Close comic** still closes the book, not Preferences.
+Closing the reader or choosing **Quit** closes both windows and exits the application. macOS `Command+Q` also quits.
 
 ### Zoom and page navigation
 
@@ -116,27 +130,27 @@ Page numbers apply only when you press `Enter`. The slideshow interval applies w
 
 ## Language
 
-Open **Preferences** from the **Tools** menu or the native Preferences entry.
-This opens **Reading tools → Reading**. Under **General settings → Language**, select
+Under **Preferences → General settings → Language**, select
 **English**, **日本語**, or **正體中文**.
 The choice applies immediately and is saved in `settings.json` as `preferences.language`
 (`en`, `ja`, or `zh-Hant`). English is the default, including for older settings without this field.
-Menus, controls, tooltips, accessibility labels, and reader messages use the selected language.
+Both windows update immediately. Menus, controls, tooltips, accessibility labels, and reader messages use the selected language.
 File names and technical error details are unchanged. Native file dialog controls use the OS language.
 GPUI component text uses the matching locale; component strings not supplied by GPUI, including Japanese text-editing menus, fall back to English.
 
 ## Local data
 
 Preferences, reading positions, recent files, and bookmarks are stored in the user's `settings.json`. Saves use a temporary file and atomic replacement.
+The independent Preferences window does not change the settings schema. Existing settings need no conversion.
 
 - Windows: `%APPDATA%\MangaMeeya\MangaMeeya Rust\config\settings.json`
 - macOS: `~/Library/Application Support/org.MangaMeeya.MangaMeeya-Rust/settings.json`
 
 `directories::ProjectDirs` determines the actual path.
 If the settings file is corrupt, the application keeps the original and shows an error.
-Under **Reading tools → Reading → General settings**, select **Back up and reset settings** to save a `settings.json.corrupt-*` backup before resetting.
+Under **Preferences → General settings**, select **Back up and reset settings** to save a `settings.json.corrupt-*` backup before resetting.
 Local storage from the older WebView version is not read, deleted, or migrated automatically.
-The single-window lock and authenticated loopback endpoint are also in this directory. The endpoint is removed when the application closes.
+The single-instance lock and authenticated loopback endpoint are also in this directory. The endpoint is removed when the application closes.
 
 ### Panel settings and downgrade
 
