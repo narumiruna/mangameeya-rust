@@ -654,9 +654,30 @@ mod tests {
         use std::{ffi::OsStr, os::unix::ffi::OsStrExt};
         let temp = tempdir().unwrap();
         let path = temp.path().join(OsStr::from_bytes(b"native-\xff.png"));
-        fs::write(&path, b"native image").unwrap();
-        let entry = listed(&path);
-        assert_eq!(entry.entry_path.file_name(), path.file_name());
-        assert_eq!(read_cover(&entry).unwrap().bytes, b"native image");
+        let lossy = PathBuf::from(path.to_string_lossy().into_owned());
+        fs::write(&lossy, b"lossy neighbor").unwrap();
+        assert_eq!(
+            read_cover(&listed(&lossy)).unwrap().bytes,
+            b"lossy neighbor"
+        );
+        match fs::write(&path, b"native image") {
+            Ok(()) => {
+                let entry = listed(&path);
+                assert_eq!(entry.entry_path.file_name(), path.file_name());
+                assert_eq!(read_cover(&entry).unwrap().bytes, b"native image");
+            }
+            Err(error) => {
+                // APFS rejects this name with EILSEQ (92). The cover reader must
+                // return that native-path error, not open the valid lossy neighbor.
+                assert!(
+                    cfg!(target_os = "macos") && error.raw_os_error() == Some(92),
+                    "{error}"
+                );
+                let mut entry = listed(&lossy);
+                entry.path = path.clone();
+                entry.entry_path = path;
+                assert!(read_cover(&entry).is_err());
+            }
+        }
     }
 }
