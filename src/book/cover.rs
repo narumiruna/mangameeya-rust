@@ -48,8 +48,25 @@ pub fn read_cover(entry: &DirectoryEntry) -> Result<CoverSource, String> {
 }
 
 fn open_regular(path: &Path) -> Result<(File, fs::Metadata), String> {
-    let file =
-        File::open(path).map_err(|error| format!("Cannot read {}: {error}", path.display()))?;
+    let mut options = fs::OpenOptions::new();
+    options.read(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        // O_NONBLOCK prevents a replaced FIFO from waiting for a writer before
+        // handle validation. These are the supported Unix platform ABI values.
+        let nonblock = if cfg!(all(target_os = "linux", target_arch = "x86_64")) {
+            0x0800
+        } else if cfg!(target_os = "macos") {
+            0x0004
+        } else {
+            return Err("Automatic cover reads are unsupported on this Unix platform.".into());
+        };
+        options.custom_flags(nonblock);
+    }
+    let file = options
+        .open(path)
+        .map_err(|error| format!("Cannot read {}: {error}", path.display()))?;
     // Use the opened handle, not earlier browser metadata or a second path lookup.
     let metadata = file.metadata().map_err(|error| error.to_string())?;
     if !metadata.is_file() {
@@ -635,6 +652,35 @@ mod tests {
             fs::write(&path, b"not parsed").unwrap();
             error(read_cover(&listed(&path)), "index and solid-prefix");
             assert_eq!(fs::read(path).unwrap(), b"not parsed");
+        }
+    }
+
+    #[cfg(any(all(target_os = "linux", target_arch = "x86_64"), target_os = "macos"))]
+    #[test]
+    fn image_and_archive_covers_reject_fifo_replacements_without_a_writer() {
+        use std::{process::Command, sync::mpsc, thread, time::Duration};
+        let temp = tempdir().unwrap();
+        for name in ["replaced.png", "replaced.cbz"] {
+            let path = temp.path().join(name);
+            fs::write(&path, b"previous regular file").unwrap();
+            let entry = listed(&path);
+            fs::remove_file(&path).unwrap();
+            assert!(
+                Command::new("mkfifo")
+                    .arg(&path)
+                    .status()
+                    .unwrap()
+                    .success()
+            );
+            let (sender, receiver) = mpsc::channel();
+            thread::spawn(move || {
+                _ = sender.send(read_cover(&entry));
+            });
+            let result = receiver
+                .recv_timeout(Duration::from_secs(3))
+                .expect("Cover open must not wait for a FIFO writer");
+            error(result, "regular file");
+            fs::remove_file(path).unwrap();
         }
     }
 

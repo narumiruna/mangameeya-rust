@@ -383,3 +383,48 @@ fn continuous_page_anchor_survives_a_resize_while_the_browser_is_visible(cx: &mu
         assert!(view.continuous.logical_scroll_top().offset_in_item >= px(0.));
     });
 }
+
+#[gpui_kit::test]
+fn failed_navigation_keeps_loading_the_retained_listing_after_scroll(cx: &mut TestAppContext) {
+    let fixture = fixture(cx);
+    let folder = book(&fixture, "failed-navigation", 60);
+    browse(&fixture, &folder, cx);
+    fixture.view.update(cx, |view, cx| {
+        view.browser.model.query = "png".into();
+        view.rebuild_browser(cx);
+    });
+    for _ in 0..5 {
+        pump(&fixture, cx);
+    }
+    let before = fixture.view.read_with(cx, |view, _| {
+        (
+            view.browser.requested_count(),
+            view.browser.cache_count(),
+            view.browser.model.selected.clone(),
+        )
+    });
+    browse(&fixture, &folder.join("missing"), cx);
+    fixture.view.read_with(cx, |view, _| {
+        assert!(view.listing_error.is_some());
+        assert_eq!(
+            view.listing.as_ref().unwrap().path,
+            folder.canonicalize().unwrap()
+        );
+        assert_eq!(view.browser.model.query, "png");
+        assert_eq!(view.browser.model.selected, before.2);
+    });
+    cx.update_window(fixture.window, |_, window, cx| window.press("end", cx))
+        .unwrap();
+    for _ in 0..5 {
+        pump(&fixture, cx);
+    }
+    fixture.view.read_with(cx, |view, _| {
+        assert!(view.browser.requested_count() > before.0);
+        assert!(view.browser.cache_count() > before.1);
+        assert_eq!(view.browser.active_jobs(), 0);
+        assert_eq!(
+            view.browser.model.selected.as_ref(),
+            Some(&folder.join("60.png").canonicalize().unwrap())
+        );
+    });
+}

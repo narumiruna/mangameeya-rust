@@ -1135,7 +1135,13 @@ impl ReaderView {
                         }
                         view.path_pending = true;
                     }
-                    Err(error) => view.listing_error = Some(error),
+                    Err(error) => {
+                        view.listing_error = Some(error);
+                        view.pending_browser_selection = None;
+                        // The previous listing is still visible. A failed newer
+                        // intent must not leave its visible-cover dispatcher paused.
+                        view.browser_resume(cx);
+                    }
                 }
                 cx.notify();
             });
