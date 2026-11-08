@@ -1,3 +1,9 @@
+## 0.6.0
+
+### Minor Changes
+
+- Browse a cover grid in the reader canvas with Backspace, stable sorting and search, retained reading state, and bounded background covers.
+
 ## 0.5.0
 
 ### Minor Changes
