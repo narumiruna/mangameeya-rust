@@ -453,7 +453,8 @@ Its unresolved external checks are retained below before plan removal.
 ## Integrated central file browser
 
 Implementation started from `1534c3e` on `narumi/feat/integrated-file-browser`.
-The execution plan is `docs/plans/2026-11-08_integrated-file-browser-plan.md`.
+The execution plan `docs/plans/2026-11-08_integrated-file-browser-plan.md` was completed
+and removed after its checks passed. The retained handoff is below.
 The HTML proposals in `docs/file-browser-concepts/` remain design references, not native verification evidence.
 
 ### Scope and behavior
@@ -489,10 +490,19 @@ format-icon fallback. Manual Book opening keeps its existing format support.
 
 Only the current viewport and one adjacent row on each side request covers. At most
 two jobs run, including obsolete jobs that have not completed. Canonical aliases share
-one worker slot. The 32 MiB pixel cache evicts old images; native atlas releases are
-deferred when the current Window is borrowed. Failures are cached until refresh or a
+one worker slot. The 32 MiB pixel cache evicts old images. Dense high-DPI viewports reduce cover
+resolution so the complete visible/overscan working set fits the budget. The size
+uses a stable worst-case row count, not the current scroll fraction. Viewport height
+is read outside list render callbacks. This prevents a nested ListState borrow.
+Native atlas releases are deferred when the current Window is borrowed. Failures are cached until refresh or a
 changed source key. Refresh also clears known counts. No source image is changed,
 no archive is extracted to disk, and no persistent cover database is created.
+
+Image and ZIP handles use nonblocking opens on Linux x86_64 and macOS before
+regular-file validation. Replacing a listed source with a FIFO cannot wait for a
+writer and occupy both cover slots. Other Unix targets use an explicit fallback.
+A failed directory intent resumes cover dispatch for the still-visible old listing
+without accepting work from an earlier revision.
 
 ### Local verification
 
@@ -505,8 +515,9 @@ repository dependency declarations were changed.
 | Check | Result |
 | --- | --- |
 | Clean `1534c3e` Windows baseline | fmt, all-target/all-feature Clippy, and native rendering passed; full tests: 185 passed, 1 existing IPC queue ConnectionReset failure |
-| `cargo test --locked --all-features`, Linux | 258 passed; no failures or ignored tests; normal parallel execution |
-| Full feature suite, Windows | Latest normal parallel run: 251 passed, 3 failures in unchanged IPC tests listed below; this is not a passing Windows full-suite result |
+| `cargo test --locked --all-features`, Linux, `4eeb0aa` | 261 passed; no failures or ignored tests; normal parallel execution |
+| Local full suite, Windows, `f17020e` | 251 passed, 3 failures in unchanged IPC tests listed below; this is not a passing Windows full-suite result |
+| Focused review regressions, Windows | All 10 lifecycle tests and the dense high-DPI budget case passed |
 | `cargo test --locked --test rendering`, Windows and Linux | Passed, including new isolated browser windows, three locales, three sizes, four panel combinations, stable shell geometry, search editing, and scroll-reachable browser tools |
 | `cargo clippy --locked --all-targets --all-features -- -D warnings` | Passed on Windows and Linux |
 | `cargo fmt --all -- --check` | Passed |
@@ -519,11 +530,18 @@ baseline binary. Local logs are under `target/integrated-browser-baseline/` and
 `target/integrated-browser/`; these are not tracked artifacts.
 
 The new coverage includes 16 browser-model tests, bounded cover-source cases,
-31 native browser event/lifecycle tests, and a lossless native-ID regression.
+32 native browser event/lifecycle tests, a lossless native-ID regression, and a
+dense high-DPI working-set regression.
 The independent review found alias worker duplication, hidden filter changes,
 recursive count identity, Close cover dispatch, external filtered selection,
 open/listing intent races, and drag shortcut ordering. Each was fixed with a
-regression test. Existing direct-book test fixtures now select Reading explicitly;
+regression test. The final review also found FIFO replacement blocking and failed
+navigation stopping the retained listing's dispatcher. Both have passing regressions;
+the focused follow-up review found no blocking issues in those fixes. A budget test
+then reproduced 91 covers at 140 logical pixels and 2x scale exceeding 32 MiB before
+the resolution cap, and passed after the cap. Existing browser render tests exposed
+and verified the subsequent ListState borrow fix. Existing direct-book test fixtures
+now select Reading explicitly;
 existing test assertions and IPC implementation/tests were not weakened.
 
 The Windows runs retain all failures: `queue_is_bounded_and_rejects_overflow`,
@@ -532,21 +550,67 @@ The Windows runs retain all failures: `queue_is_bounded_and_rejects_overflow`,
 reproduced the queue failure; earlier sections also record this IPC failure family.
 No cause is asserted for the other two in this final run. No IPC source/test was
 changed, no test was skipped, and no serial run is reported as a parallel pass.
-PR platform CI is required to establish its hosted-platform outcome. The local
-Windows and Linux rendering paths verify events and geometry, not Metal pixels.
+PR platform CI is required to establish its hosted-platform outcome.
+macOS CI first exposed an APFS test-fixture error when creating a non-UTF-8 filename.
+The same Unix test still runs: it verifies exact bytes where the filesystem accepts
+the name, or APFS's EILSEQ rejection without opening an existing lossy-name neighbor.
+The Unicode cover test runs on every platform. No case was ignored to pass macOS.
+
+The local Windows and Linux rendering paths verify events and geometry, not Metal pixels.
 The existing macOS CI rendering path writes real native captures under
 `target/ui-smoke/browser-*`, alongside the previous captures.
 
+### Hosted verification
+
+[CI run 42499140744](https://github.com/narumiruna/mangameeya-rust/actions/runs/42499140744)
+passed all five configured jobs for final code `4eeb0aa`. All full suites used normal
+parallel execution, with no failures or ignored tests:
+
+| Target | Full Rust suite |
+| --- | --- |
+| Windows x86_64 | 256 passed |
+| macOS arm64 | 261 passed |
+| macOS x86_64 | 261 passed |
+| Linux x86_64 | 261 passed |
+
+The hosted run passed the existing native rendering, lint, release-configuration,
+recovery, and package-build gates. This supplies a passing Windows full-suite result
+without changing, skipping, or waiving the local IPC failures. CI package artifacts
+are test build outputs, not a package publication or release.
+
+Both macOS architectures produced 72 browser captures each: English, Japanese,
+Traditional Chinese; three sizes; four panel combinations; Reading and Browsing.
+
+- [arm64 native captures](https://github.com/narumiruna/mangameeya-rust/actions/runs/42499140744/artifacts/13625255748)
+- [x86_64 native captures](https://github.com/narumiruna/mangameeya-rust/actions/runs/42499140744/artifacts/13625392767)
+
+The artifact names are `mangameeya-rust-ui-smoke-aarch64-apple-darwin` and
+`mangameeya-rust-ui-smoke-x86_64-apple-darwin`. Browser files use
+`browser-<locale>-<size>-<panels>-<reading|browsing>.png`. The captures use generated
+test pages, not user comics. Representative final captures were inspected for
+central replacement and readable labels. They led to the compact Japanese tab label
+and the English page-count label without a singular/plural error. This inspection
+does not establish physical desktop behavior or subjective product acceptance.
+CI artifacts expire under repository retention; the existing native rendering test
+can reproduce the captures. No capture or generated binary was committed.
+
+The final documentation/plan-removal commit changes no validated Rust source,
+dependencies, settings schema, IPC, packaging, or workflow. PR checks also run for
+that documentation-only head before the PR is marked ready.
+
 ### Retained browser handoff and recovery
 
-- **Platform maintainer:** Use the PR's native CI results and macOS capture artifacts.
-  At the intended desktop scaling, inspect physical OS shortcuts, IME composition,
-  focus, font rendering, and high-DPI covers. Geometry tests do not prove these
+- **Platform maintainer:** Prerequisite: the PR's native build, CI results, capture
+  artifacts, and a desktop at the intended display scaling. Inspect physical OS
+  shortcuts, IME composition, focus, font rendering, and high-DPI covers. Expected
+  result: text editing does not navigate the grid, focus returns to the correct
+  control, and covers and labels are readable. Geometry tests do not prove these
   physical desktop paths. Do not claim a platform or native pixels without its
   corresponding execution evidence. Keep the existing CI/release gates.
 - **Product maintainer:** Compare native reading and browsing captures with proposal
-  04 for cover density, filename readability, and reading comfort. This subjective
-  review is optional and is not an agent coding gate.
+  04 for cover density, filename readability, and reading comfort. Expected result:
+  a documented visual and usability assessment. This subjective review is optional
+  and is not an agent coding gate.
 - **Recovery:** Revert the feature and its unreleased note. Settings need no conversion;
   do not reset reading positions, history, bookmarks, or comic files. No package was
   published, version tag created, or release workflow dispatched by this work.
