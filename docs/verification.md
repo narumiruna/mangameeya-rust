@@ -693,8 +693,8 @@ Logs are under ignored `target/files-tree/`: `baseline-*`, `model-final-tests.lo
 `path-initial-full-tests.log`, `final-browser.log`, `final-tests.log`,
 `final-tests-retry.log`, `ipc-isolated.log`, `final-fmt.log`, `final-clippy.log`,
 `final-rendering.log`, `linux-tests.log`, `linux-clippy.log`,
-`linux-rendering.log`, and `release-tests.log`. HTML captures remain in an OS
-temporary directory. These files are local evidence, not tracked source assets.
+`linux-rendering.log`, `release-tests.log`, and `icon-*.log`. HTML captures remain
+in an OS temporary directory. These files are local evidence, not tracked source assets.
 
 ### Regression and review evidence
 
@@ -742,6 +742,12 @@ temporary directory. These files are local evidence, not tracked source assets.
   The matrix checks fixed controls, labels, bounds, active-row reachability, sibling
   icon alignment, keyboard reachability, and long names. It also checks 54 End-key
   states. The smallest tree scrolls to rows rather than requiring all rows visible.
+- Review of the initial arm64 macOS capture found blank Locate and file-type icons.
+  The default component bundle did not contain the three new SVG assets. The
+  reader bundle now embeds them. The asset test checks all Files control and
+  entry icons, and failed on the missing archive asset before the fix. Local full
+  suites then passed all changed code; the same Windows IPC failure remained.
+  Post-fix macOS capture verification is pending normal CI.
 - Existing reader and central-browser rendering workflows remain unchanged. Local
   Windows and Linux rendering verifies native events and geometry, not Metal
   pixels. The rendering test emits `target/ui-smoke/files-*.png` on macOS; those
@@ -752,8 +758,8 @@ The initial implementation at `6b157bc` passed all five jobs in
 [CI run 42520274379](https://github.com/narumiruna/mangameeya-rust/actions/runs/42520274379),
 including normal Windows tests, both macOS architectures, Linux, release checks,
 and production rendering. This demonstrates a clean CI Windows execution; it does
-not change the local Windows failure into a pass. The subsequent path/focus fixes
-require their own normal CI evidence before the plan is retired.
+not change the local Windows failure into a pass. The subsequent path/focus and
+embedded-icon fixes require their own normal CI evidence before plan retirement.
 
 The complete change was reviewed for correctness, security, lifecycle safety,
 compatibility, regressions, and scope. The Windows baseline failure remains disclosed;
