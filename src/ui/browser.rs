@@ -32,6 +32,32 @@ fn native_entry_ids_do_not_merge_equal_lossy_display_names() {
     assert_ne!(browser_entry_id(&paths[0]), browser_entry_id(&paths[1]));
 }
 
+fn cover_dimensions(tile_width: f32, scale: f32, capacity: usize) -> (u32, u32) {
+    // Keep the whole viewport and overscan inside the pixel budget. A dense
+    // high-DPI view must not repeatedly decode and evict its own visible covers.
+    let pixels = COVER_CACHE_BYTES / 4 / capacity.max(1);
+    let max_width = ((pixels as f64 / 1.4).sqrt().floor() as u32).max(1);
+    let width = ((tile_width * scale).ceil().max(1.) as u32).min(max_width);
+    (width, (width * 14 / 10).max(1))
+}
+
+#[test]
+fn dense_high_dpi_cover_working_sets_fit_the_pixel_budget() {
+    for width in [140., 100., 220.] {
+        for scale in [2., 1., 1.25, 3., 4.] {
+            for capacity in [91, 1, 16, 32, 64, 128, 512] {
+                let (w, h) = cover_dimensions(width, scale, capacity);
+                assert!(w > 0 && h > 0);
+                assert!(
+                    u64::from(w) * u64::from(h) * 4 * capacity as u64 <= COVER_CACHE_BYTES as u64,
+                    "{capacity} covers at {width}px / {scale}x exceed the cache budget: {w}x{h}"
+                );
+            }
+        }
+    }
+    assert_eq!(cover_dimensions(140., 2., 16), (280, 392));
+}
+
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
 struct CoverKey {
     path: PathBuf,
@@ -164,12 +190,22 @@ impl BrowserUi {
     }
 
     fn cover_key(&self, entry: &book::DirectoryEntry) -> CoverKey {
+        // Include a partial row and both overscan rows. This capacity does not
+        // change at each scroll offset, so decoded resolution remains stable.
+        let rows = (f32::from(self.grid.viewport_bounds().size.height).max(0.) / self.row_height())
+            .ceil() as usize;
+        let capacity = rows
+            .saturating_add(3)
+            .saturating_mul(self.columns)
+            .min(self.model.order.len())
+            .max(1);
+        let (width, height) = cover_dimensions(self.tile_width, self.scale, capacity);
         CoverKey {
             path: entry.path.clone(),
             size: entry.size,
             modified: entry.modified,
-            width: (self.tile_width * self.scale).ceil().max(1.) as u32,
-            height: (self.tile_width * 1.4 * self.scale).ceil().max(1.) as u32,
+            width,
+            height,
         }
     }
 }

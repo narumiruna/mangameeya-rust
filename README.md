@@ -84,7 +84,7 @@ The browser keeps the query, sort, selection, and scroll position when you retur
 
 Sort by natural or literal name, modified or created time, size, type, known page count, known reading progress, recent-open order, or a fixed random order. Folder grouping is independent of sort direction; unknown values stay last. Counts come only from opened books or visible cover reads. Sorting does not scan all archives. Recent-open order is not a last-read timestamp.
 
-Covers load only near the viewport, with at most two jobs and a 32 MiB pixel cache. Folder covers use the first image at the top level. Automatic ZIP/CBZ covers require a classic single-volume Stored/Deflated archive within 64 MiB, 4096 entries, and 2 MiB of metadata. RAR/CBR, ZIP64, unsupported layouts, and over-limit sources show a format icon and a reason. Manual book opening is unchanged. Press `F5` to retry and discard stale covers and counts. Source comics are never changed.
+Covers load only near the viewport, with at most two jobs and a 32 MiB pixel cache. Dense high-DPI grids use a lower cover resolution so the visible and nearby rows fit that budget. Folder covers use the first image at the top level. Automatic ZIP/CBZ covers require a classic single-volume Stored/Deflated archive within 64 MiB, 4096 entries, and 2 MiB of metadata. RAR/CBR, ZIP64, unsupported layouts, and over-limit sources show a format icon and a reason. Manual book opening is unchanged. Press `F5` to retry and discard stale covers and counts. Source comics are never changed.
 
 ### Toolbar and panels
 
