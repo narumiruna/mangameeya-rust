@@ -642,7 +642,9 @@ Implementation started on 2026-11-09 from `798ce33`, the current `origin/main`, 
   filtering covers dot entries and Windows Hidden/System attributes. Locate can
   enable hidden visibility and report the change.
 - The location field displays ordinary drive and UNC paths without using display
-  text as an entry identity. Enter submits; Escape restores the accepted path.
+  text as an entry identity. Accepted relative and parent-component paths normalize
+  to absolute locations. Valid alias spelling is retained when it still identifies
+  the actual target; POSIX alias/parent resolution keeps physical directory semantics. Enter submits; Escape restores the accepted path.
   Invalid paths and failed reads retain the prior location and reader. Retry keeps
   the failed operation: a Locate failure retries Locate, not a previous navigation.
 - The existing 224 logical-pixel sidebar default and 216–320 range are unchanged.
@@ -664,11 +666,11 @@ repository build configuration were changed.
 | Baseline Windows formatting, all-target Clippy, production rendering | Passed before implementation |
 | Baseline Windows full suite | 253 passed; 3 existing IPC failures; none ignored |
 | Windows `cargo fmt --all -- --check` | Passed |
-| Windows tree model tests | 45 passed |
-| Windows native Files event tests | 24 passed |
+| Windows tree model tests | 51 passed |
+| Windows native Files event tests | 26 passed |
 | Windows central-browser event/lifecycle tests | 32 passed |
-| Windows final `cargo test --locked --all-features` | **Failed: 324 passed, 1 existing IPC failure; none ignored** |
-| Linux final `cargo test --locked --all-features` | 326 passed; no failures or ignored tests; normal parallel execution |
+| Windows final `cargo test --locked --all-features` | **Failed: 332 passed, 1 existing IPC failure; none ignored** |
+| Linux final `cargo test --locked --all-features` | 335 passed; no failures or ignored tests; normal parallel execution |
 | Windows and Linux production rendering | Passed, including the Files matrix below |
 | Windows and Linux all-target/all-feature Clippy with `-D warnings` | Passed |
 | Pinned changenote v0.10.0 status | Passed; one minor feature note; no product version files changed |
@@ -687,7 +689,8 @@ execution evidence. **The Windows full suite is not reported as passing, and the
 existing required CI gates still apply before merge or release.**
 
 Logs are under ignored `target/files-tree/`: `baseline-*`, `model-final-tests.log`,
-`files-final-tests.log`, `final-browser.log`, `final-tests.log`,
+`files-final-tests.log`, `path-model-tests.log`, `path-ui-tests.log`,
+`path-initial-full-tests.log`, `final-browser.log`, `final-tests.log`,
 `final-tests-retry.log`, `ipc-isolated.log`, `final-fmt.log`, `final-clippy.log`,
 `final-rendering.log`, `linux-tests.log`, `linux-clippy.log`,
 `linux-rendering.log`, and `release-tests.log`. HTML captures remain in an OS
@@ -704,7 +707,16 @@ temporary directory. These files are local evidence, not tracked source assets.
   Back or Locate cancellation. Accepted explicit expansions resume without scanning
   query-only branches or retrying persistent errors indefinitely. Close invalidates
   pending work and leaves canceled unloaded branches available to expand again.
-- Directory requests capture the expected canonical owner. A retargeted alias
+- Final review found and fixed incorrect Parent behavior after accepting `.` or
+  paths ending in `..`, and off-screen focus after navigating to a distant sibling.
+  Tests cover the original request proof, accepted absolute paths, alias-safe parent
+  components, POSIX physical-parent semantics, same-location input synchronization,
+  external book-source normalization, and focused-row visibility after navigation.
+  A first full path-fix run exposed a shared-CWD test-fixture race. The dot case now
+  tests the actual normalizer and model without enumerating other parallel fixtures;
+  a separate real relative-directory fixture verifies runtime loader wiring. The
+  final full run has no change-caused failures; no test was ignored or serialized.
+- Directory requests capture the original request and expected canonical owner. A retargeted alias
   cannot install ancestor contents under a stale node. Detached descendants and
   their work are invalidated. Staged Locate merges check owner identity both before
   replay and at each install; unrelated expanded branches remain intact.
@@ -735,6 +747,13 @@ temporary directory. These files are local evidence, not tracked source assets.
   pixels. The rendering test emits `target/ui-smoke/files-*.png` on macOS; those
   platform captures were not produced locally and are not claimed as local visual
   evidence. The HTML screenshots are not native evidence.
+
+The initial implementation at `6b157bc` passed all five jobs in
+[CI run 42520274379](https://github.com/narumiruna/mangameeya-rust/actions/runs/42520274379),
+including normal Windows tests, both macOS architectures, Linux, release checks,
+and production rendering. This demonstrates a clean CI Windows execution; it does
+not change the local Windows failure into a pass. The subsequent path/focus fixes
+require their own normal CI evidence before the plan is retired.
 
 The complete change was reviewed for correctness, security, lifecycle safety,
 compatibility, regressions, and scope. The Windows baseline failure remains disclosed;

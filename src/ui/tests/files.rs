@@ -1096,6 +1096,87 @@ fn windows_junction_aliases_keep_native_rows_and_locate_alias_source(cx: &mut Te
 }
 
 #[gpui_kit::test]
+fn accepted_parent_components_show_normalized_paths_and_navigate_the_real_parent(
+    cx: &mut TestAppContext,
+) {
+    let fixture = files_fixture(cx);
+    let root = book(&fixture, "normalized-location", 2)
+        .canonicalize()
+        .unwrap();
+    std::fs::create_dir(root.join("series")).unwrap();
+    let ordinary = PathBuf::from(crate::file_tree::display_path(&root));
+    let expected = std::path::absolute(&ordinary).unwrap();
+    browse(&fixture, &expected, cx);
+    let draft = ordinary.join("series").join("..");
+    replace_input(&fixture, "path-input", &draft.to_string_lossy(), cx);
+    press(&fixture, "enter", cx);
+    fixture.view.read_with(cx, |view, _| {
+        assert_eq!(view.files_ui.model.location(), Some(expected.as_path()));
+    });
+    cx.update_window(fixture.window, |_, window, _| {
+        assert_eq!(
+            window.find("path-input").value(),
+            Some(crate::file_tree::display_path(&expected).as_str())
+        );
+    })
+    .unwrap();
+    click(&fixture, "files-parent", cx);
+    fixture.view.read_with(cx, |view, _| {
+        assert_eq!(view.files_ui.model.location(), expected.parent());
+    });
+
+    let source = ordinary.join("series").join("..").join("2.png");
+    fixture.sender.send(vec![source]).unwrap();
+    pump(&fixture, cx);
+    click(&fixture, "files-locate", cx);
+    fixture.view.read_with(cx, |view, _| {
+        assert_eq!(
+            view.files_ui.source.as_deref(),
+            Some(expected.join("2.png").as_path())
+        );
+        assert_eq!(view.files_ui.model.location(), Some(expected.as_path()));
+        assert_eq!(
+            view.files_ui.model.selected(),
+            Some(expected.join("2.png").as_path())
+        );
+        assert_eq!(view.reader.current, 1);
+    });
+}
+
+#[gpui_kit::test]
+fn navigating_to_a_far_sibling_reveals_its_focused_tree_row(cx: &mut TestAppContext) {
+    let fixture = files_fixture(cx);
+    let root = book(&fixture, "navigation-focus", 1)
+        .canonicalize()
+        .unwrap();
+    for index in 0..100 {
+        std::fs::create_dir(root.join(format!("series-{index:03}"))).unwrap();
+    }
+    let target = root.join("series-099");
+    browse(&fixture, &root, cx);
+    fixture.view.update(cx, |view, cx| {
+        view.files_ui.list.scroll_to(ListOffset {
+            item_ix: 99,
+            offset_in_item: px(0.),
+        });
+        cx.notify();
+    });
+    pump(&fixture, cx);
+    click(&fixture, entry_id(&target), cx);
+    fixture.view.read_with(cx, |view, _| {
+        assert_eq!(view.files_ui.model.location(), Some(target.as_path()));
+        assert_eq!(view.files_ui.model.focused(), Some(target.as_path()));
+        assert!(view.files_ui.list.logical_scroll_top().item_ix > 50);
+    });
+    cx.update_window(fixture.window, |_, window, _| {
+        let tree = window.find("files-tree").bounds();
+        let row = window.find(entry_id(&target)).bounds();
+        assert!(row.top() >= tree.top() && row.bottom() <= tree.bottom());
+    })
+    .unwrap();
+}
+
+#[gpui_kit::test]
 fn sidebar_book_replacement_releases_the_borrowed_windows_image_atlas(cx: &mut TestAppContext) {
     let fixture = files_fixture(cx);
     let first = book(&fixture, "atlas-first", 1).canonicalize().unwrap();

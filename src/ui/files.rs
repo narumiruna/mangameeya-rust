@@ -175,6 +175,7 @@ impl ReaderView {
                     view.files_remember_scroll();
                     let old_location = view.files_ui.model.location().map(Path::to_path_buf);
                     let was_hidden = view.files_ui.model.show_hidden();
+                    let was_navigation = view.files_ui.model.is_navigation_request(request.token);
                     let accepted = view.files_ui.model.complete(request.token, result);
                     if accepted {
                         if view.files_ui.auto_reveal
@@ -187,7 +188,11 @@ impl ReaderView {
                         }
                         view.files_rebuild(cx);
                         let changed = old_location.as_deref() != view.files_ui.model.location();
-                        view.files_sync_inputs(changed, window, cx);
+                        let navigated = was_navigation && view.files_ui.model.error().is_none();
+                        view.files_sync_inputs(changed || navigated, window, cx);
+                        if navigated {
+                            view.files_reveal_focus();
+                        }
                         let revealed =
                             view.files_ui
                                 .reveal_target

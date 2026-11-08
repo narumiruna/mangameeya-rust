@@ -1027,7 +1027,14 @@ impl ReaderView {
                 .and_then(|parent| path.file_name().map(|name| parent.join(name)))
                 .unwrap_or_else(|| book.path.clone());
             let folder_book = book.path.is_dir();
-            let source_entry = std::path::absolute(&path).map_err(|error| error.to_string())?;
+            let mut source_entry = std::path::absolute(&path).map_err(|error| error.to_string())?;
+            if source_entry
+                .components()
+                .any(|part| part == std::path::Component::ParentDir)
+            {
+                let target = path.canonicalize().map_err(|error| error.to_string())?;
+                source_entry = crate::file_tree::normalize_entry_path(&path, &target)?;
+            }
             Ok::<_, String>((book, origin, folder_book, source_entry))
         });
         cx.spawn_in(window, async move |view, cx| {

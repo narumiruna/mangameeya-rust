@@ -4,7 +4,7 @@ use crate::book::{self, DirectoryEntry, EntryKind};
 use std::{
     collections::{HashMap, HashSet, VecDeque},
     fs,
-    path::{Path, PathBuf},
+    path::{Component, Path, PathBuf},
 };
 
 // History snapshots retain loaded metadata; cap them independently of virtual rows.
@@ -18,7 +18,9 @@ pub(crate) struct TreeEntry {
 
 #[derive(Clone, Debug)]
 pub(crate) struct LoadedDirectory {
-    /// Requested native path, including aliases.
+    /// Original request spelling, used to validate the result.
+    pub requested_path: PathBuf,
+    /// Accepted absolute logical path, including valid aliases.
     pub path: PathBuf,
     pub target: PathBuf,
     pub entries: Vec<TreeEntry>,
@@ -27,23 +29,52 @@ pub(crate) struct LoadedDirectory {
 /// Call on a worker. Never recursively enumerates children.
 pub(crate) fn load_directory(path: &Path) -> Result<LoadedDirectory, String> {
     let listing = book::browse_directory(path)?;
+    let accepted_path = normalize_entry_path(path, &listing.path)?;
     let mut entries = Vec::with_capacity(listing.entries.len());
     for mut entry in listing.entries {
         let name = entry
             .entry_path
             .file_name()
             .ok_or("Entry has no native name.")?;
-        entry.entry_path = path.join(name);
+        entry.entry_path = accepted_path.join(name);
         let metadata =
             fs::symlink_metadata(&entry.entry_path).map_err(|error| error.to_string())?;
         let hidden = hidden_entry(&entry.entry_path, &metadata);
         entries.push(TreeEntry { entry, hidden });
     }
     Ok(LoadedDirectory {
-        path: path.to_path_buf(),
+        requested_path: path.to_path_buf(),
+        path: accepted_path,
         target: listing.path,
         entries,
     })
+}
+
+/// Normalize a successful native entry on a worker without merging valid aliases.
+/// `target` must be the actual canonical target of the original request.
+pub(crate) fn normalize_entry_path(path: &Path, target: &Path) -> Result<PathBuf, String> {
+    let absolute = std::path::absolute(path).map_err(|error| error.to_string())?;
+    // Windows absolute paths can already have their parent components folded.
+    let had_parent = path
+        .components()
+        .chain(absolute.components())
+        .any(|component| component == Component::ParentDir);
+    let mut logical = PathBuf::new();
+    for component in absolute.components() {
+        match component {
+            Component::CurDir => {}
+            Component::ParentDir => {
+                logical.pop();
+            }
+            _ => logical.push(component.as_os_str()),
+        }
+    }
+    // POSIX resolves symlinks before `..`. Keep the lexical alias only when
+    // folding its parent components still identifies the directory actually read.
+    if had_parent && !fs::canonicalize(&logical).is_ok_and(|candidate| candidate == target) {
+        return Ok(target.to_path_buf());
+    }
+    Ok(logical)
 }
 
 fn hidden_entry(path: &Path, metadata: &fs::Metadata) -> bool {
@@ -331,6 +362,12 @@ impl FileTree {
         if let Some(root) = self.state.root.clone() {
             self.resume_expansions(&root);
         }
+    }
+
+    pub(crate) fn is_navigation_request(&self, token: RequestToken) -> bool {
+        self.navigation
+            .as_ref()
+            .is_some_and(|request| request.token == token)
     }
 
     pub(crate) fn pending_navigation(&self) -> Option<&Path> {
@@ -766,6 +803,7 @@ impl FileTree {
             return false;
         }
         if let Ok(loaded) = &result
+            && loaded.requested_path == work.request.path
             && loaded.path == work.request.path
             && let Some(expected) = &work.expected_target
             && loaded.target != *expected
@@ -786,8 +824,12 @@ impl FileTree {
             return true;
         }
         let result = result.and_then(|loaded| {
-            if loaded.path != work.request.path {
+            if loaded.requested_path != work.request.path {
                 Err("Directory result does not match its requested native path.".into())
+            } else if !matches!(work.purpose, Purpose::Navigation)
+                && loaded.path != work.request.path
+            {
+                Err("Directory result does not match its current owner path.".into())
             } else {
                 Ok(loaded)
             }
@@ -1156,6 +1198,7 @@ mod tests {
 
     fn listing(path: &Path, entries: Vec<TreeEntry>) -> LoadedDirectory {
         LoadedDirectory {
+            requested_path: path.into(),
             path: path.into(),
             target: path.into(),
             entries,
@@ -1912,6 +1955,7 @@ mod tests {
             tree.complete(
                 request.token,
                 Ok(LoadedDirectory {
+                    requested_path: request.path.clone(),
                     path: request.path.clone(),
                     target: "shared-target".into(),
                     entries: vec![back, nested, item(&request.path, "page.png", false)],
@@ -2208,6 +2252,121 @@ mod tests {
     }
 
     #[test]
+    fn relative_dot_accepts_absolute_location_and_requests_its_real_parent() {
+        let cwd = std::env::current_dir().unwrap();
+        let mut tree = FileTree::new();
+        tree.request_navigation(".".into());
+        let request = tree.take_requests().pop().unwrap();
+        // Do not enumerate the shared process CWD while parallel relative fixtures
+        // create and remove children there. The next test covers the real loader.
+        let target = fs::canonicalize(&request.path).unwrap();
+        let loaded = LoadedDirectory {
+            requested_path: request.path.clone(),
+            path: normalize_entry_path(&request.path, &target).unwrap(),
+            target,
+            entries: Vec::new(),
+        };
+        assert_eq!(loaded.requested_path, Path::new("."));
+        assert_eq!(loaded.path, cwd);
+        assert!(tree.is_navigation_request(request.token));
+        assert!(tree.complete(request.token, Ok(loaded)));
+        assert!(!tree.is_navigation_request(request.token));
+        assert_eq!(tree.location(), Some(cwd.as_path()));
+        assert!(tree.can_parent());
+        assert!(tree.request_parent());
+        assert_eq!(tree.pending_navigation(), cwd.parent());
+        assert_eq!(std::env::current_dir().unwrap(), cwd);
+    }
+
+    #[test]
+    fn relative_temporary_directory_rebases_children_under_absolute_location() {
+        let temp = tempfile::tempdir_in(".").unwrap();
+        fs::write(temp.path().join("page.png"), b"image").unwrap();
+        let name = temp.path().file_name().unwrap();
+        let requested = Path::new(".").join(name).join(".");
+        assert!(requested.is_relative());
+        let expected = std::env::current_dir().unwrap().join(name);
+        let loaded = load_directory(&requested).unwrap();
+        assert_eq!(loaded.requested_path, requested);
+        assert_eq!(loaded.path, expected);
+        assert_eq!(
+            loaded.entries[0].entry.entry_path,
+            expected.join("page.png")
+        );
+        assert_eq!(loaded.target, fs::canonicalize(temp.path()).unwrap());
+        let mut tree = FileTree::new();
+        tree.request_navigation(requested);
+        let request = tree.take_requests().pop().unwrap();
+        assert!(tree.complete(request.token, Ok(loaded)));
+        assert!(tree.request_parent());
+        assert_eq!(tree.pending_navigation(), expected.parent());
+    }
+
+    #[test]
+    fn accepted_series_parent_requests_the_next_parent_not_series() {
+        let temp = tempdir().unwrap();
+        let library = temp.path().join("library");
+        fs::create_dir_all(library.join("series")).unwrap();
+        let requested = library.join("series/..");
+        let mut tree = FileTree::new();
+        tree.request_navigation(requested.clone());
+        let request = tree.take_requests().pop().unwrap();
+        let loaded = load_directory(&request.path).unwrap();
+        assert_eq!(loaded.requested_path, requested);
+        assert_eq!(loaded.path, library);
+        assert_eq!(loaded.entries[0].entry.entry_path, library.join("series"));
+        assert!(tree.complete(request.token, Ok(loaded)));
+        assert_eq!(tree.location(), Some(library.as_path()));
+        assert!(tree.request_parent());
+        assert_eq!(tree.pending_navigation(), Some(temp.path()));
+        let parent = tree.take_requests().pop().unwrap();
+        assert!(tree.complete(parent.token, load_directory(&parent.path)));
+        assert_eq!(tree.location(), Some(temp.path()));
+        assert!(tree.back());
+        assert_eq!(tree.location(), Some(library.as_path()));
+    }
+
+    #[test]
+    fn original_request_proof_is_required_even_when_accepted_path_matches() {
+        let temp = tempdir().unwrap();
+        let mut tree = initialize(&[("page.png", false)]);
+        tree.request_navigation(temp.path().into());
+        let request = tree.take_requests().pop().unwrap();
+        let mut loaded = load_directory(&request.path).unwrap();
+        loaded.requested_path = temp.path().join("wrong");
+        assert_eq!(loaded.path, request.path);
+        assert!(tree.complete(request.token, Ok(loaded)));
+        assert_eq!(tree.location(), Some(Path::new("root")));
+        assert!(tree.error().unwrap().contains("native path"));
+        assert!(!tree.can_back());
+    }
+
+    #[test]
+    fn expansion_and_locate_require_the_accepted_path_to_match_the_owner() {
+        for locate in [false, true] {
+            let mut tree = initialize(&[("a", true)]);
+            if locate {
+                tree.locate("root/a/book.png".into());
+            } else {
+                tree.expand(Path::new("root/a"));
+            }
+            let request = tree.take_requests().pop().unwrap();
+            assert!(!tree.is_navigation_request(request.token));
+            let mut loaded = listing(&request.path, vec![]);
+            loaded.path = "wrong-owner".into();
+            assert!(tree.complete(request.token, Ok(loaded)));
+            let error = if locate {
+                tree.error()
+            } else {
+                tree.node_error(&request.path)
+            };
+            assert!(error.unwrap().contains("owner path"));
+            assert_eq!(tree.location(), Some(Path::new("root")));
+            assert!(!tree.node(&request.path).unwrap().loaded);
+        }
+    }
+
+    #[test]
     fn root_parent_navigation_and_back_preserve_the_previous_tree() {
         let temp = tempdir().unwrap();
         let child = temp.path().join("child");
@@ -2411,6 +2570,93 @@ mod tests {
     }
 
     #[cfg(any(windows, unix))]
+    fn directory_alias(target: &Path, alias: &Path) {
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(target, alias).unwrap();
+        #[cfg(windows)]
+        {
+            let result = std::process::Command::new("cmd.exe")
+                .args(["/D", "/C", "mklink", "/J"])
+                .arg(alias)
+                .arg(target)
+                .output()
+                .unwrap();
+            assert!(result.status.success(), "{result:?}");
+        }
+    }
+
+    #[cfg(any(windows, unix))]
+    #[test]
+    fn alias_sub_parent_keeps_alias_when_lexical_and_actual_targets_match() {
+        let temp = tempdir().unwrap();
+        let target = temp.path().join("target");
+        let alias = temp.path().join("alias");
+        fs::create_dir_all(target.join("sub")).unwrap();
+        fs::write(target.join("page.png"), b"image").unwrap();
+        directory_alias(&target, &alias);
+        let requested = alias.join("sub/..");
+        let loaded = load_directory(&requested).unwrap();
+        assert_eq!(loaded.requested_path, requested);
+        assert_eq!(loaded.path, alias);
+        assert_eq!(loaded.target, fs::canonicalize(&target).unwrap());
+        assert!(loaded.entries.iter().any(|item| {
+            item.entry.entry_path == alias.join("page.png")
+                && item.entry.path == fs::canonicalize(target.join("page.png")).unwrap()
+        }));
+        let source = alias.join("sub/../page.png");
+        let source_target = fs::canonicalize(&source).unwrap();
+        assert_eq!(
+            normalize_entry_path(&source, &source_target).unwrap(),
+            alias.join("page.png")
+        );
+        let mut tree = FileTree::new();
+        tree.request_navigation(requested);
+        let request = tree.take_requests().pop().unwrap();
+        assert!(tree.complete(request.token, Ok(loaded)));
+        assert_eq!(tree.root(), Some(alias.as_path()));
+        assert!(tree.request_parent());
+        assert_eq!(tree.pending_navigation(), Some(temp.path()));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn posix_alias_parent_uses_physical_parent_when_lexical_parent_differs() {
+        let temp = tempdir().unwrap();
+        let library = temp.path().join("library");
+        let physical = temp.path().join("physical");
+        let target = physical.join("series");
+        let alias = library.join("alias");
+        fs::create_dir(&library).unwrap();
+        fs::create_dir_all(&target).unwrap();
+        fs::write(physical.join("page.png"), b"image").unwrap();
+        directory_alias(&target, &alias);
+        let requested = alias.join("..");
+        let loaded = load_directory(&requested).unwrap();
+        let expected = fs::canonicalize(&physical).unwrap();
+        assert_eq!(loaded.requested_path, requested);
+        assert_eq!(loaded.path, expected);
+        assert_ne!(loaded.path, library);
+        assert_eq!(loaded.target, expected);
+        assert!(
+            loaded
+                .entries
+                .iter()
+                .any(|item| { item.entry.entry_path == expected.join("page.png") })
+        );
+        let source = alias.join("../page.png");
+        assert_eq!(
+            normalize_entry_path(&source, &fs::canonicalize(&source).unwrap()).unwrap(),
+            expected.join("page.png")
+        );
+        let mut tree = FileTree::new();
+        tree.request_navigation(requested);
+        let request = tree.take_requests().pop().unwrap();
+        assert!(tree.complete(request.token, Ok(loaded)));
+        assert!(tree.request_parent());
+        assert_eq!(tree.pending_navigation(), expected.parent());
+    }
+
+    #[cfg(any(windows, unix))]
     #[test]
     fn actual_directory_alias_rebases_native_children_and_preserves_targets() {
         let temp = tempdir().unwrap();
@@ -2418,19 +2664,15 @@ mod tests {
         let alias = temp.path().join("alias");
         fs::create_dir(&target).unwrap();
         fs::write(target.join("page.png"), b"image").unwrap();
-        #[cfg(unix)]
-        std::os::unix::fs::symlink(&target, &alias).unwrap();
-        #[cfg(windows)]
-        {
-            let result = std::process::Command::new("cmd.exe")
-                .args(["/D", "/C", "mklink", "/J"])
-                .arg(&alias)
-                .arg(&target)
-                .output()
-                .unwrap();
-            assert!(result.status.success(), "{result:?}");
-        }
+        directory_alias(&target, &alias);
+        let second_alias = temp.path().join("second-alias");
+        directory_alias(&target, &second_alias);
+        let second = load_directory(&second_alias).unwrap();
         let loaded = load_directory(&alias).unwrap();
+        assert_eq!(loaded.requested_path, alias);
+        assert_eq!(second.path, second_alias);
+        assert_ne!(loaded.path, second.path);
+        assert_eq!(loaded.target, second.target);
         assert_eq!(loaded.path, alias);
         assert_eq!(loaded.target, fs::canonicalize(&target).unwrap());
         assert_eq!(loaded.entries[0].entry.entry_path, alias.join("page.png"));
