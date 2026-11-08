@@ -1,1 +1,5 @@
 * text=auto eol=lf
+
+# Keep upstream EOLs and required unified-diff context markers.
+# git apply --whitespace=error still checks all added SDK source lines.
+packaging/updates/*/*.patch -text whitespace=-blank-at-eol,-blank-at-eof,-space-before-tab

@@ -1,0 +1,89 @@
+name: Updater SDK checks
+
+on:
+  push:
+    paths:
+      - '.github/workflows/updater-sdk.yml'
+      - '.gitattributes'
+      - 'packaging/updates/**'
+      - 'tests/updates/**'
+  pull_request:
+    paths:
+      - '.github/workflows/updater-sdk.yml'
+      - '.gitattributes'
+      - 'packaging/updates/**'
+      - 'tests/updates/**'
+
+permissions:
+  contents: read
+
+jobs:
+  source-safety:
+    name: SDK source preparation safety
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: false
+      - name: Test source preparation and build-helper failure guards
+        run: |
+          uv run --no-project --python 3.13 python -m unittest discover -s tests/updates -p 'test_prepare_sdk.py' -v
+          uv run --no-project --python 3.13 python -m unittest discover -s tests/updates/sparkle -p 'test_*.py' -v
+          uv run --no-project --python 3.13 python -m unittest discover -s tests/updates/winsparkle -p 'test_*.py' -v
+
+  sdk-native:
+    name: ${{ matrix.sdk }} / ${{ matrix.arch }}
+    needs: source-safety
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - sdk: winsparkle
+            arch: x64
+            runner: windows-2022
+          - sdk: sparkle
+            arch: arm64
+            runner: macos-15
+          - sdk: sparkle
+            arch: x86_64
+            runner: macos-15-intel
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: false
+      - name: Select full Xcode
+        if: runner.os == 'macOS'
+        env:
+          DEVELOPER_DIR: /Applications/Xcode.app/Contents/Developer
+        run: |
+          echo "DEVELOPER_DIR=$DEVELOPER_DIR" >> "$GITHUB_ENV"
+          xcodebuild -version
+      - name: Prepare exact source and reviewed patch
+        run: uv run --no-project --python 3.13 python packaging/updates/prepare_sdk.py '${{ matrix.sdk }}' --output 'target/sdk-preflight/${{ matrix.sdk }}'
+      - name: Build and test hardened Windows SDK
+        if: runner.os == 'Windows'
+        run: uv run --no-project --python 3.13 python packaging/updates/winsparkle/build_sdk.py --source target/sdk-preflight/winsparkle/source --output target/sdk-preflight/winsparkle/native
+      - name: Build and test hardened macOS SDK
+        if: runner.os == 'macOS'
+        run: uv run --no-project --python 3.13 python packaging/updates/sparkle/build_sdk.py --source target/sdk-preflight/sparkle/source --output target/sdk-preflight/sparkle/native --arch '${{ matrix.arch }}'
+      - name: Upload SDK check evidence, not distribution binaries
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: updater-sdk-checks-${{ matrix.sdk }}-${{ matrix.arch }}
+          path: |
+            target/sdk-preflight/**/provenance.json
+            target/sdk-preflight/**/native/*.log
+            target/sdk-preflight/**/native/*.json
+            target/sdk-preflight/**/native/*.txt
+            target/sdk-preflight/**/native/*.xcresult
+          if-no-files-found: ignore

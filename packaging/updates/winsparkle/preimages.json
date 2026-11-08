@@ -1,0 +1,106 @@
+{
+  "3rdparty/config/wx/setup.h": {
+    "before_sha256": "1af9c5a9deef90f7570b364c61560b93516f689667aee5dfbf7e076f1868c18f",
+    "after_sha256": "8fa6dca0eaf45fbc22593bf52078cd670439fa257ecb83517cddf79e10a6c79a"
+  },
+  "3rdparty/dependencies.bkl": {
+    "before_sha256": "e9e8c69aa0ca2f45a912f763936f6a0619202e7f3a4752355d2824e35f341e7b",
+    "after_sha256": "78bd0e6800f054e8ae237838bb076880492151668f8e5de0e242169e090ef11d"
+  },
+  "3rdparty/wx.vcxproj": {
+    "before_sha256": "ff2554a3dd1b1458beda9d96482644a50fe4a0d747c7699f9119a22960325cd5",
+    "after_sha256": "58bb37f873d791149f2bbd03f3787e8a7d0dd04792a019d5f890d88765fbbe36"
+  },
+  "WinSparkle.bkl": {
+    "before_sha256": "69f8b0172464abd5ccaa8cf6c74ad3d148104f686e592a751cf7479b0ad47ba1",
+    "after_sha256": "2ad5022c2b2481ef421f3e9f0da87d33eff9c40d10a3cdc41847dc4b8d9b1ca2"
+  },
+  "WinSparkle.sln": {
+    "before_sha256": "69fe447f895fb09909b747731f1ce4b9cc074ec9cc8f20f3ae1fca5a31c95b3e",
+    "after_sha256": "a789688a85a49444f98675bf01b6755413758c86467ae00fce63c3feb20c8e45"
+  },
+  "WinSparkle.vcxproj": {
+    "before_sha256": "b6dcdbf4debc240c39dd8cf322c5a79d15e951ce70f32fb38b89258fadefe7d3",
+    "after_sha256": "de94cc7544c94e7e390acc0fdf8810ee0b5b28ec3367ee235aaae212ac2d5c70"
+  },
+  "cmake/CMakeLists.txt": {
+    "before_sha256": "e02f0483e22bbf57ec5395f2341249a673174a08d3ea2f5e7521933d10c21d0c",
+    "after_sha256": "7bdf0a78c114cd40a3fed5fdb9cce3f034680a3eab8dade3fe97d5b51c90da50"
+  },
+  "cmake/wxWidgets/CMakeLists.txt": {
+    "before_sha256": "fc4ddc11e5d25bfaf241d13f287fa31a562fac5ca72b31dec54a85790772142e",
+    "after_sha256": "8e8bb4f2aa40f175b510e761f7df68d2708e36b8a2a9129ed0795e699cdead1f"
+  },
+  "include/winsparkle.h": {
+    "before_sha256": "68bc74f82300361af00a5080b254c7e2f3a3af7ad6e98546751f9e090b9c1d22",
+    "after_sha256": "ae2918dc7b0517fbfd76cd469a249edc1e6013c4e6dd5b5426860414f73ba7bb"
+  },
+  "packages.config": {
+    "before_sha256": "6268bf224bf1ef4bf2cb7bc7929ee552fd0d17f26787d5b0807e9d0fca6a7847",
+    "after_sha256": "db11af92d67cc79f8e1adb6fd7c7588e2c26530c4bcc169a31fb1d57af18ca98"
+  },
+  "src/appcast.cpp": {
+    "before_sha256": "b7fbee2463604fb79f842bbe673972fa2407465959d7e42cdada6e44c9625251",
+    "after_sha256": "4ecd5498bb22a1be0e3e2537ff143299ab6184fb62644dbd82693bf6e2daf38d"
+  },
+  "src/appcontroller.cpp": {
+    "before_sha256": "d6f59b380ac380ecbabc165e72cfcd61174ddcc85f597d7e32a8fe33759e0938",
+    "after_sha256": "6a92be6bd0fe93989b490d341e5e4f20b6f0221d50d5fa1a6394328d59c1891b"
+  },
+  "src/appcontroller.h": {
+    "before_sha256": "4aa757786cabf414644b1d4959595166e5615f6a099178099e5bb990e2540368",
+    "after_sha256": "a74989e5eb3e680e3ba1de2458ad5b1ba032b7c574064a9df3a6e966511367b6"
+  },
+  "src/dll_api.cpp": {
+    "before_sha256": "e06b4a56d5058b751b05328a52dabed6d86db6f53ab42d8d1d04cda37f7f1ac5",
+    "after_sha256": "abf420ab9e137e43d7fe1ab5cef676ab95c5b93ed77e883c98cfcb8854ddda5a"
+  },
+  "src/download.cpp": {
+    "before_sha256": "b894b64ec9f78ef5d9b28133e6ce228e72083009604b8b221dbd95d313d6f274",
+    "after_sha256": "4b87746298d397634b4c338ab77b16f5ca388373b7e38d41d278d7acf00caf84"
+  },
+  "src/download.h": {
+    "before_sha256": "120514816a456b3a3019aa3daf2b21f3ccf8f2b0fbe555686987ec2b414b8e9c",
+    "after_sha256": "a31ce2b3d3440570f9e6c13136e8339dc0dd88790ad577640bf0780cef858ea6"
+  },
+  "src/settings.cpp": {
+    "before_sha256": "1aef661f895ad0fe1358bed1b7c2f39d094c77cf3b9b799299e8a307fdcb6e94",
+    "after_sha256": "9d6f16a84da00d597d5bfae84e7cb971a5a1e20200bac0cf0bedd47de6466be4"
+  },
+  "src/settings.h": {
+    "before_sha256": "1e0b06058dcb332daf08e9363bed6b912ff19374cc2f37a5f39e7b4c315f9bb3",
+    "after_sha256": "baec12df15ba1f3bcbb6321c92dc5f9de3cb3816f2dbaa1ff7f9e1d0f77672f0"
+  },
+  "src/signatureverifier.cpp": {
+    "before_sha256": "0fbd7a51da487b9f55b0230d60a391cceaf748c75cc327c3d2a897f41140ec97",
+    "after_sha256": "b58a4ce977694bd879af0fda8bd249641be949181ea77c08b020a3c4144ed441"
+  },
+  "src/signatureverifier.h": {
+    "before_sha256": "bf9c1970ac33debe2bc7e0dbe2a9749da30fbe46c3c312d0feccd7cabc45cccd",
+    "after_sha256": "ab2a43e78f4ccea0f66a6e28bec1856955ec147829899f3144d157a671ec7fbf"
+  },
+  "src/ui.cpp": {
+    "before_sha256": "149bd96ef412bb73268303b482769deb47a94846e1eb4038573079878ad8bca3",
+    "after_sha256": "9ca027237990cc16ac90fb727beef7461beab28f5ae3afd26f542718f2b28d3f"
+  },
+  "src/ui.h": {
+    "before_sha256": "e61c2c06bdc19fe8129821a8d9dd20f96895e8165b6a30e163a08379965d4cf3",
+    "after_sha256": "2b25e4bddbad1b632fac7e6a37b9a36e32a5b21171049b70a07b665b5557cc55"
+  },
+  "src/updatechecker.cpp": {
+    "before_sha256": "8fe7e4c0f57b86786daeb4d3994948c393f9f923134b8d5af78d06d7ad31d3b1",
+    "after_sha256": "02c30a7680b39ccd38532b82d7f7e98f1867d98fcdf269d906ca2f2b2fc09ed5"
+  },
+  "src/updatedownloader.cpp": {
+    "before_sha256": "6ac69ea748df2a1e036557c8b4d6a0f3daf608fb33f3bf181fb08b5661c1f1a6",
+    "after_sha256": "6896af1c463b9644659d00c9d2713aed560a945a86b872c508214ce682b7d360"
+  },
+  "src/updatedownloader.h": {
+    "before_sha256": "05098e9c2d41c8ed0f9d600f5c8c8bacc229dc0a3b307a155118f96e47f1ddc7",
+    "after_sha256": "e915004a094421ee0f66519ea791cafdd49d60913b685d266568041275739d56"
+  },
+  "src/utils.h": {
+    "before_sha256": "60777f1a753538716694a19f9abaf8a25569f9981072474b336f846ffd1770b5",
+    "after_sha256": "61effab3ad5080a1d93ca1cbbf757093ad0bafecad72c97a05ed09e2198c4574"
+  }
+}

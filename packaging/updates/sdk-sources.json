@@ -1,0 +1,26 @@
+{
+  "schema": 1,
+  "hardening_version": 1,
+  "sdks": {
+    "winsparkle": {
+      "version": "0.9.4",
+      "commit": "a8986caf620262f7d4581b241436ceaa0cc9370f",
+      "url": "https://github.com/vslavik/winsparkle/releases/download/v0.9.4/WinSparkle-0.9.4-src.zip",
+      "sha256": "cd77040f828dce0adcf8f0205f776238197deb24f5108bf01a3e5623b703a3b9",
+      "size": 64991527,
+      "format": "zip",
+      "prefix": "",
+      "patch": "winsparkle/hardening.patch"
+    },
+    "sparkle": {
+      "version": "2.10.1",
+      "commit": "ab7d71291238df6e0492143b120c9b696a35f603",
+      "url": "https://codeload.github.com/sparkle-project/Sparkle/tar.gz/ab7d71291238df6e0492143b120c9b696a35f603",
+      "sha256": "d7e5599d56ddb917cddbb4a719fb534ad5d2d7e80a653446d0eea6a38920b302",
+      "size": 16788678,
+      "format": "tar.gz",
+      "prefix": "Sparkle-ab7d71291238df6e0492143b120c9b696a35f603",
+      "patch": "sparkle/hardening.patch"
+    }
+  }
+}
