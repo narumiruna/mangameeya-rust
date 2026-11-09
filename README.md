@@ -76,6 +76,14 @@ cargo run --locked -- /path/to/book.cbz
 macOS also supports `Command+O`, `Command+Shift+O`, `Command+S`, `Command+W`, `Command+Q`, `Command+,`, and `Control+Command+F`.
 The mouse wheel scrolls without directly turning pages. Hold `Ctrl` while using the wheel to zoom. In single-page and two-page layouts, click the left or right edge of the reading area to turn pages.
 
+### Bookmarks
+
+Each book has one bookmark. `B` or the toolbar button sets or updates it. `Shift+B` or **Bookmarks → Go to bookmark** returns to it. **Bookmarks → Delete bookmark** removes it.
+
+New folder bookmarks track the source image, not only its page number. They keep the same image after **Include subfolders** or natural page order changes. If the image is missing or excluded when you reopen the folder, the reader shows an error and keeps the bookmark. It does not select another image. Restore the image or subfolder setting and reopen the folder to use it again. Renamed or moved images need a new bookmark. Archive bookmarks keep their existing page-number behavior.
+
+Old bookmarks remain readable. They keep numeric behavior until you set them again, because old settings do not identify the source image.
+
 ### Files sidebar
 
 The **File** tab has an expandable folder tree, independent of the central browser. Click a disclosure arrow to expand or collapse a folder; click its name to navigate the sidebar. A single book click selects it without changing the reader. Double-click a book, press `Enter` on its row, or use **Read selection** to read it. A selection hidden by filtering or collapse cannot be read with that button. **Read this folder** opens the current folder's images using the existing **Include subfolders** preference; it does not combine child archives into one book.
@@ -177,6 +185,12 @@ If the settings file is corrupt, the application keeps the original and shows an
 Under **Preferences → General settings**, select **Back up and reset settings** to save a `settings.json.corrupt-*` backup before resetting.
 Local storage from the older WebView version is not read, deleted, or migrated automatically.
 The single-instance lock and authenticated loopback endpoint are also in this directory. The endpoint is removed when the application closes.
+
+### Bookmark metadata and downgrade
+
+The `bookmarks` field keeps its existing numeric format. New folder bookmarks also save optional `bookmark_images` metadata. It contains the saved index and the lossless native image path. The field is omitted when empty. Existing settings load without conversion.
+
+Before using an older build, close the application and back up `settings.json`. From a working copy, remove only the top-level `bookmark_images` field if that build does not support it. Keep `bookmarks`, `positions`, `recent`, and all preferences. Numeric bookmarks remain usable, but no longer track image identity. Do not reset settings.
 
 ### Panel settings and downgrade
 

@@ -138,6 +138,24 @@ fn sort_pages(pages: &mut [Page]) {
 }
 
 impl Book {
+    /// Cached canonical image identity. Archive pages keep their existing index semantics.
+    pub(crate) fn image_page_path(&self, index: usize) -> Option<&Path> {
+        match &self.pages.get(index)?.source {
+            PageSource::File(path) => Some(path),
+            _ => None,
+        }
+    }
+
+    /// Keep an unchanged alias position when it still reads the same image.
+    pub(crate) fn image_page_index(&self, image: &Path, preferred: usize) -> Option<usize> {
+        if self.image_page_path(preferred) == Some(image) {
+            return Some(preferred);
+        }
+        self.pages
+            .iter()
+            .position(|page| matches!(&page.source, PageSource::File(path) if path == image))
+    }
+
     /// Opens a folder, an image's containing folder, or a ZIP/CBZ or RAR/CBR.
     /// `recursive` controls folder traversal; archive entries always include subfolders.
     pub fn open(path: &Path, recursive: bool) -> Result<Self, String> {
@@ -705,6 +723,47 @@ mod tests {
         assert_eq!(book.read_page(1).unwrap(), b"two");
         assert_eq!(book.clone().read_page(2).unwrap(), b"ten");
         assert_eq!(Book::open(temp.path(), false).unwrap().initial_page, 0);
+    }
+
+    #[test]
+    fn image_page_identity_is_cached_native_and_prefers_an_unchanged_alias() {
+        let directory = tempdir().unwrap();
+        let image = directory.path().join("image.png");
+        fs::write(&image, b"image").unwrap();
+        let image = fs::canonicalize(image).unwrap();
+        let book = Book {
+            title: "aliases".into(),
+            path: directory.path().to_path_buf(),
+            pages: vec![
+                Page {
+                    name: "first.png".into(),
+                    source: PageSource::File(image.clone()),
+                },
+                Page {
+                    name: "alias.png".into(),
+                    source: PageSource::File(image.clone()),
+                },
+                Page {
+                    name: "archive.png".into(),
+                    source: PageSource::Zip {
+                        archive: directory.path().join("book.cbz"),
+                        entry_index: 0,
+                        entry_name: b"archive.png".to_vec(),
+                    },
+                },
+            ],
+            initial_page: 0,
+        };
+        fs::remove_file(&image).unwrap();
+        assert_eq!(book.image_page_path(0), Some(image.as_path()));
+        assert_eq!(book.image_page_index(&image, 1), Some(1));
+        assert_eq!(book.image_page_index(&image, 20), Some(0));
+        assert_eq!(book.image_page_path(2), None);
+        assert_eq!(book.image_page_path(20), None);
+        assert_eq!(
+            book.image_page_index(&directory.path().join("missing.png"), 0),
+            None
+        );
     }
 
     #[test]

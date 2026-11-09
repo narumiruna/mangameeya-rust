@@ -3,6 +3,7 @@ use crate::i18n::Language;
 use gpui_kit::{AnyWindowHandle, TestAppContext, test::TestWindowExt};
 use tempfile::TempDir;
 
+mod bookmarks;
 mod browser;
 mod browser_lifecycle;
 mod desktop;
