@@ -577,10 +577,17 @@ fn delayed_workers_prioritize_visible_rows_and_refill_on_completion_without_tick
         .map(|index| path.join(format!("comic-{index:05}.cbz")))
         .collect();
     assert_eq!(
-        gate.lock().unwrap().started,
-        expected[..2],
-        "previous-row overscan must not delay the visible first row"
+        gate.lock()
+            .unwrap()
+            .started
+            .iter()
+            .cloned()
+            .collect::<HashSet<_>>(),
+        expected[..2].iter().cloned().collect::<HashSet<_>>(),
+        "both actual slots must contain visible sources, not preceding overscan"
     );
+    // Concurrent jobs can be first polled in either order on different hosts.
+    // Dispatch priority does not impose a start order within the visible pair.
     for _ in 0..4 {
         fixture.view.update(cx, |view, cx| view.browser_tick(cx));
         render_windows(&fixture, cx);
@@ -593,7 +600,17 @@ fn delayed_workers_prioritize_visible_rows_and_refill_on_completion_without_tick
     // Finish the second job first. No tick or timer runs after this release.
     gate.lock().unwrap().release(expected[1].clone());
     cx.run_until_parked();
-    assert_eq!(gate.lock().unwrap().started, expected);
+    let started = gate.lock().unwrap().started.clone();
+    assert_eq!(started.len(), 3);
+    assert_eq!(
+        started.last(),
+        Some(&expected[2]),
+        "completion must refill with the next visible source without a timer"
+    );
+    assert_eq!(
+        started.iter().cloned().collect::<HashSet<_>>(),
+        expected.iter().cloned().collect::<HashSet<_>>()
+    );
     fixture.view.read_with(cx, |view, _| {
         assert_eq!(view.browser.active_jobs(), 2);
         assert_eq!(view.browser.requested_count() - before, 3);

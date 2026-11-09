@@ -110,6 +110,13 @@ They now compare exact retained source sets, still reject stale results, and che
 explicit refresh and changed-source retry. The final full run passes. Logs retain
 the initial failures; no assertion was replaced with a permissive count bound.
 
+The first hosted Windows and Linux jobs also exposed a test-only ordering error:
+both visible workers started, but their first polls were reversed. The check now
+requires the exact visible pair regardless of concurrent poll order, still checks
+exactly two held slots, and requires the exact next source after completion
+without a timer. Runtime work was not serialized and no priority criterion was
+removed. The failed jobs remain in [run 42628620728](https://github.com/narumiruna/mangameeya-rust/actions/runs/42628620728).
+
 Controlled-worker regressions check painted queued/loading/failed labels,
 visible-before-overscan dispatch, out-of-order completion without a timer tick,
 and obsolete slots across folder/scroll/resize changes. Production native-text
