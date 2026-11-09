@@ -13,6 +13,7 @@ use std::{
 use zip::ZipArchive;
 
 mod cover;
+pub(crate) use cover::{CoverError, read_cover_classified};
 pub use cover::{CoverSource, read_cover};
 
 pub const MAX_PAGE_BYTES: u64 = 128 * 1024 * 1024;

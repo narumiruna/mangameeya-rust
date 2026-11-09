@@ -2806,7 +2806,12 @@ impl ReaderView {
                 Button::new(id)
                     .small()
                     .ghost()
-                    .label(label)
+                    .label(if mode == SidebarMode::Recent {
+                        language.text(Text::RecentTab)
+                    } else {
+                        label
+                    })
+                    .accessibility_label(label)
                     .tooltip(label)
                     .flex_1()
                     .min_w_0()

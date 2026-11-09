@@ -2,19 +2,17 @@
 
 use super::*;
 use crate::{book::DirectoryEntry, browser::SortKey};
-use gpui_kit::{Modifiers, PlatformInput, ScrollDelta, ScrollEvent};
+use gpui_kit::{Modifiers, PlatformInput, ScrollDelta, ScrollEvent, test::TestQueryExt};
 
 const SIZES: [(f32, f32); 3] = [(1280., 800.), (960., 640.), (800., 540.)];
-const BROWSER_CONTROLS: [&str; 9] = [
+const BROWSER_CONTROLS: [&str; 7] = [
     "browser-search",
     "browser-parent",
     "browser-sort",
     "browser-reverse",
     "browser-folders-first",
-    "browser-shuffle",
     "browser-refresh",
     "browser-open",
-    "browser-resume",
 ];
 
 fn press(fixture: &Fixture, key: &str, cx: &mut TestAppContext) {
@@ -166,6 +164,31 @@ fn assert_browser_geometry(window: &Window) {
             disjoint(*a, *b);
         }
     }
+    assert!(
+        window.try_find("browser-resume").is_none(),
+        "resume has one entrance"
+    );
+    let header = window.find("browser-header").bounds();
+    inside(header, viewer);
+    assert!(header.size.height <= px(80.), "compact header: {header:?}");
+    let search = window.find("browser-search").bounds();
+    assert!(
+        search.size.width <= px(160.),
+        "search width must be bounded"
+    );
+    let actions = window.find("browser-actions").bounds();
+    if viewer.size.width >= px(900.) {
+        assert!((search.center().y - actions.center().y).abs() < px(1.));
+    } else {
+        assert!(
+            search.bottom() <= actions.top(),
+            "narrow header must have two rows"
+        );
+    }
+    assert_eq!(
+        window.find("browser-folders-first").role(),
+        Some(gpui_kit::Role::CheckBox)
+    );
     let toolbar = window.find("reader-toolbar").bounds();
     let toggle = window.find("browser-toggle");
     inside(toggle.bounds(), toolbar);
@@ -200,9 +223,9 @@ fn initial_browser_cannot_resume_without_a_book(cx: &mut TestAppContext) {
     cx.update_window(fixture.window, |_, window, cx| {
         assert_eq!(fixture.view.read(cx).content_mode, ContentMode::Browsing);
         assert!(window.find("browser-grid").visible());
-        assert_eq!(window.find("browser-resume").disabled(), Some(true));
+        assert!(window.try_find("browser-resume").is_none());
         assert_eq!(window.find("browser-toggle").disabled(), Some(true));
-        window.click("browser-resume", cx);
+        window.click("browser-toggle", cx);
         window.press("escape", cx);
         assert_eq!(fixture.view.read(cx).content_mode, ContentMode::Browsing);
         assert!(fixture.view.read(cx).reader.book.is_none());
@@ -883,7 +906,22 @@ fn query_sort_and_grid_preferences_remain_window_local_without_settings_writes(
         window.click("browser-show-names", cx);
         window.click(("browser-name-lines", 3usize), cx);
         window.click("browser-metadata", cx);
-        window.click("browser-shuffle", cx);
+        assert!(window.try_find("browser-shuffle").is_none());
+        window.click("browser-sort", cx);
+        let item = window.find_by_label(
+            fixture
+                .view
+                .read(cx)
+                .language()
+                .text(Text::BrowserSortRandom),
+        );
+        let menu = window.find("popup-menu").bounds();
+        window.click_at("popup-menu", item.bounds().center() - menu.origin, cx);
+    })
+    .unwrap();
+    pump(&fixture, cx);
+    cx.update_window(fixture.window, |_, window, cx| {
+        window.click("browser-shuffle", cx)
     })
     .unwrap();
     pump(&fixture, cx);
@@ -1149,26 +1187,29 @@ fn generation_change_rejects_cover_results_and_refresh_clears_cached_failures(
         synthetic_listing(fixture.directory.path().join("stale"), 100),
         cx,
     );
-    cx.update_window(fixture.window, |_, window, cx| {
-        fixture.view.update(cx, |view, cx| {
-            view.browser_tick(cx);
-            assert!(view.browser.active_jobs() > 0);
-            assert!(view.browser.active_jobs() <= 2);
-            let generation = view.browser.cover_generation();
-            view.clear_browser_covers(cx);
-            assert!(view.browser.cover_generation() > generation);
-            view.resume_reading(window, cx);
-        });
-    })
-    .unwrap();
+    let retained_failures = cx
+        .update_window(fixture.window, |_, window, cx| {
+            fixture.view.update(cx, |view, cx| {
+                view.browser_tick(cx);
+                let retained_failures = view.browser.failure_sources();
+                assert!(view.browser.active_jobs() > 0);
+                assert!(view.browser.active_jobs() <= 2);
+                let generation = view.browser.cover_generation();
+                view.clear_browser_covers(cx);
+                assert!(view.browser.cover_generation() > generation);
+                view.resume_reading(window, cx);
+                retained_failures
+            })
+        })
+        .unwrap();
     pump(&fixture, cx);
     fixture.view.read_with(cx, |view, _| {
         assert_eq!(view.browser.active_jobs(), 0);
         assert_eq!(view.browser.cache_count(), 0);
         assert_eq!(
-            view.browser.failure_count(),
-            0,
-            "stale errors must not enter the current generation"
+            view.browser.failure_sources(),
+            retained_failures,
+            "stale results must not add errors; prior source failures remain cached"
         );
     });
     let directory = fixture.directory.path().join("refresh-failure");
@@ -1180,7 +1221,12 @@ fn generation_change_rejects_cover_results_and_refresh_clears_cached_failures(
         pump(&fixture, cx);
     }
     let before = fixture.view.read_with(cx, |view, _| {
-        assert_eq!(view.browser.failure_count(), 1);
+        assert_eq!(view.browser.failure_count(), retained_failures.len() + 1);
+        assert!(
+            view.browser
+                .failure_sources()
+                .contains(&corrupt.canonicalize().unwrap())
+        );
         view.browser.requested_count()
     });
     image::RgbaImage::from_pixel(120, 200, image::Rgba([10, 80, 150, 255]))
@@ -1393,4 +1439,272 @@ fn refresh_and_close_release_native_cover_images_without_using_reader_cache(
         }
     })
     .unwrap();
+}
+
+fn set_cover_width(fixture: &Fixture, width: f32, cx: &mut TestAppContext) {
+    fixture.view.update(cx, |view, cx| {
+        view.browser.tile_slider.update(cx, |_, cx| {
+            cx.emit(SliderEvent::Change(
+                gpui_kit::component::slider::SliderValue::Single(width),
+            ));
+        });
+    });
+    render_windows(fixture, cx);
+    render_windows(fixture, cx);
+}
+
+#[gpui_kit::test]
+fn long_names_paint_two_or_three_lines_at_each_cover_width(cx: &mut TestAppContext) {
+    let fixture = fixture(cx);
+    pump(&fixture, cx);
+    let mut listing = synthetic_listing(fixture.directory.path().join("wrapping"), 4);
+    for (entry, name) in listing.entries.iter_mut().zip([
+        "[Shared Author Event] The common title has a long prefix Volume 01.cbz",
+        "[Shared Author Event] The common title has a long prefix Volume 02.cbz",
+        "日本語正體中文長篇漫畫名稱連續文字第十二卷測試沒有空白文字.cbz",
+        "LongUnspacedCommonFilenamePrefixWithDifferentVolumeNumber0123456789.cbz",
+    ]) {
+        // Keep each sample long enough to reach both clamp limits at 220 px.
+        entry.name = name.repeat(2);
+        entry.path = listing.path.join(&entry.name);
+        entry.entry_path = entry.path.clone();
+    }
+    let names: Vec<_> = listing
+        .entries
+        .iter()
+        .map(|entry| (entry.entry_path.clone(), entry.name.clone()))
+        .collect();
+    install_listing(&fixture, listing, cx);
+    cx.update_window(fixture.window, |_, window, cx| {
+        window.click("inspector-browser", cx)
+    })
+    .unwrap();
+    for width in [100., 140., 220.] {
+        set_cover_width(&fixture, width, cx);
+        for lines in [2usize, 3] {
+            cx.update_window(fixture.window, |_, window, cx| {
+                window.click(("browser-name-lines", lines), cx)
+            })
+            .unwrap();
+            render_windows(&fixture, cx);
+            let columns = fixture.view.read_with(cx, |view, _| view.browser.columns);
+            for (index, (path, name)) in names.iter().enumerate() {
+                fixture.view.update(cx, |view, cx| {
+                    let position = ordered_paths(view)
+                        .iter()
+                        .position(|candidate| candidate == path)
+                        .unwrap();
+                    view.browser.grid.scroll_to_reveal_item(position / columns);
+                    cx.notify();
+                });
+                render_windows(&fixture, cx);
+                cx.update_window(fixture.window, |_, window, _| {
+                    let id: gpui_kit::ElementId = entry_id(path).into();
+                    let tile = window.find(id.clone());
+                    let title = window.within(id.clone()).find("browser-title");
+                    assert_eq!(
+                        tile.label(),
+                        Some(name.as_str()),
+                        "full accessible filename"
+                    );
+                    assert!(tile.description().unwrap().contains(name));
+                    assert!(
+                        tile.description()
+                            .unwrap()
+                            .contains(&crate::file_tree::display_path(path))
+                    );
+                    let text = gpui_kit::base::test_support::texts(window)
+                        .into_iter()
+                        .find(|text| {
+                            text.path().contains(&id) && text.text() == name && text.visible()
+                        })
+                        .unwrap_or_else(|| panic!("filename must actually paint: {width}px/{lines}/{index}; tile={:?}; texts={:?}", tile.bounds(), gpui_kit::base::test_support::texts(window).into_iter().filter(|text| text.path().contains(&id)).collect::<Vec<_>>()));
+                    let height = f32::from(text.bounds().size.height);
+                    assert_eq!(title.bounds().size.height, px(lines as f32 * 18.), "line control must change title height");
+                    assert!(
+                        (height - lines as f32 * 18.).abs() < 1.,
+                        "{width}px, {lines} lines: {name}: painted {height}px; text={:?}, title={:?}", text.bounds(), title.bounds()
+                    );
+                    inside(text.bounds(), title.bounds());
+                    inside(title.bounds(), tile.bounds());
+                    let cover = window.within(id.clone()).find("browser-cover");
+                    assert!((f32::from(cover.bounds().size.width) - width).abs() < 1.);
+                    assert!(
+                        window.within(id).try_find("browser-tile-metadata").is_none(),
+                        "metadata and its space are off by default"
+                    );
+                })
+                .unwrap();
+            }
+        }
+    }
+}
+
+#[gpui_kit::test]
+fn metadata_toggle_changes_row_height_without_losing_the_native_scroll_anchor(
+    cx: &mut TestAppContext,
+) {
+    let fixture = fixture(cx);
+    pump(&fixture, cx);
+    let listing = synthetic_listing(fixture.directory.path().join("metadata"), 500);
+    install_listing(&fixture, listing, cx);
+    cx.update_window(fixture.window, |_, window, cx| {
+        window.click("inspector-browser", cx)
+    })
+    .unwrap();
+    fixture.view.update(cx, |view, cx| {
+        view.browser.grid.scroll_to(ListOffset {
+            item_ix: 20,
+            offset_in_item: px(19.),
+        });
+        cx.notify();
+    });
+    render_windows(&fixture, cx);
+    let (path, top) = fixture.view.read_with(cx, |view, _| {
+        let top = view.browser.grid.logical_scroll_top();
+        (
+            ordered_paths(view)[top.item_ix * view.browser.columns].clone(),
+            top,
+        )
+    });
+    let before = cx
+        .update_window(fixture.window, |_, window, _| {
+            window.find(entry_id(&path)).bounds()
+        })
+        .unwrap();
+    for enabled in [true, false] {
+        cx.update_window(fixture.window, |_, window, cx| {
+            window.click("browser-metadata", cx)
+        })
+        .unwrap();
+        render_windows(&fixture, cx);
+        fixture.view.read_with(cx, |view, _| {
+            let current = view.browser.grid.logical_scroll_top();
+            assert_eq!(current.item_ix, top.item_ix);
+            assert_eq!(current.offset_in_item, top.offset_in_item);
+            assert_eq!(
+                ordered_paths(view)[current.item_ix * view.browser.columns],
+                path
+            );
+        });
+        cx.update_window(fixture.window, |_, window, _| {
+            let id: gpui_kit::ElementId = entry_id(&path).into();
+            let tile = window.find(id.clone()).bounds();
+            assert_eq!(
+                tile.size.height,
+                before.size.height + px(if enabled { 22. } else { 0. })
+            );
+            if enabled {
+                let metadata = window.within(id.clone()).find("browser-tile-metadata");
+                inside(metadata.bounds(), tile);
+                assert!(
+                    gpui_kit::base::test_support::texts(window)
+                        .iter()
+                        .any(|text| text.path().contains(&id)
+                            && text.visible()
+                            && text.text()
+                                == Language::TraditionalChinese
+                                    .text(Text::BrowserInformationUnknown))
+                );
+            } else {
+                assert!(
+                    window
+                        .within(id)
+                        .try_find("browser-tile-metadata")
+                        .is_none()
+                );
+            }
+        })
+        .unwrap();
+    }
+}
+
+#[gpui_kit::test]
+fn random_header_controls_and_result_count_stay_reachable_in_every_language(
+    cx: &mut TestAppContext,
+) {
+    let fixture = fixture(cx);
+    pump(&fixture, cx);
+    install_listing(
+        &fixture,
+        synthetic_listing(fixture.directory.path().join("header"), 17),
+        cx,
+    );
+    for language in Language::ALL {
+        cx.update_window(fixture.window, |_, window, cx| {
+            fixture.view.update(cx, |view, cx| {
+                view.set_language(language, window, cx);
+                view.browser.model.sort = SortKey::Random;
+                view.rebuild_browser(cx);
+            });
+        })
+        .unwrap();
+        for (width, height) in [
+            (1280., 800.),
+            (960., 640.),
+            (800., 540.),
+            (900., 640.),
+            (899., 640.),
+        ] {
+            cx.update_window(fixture.window, |_, window, cx| {
+                window.resize(size(px(width), px(height)));
+                window.bounds_changed(cx);
+            })
+            .unwrap();
+            // Both panels, right only, neither, left only, and both again.
+            for toggle in [
+                None,
+                Some("sidebar-toggle"),
+                Some("inspector-toggle"),
+                Some("sidebar-toggle"),
+                Some("inspector-toggle"),
+            ] {
+                if let Some(toggle) = toggle {
+                    cx.update_window(fixture.window, |_, window, cx| window.click(toggle, cx))
+                        .unwrap();
+                }
+                for _ in 0..3 {
+                    render_windows(&fixture, cx);
+                }
+                cx.update_window(fixture.window, |_, window, _| {
+                    assert_browser_geometry(window);
+                    let shuffle = window.find("browser-shuffle");
+                    assert!(shuffle.visible());
+                    inside(shuffle.bounds(), window.find("browser-header").bounds());
+                    for id in BROWSER_CONTROLS {
+                        disjoint(shuffle.bounds(), window.find(id).bounds());
+                    }
+                    assert_eq!(
+                        window.find("browser-results").label(),
+                        Some(
+                            language
+                                .format(Text::BrowserResults, &[("count", "17".into())])
+                                .as_str()
+                        )
+                    );
+                })
+                .unwrap();
+            }
+        }
+        fixture.view.update(cx, |view, cx| {
+            view.browser.model.query = "00001".into();
+            view.rebuild_browser(cx);
+        });
+        render_windows(&fixture, cx);
+        cx.update_window(fixture.window, |_, window, _| {
+            assert_eq!(
+                window.find("browser-results").label(),
+                Some(
+                    language
+                        .format(Text::BrowserResults, &[("count", "1".into())])
+                        .as_str()
+                )
+            );
+        })
+        .unwrap();
+        fixture.view.update(cx, |view, cx| {
+            view.browser.model.query.clear();
+            view.rebuild_browser(cx);
+        });
+    }
 }

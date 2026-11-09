@@ -1,6 +1,9 @@
 //! Production-window integration checks. macOS uses the real Metal renderer.
 //! Run explicitly with `cargo test --test rendering`.
 
+#[path = "support/browser_visual.rs"]
+mod browser_visual;
+
 use gpui_kit::{
     AnyWindowHandle, AppContext, Bounds, Entity, HeadlessAppContext, Modifiers, OwnedMenuItem,
     PlatformInput, ScrollDelta, ScrollEvent, Window, WindowBounds, WindowOptions, point, px, size,
@@ -1070,10 +1073,8 @@ fn browser_controls_in_bounds(window: &Window, language: Language) {
         "browser-sort",
         "browser-reverse",
         "browser-folders-first",
-        "browser-shuffle",
         "browser-refresh",
         "browser-open",
-        "browser-resume",
     ];
     for (index, id) in ids.iter().enumerate() {
         let control = window.find(*id);
@@ -1121,7 +1122,9 @@ fn capture_browser_states(cx: &mut HeadlessAppContext, temporary: &Path, folder:
         settle(cx, reader);
         cx.update_window(reader, |_, window, cx| {
             assert!(window.find("browser-grid").visible());
-            assert_eq!(window.find("browser-resume").disabled(), Some(true));
+            assert_eq!(window.find("browser-toggle").disabled(), Some(true));
+            assert!(window.try_find("browser-resume").is_none());
+            assert!(window.try_find("browser-shuffle").is_none());
             window.press("escape", cx);
             assert!(window.find("browser-grid").visible());
         })
@@ -1210,7 +1213,7 @@ fn capture_browser_states(cx: &mut HeadlessAppContext, temporary: &Path, folder:
                     window.press("backspace", cx);
                     // Resume explicitly. Clicking the grid's center can select
                     // a different tile and is not a neutral way to blur search.
-                    window.click("browser-resume", cx);
+                    window.click("browser-toggle", cx);
                 })
                 .unwrap();
                 settle(cx, reader);
@@ -1269,7 +1272,7 @@ fn capture_browser_states(cx: &mut HeadlessAppContext, temporary: &Path, folder:
             }
             assert!(reached, "browser tool must be scroll-reachable: {id}");
         }
-        cx.update_window(reader, |_, window, cx| window.click("browser-resume", cx))
+        cx.update_window(reader, |_, window, cx| window.click("browser-toggle", cx))
             .unwrap();
         settle(cx, reader);
         assert_eq!(page(cx, reader), "2");
@@ -1523,7 +1526,7 @@ fn capture_files_states(cx: &mut HeadlessAppContext, temporary: &Path, source_fo
                         ),
                     );
                 }
-                cx.update_window(reader, |_, window, cx| window.click("browser-resume", cx))
+                cx.update_window(reader, |_, window, cx| window.click("browser-toggle", cx))
                     .unwrap();
                 settle(cx, reader);
             }
@@ -1622,6 +1625,7 @@ fn main() {
             .unwrap();
     }
     capture_browser_states(&mut cx, temporary.path(), &folder);
+    browser_visual::capture(&mut cx, temporary.path());
     capture_files_states(&mut cx, temporary.path(), &folder);
     let settings_path = temporary.path().join("settings.json");
     let (sender, launches) = mpsc::channel();

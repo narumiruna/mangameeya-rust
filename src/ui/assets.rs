@@ -6,9 +6,14 @@ use std::borrow::Cow;
 gpui_kit::assets::icon_assets!(
     ReaderIcons,
     [
+        ArrowDown,
         ArrowLeftRight,
+        ArrowUp,
         Bookmark,
         Check,
+        CircleAlert,
+        CircleOff,
+        Clock,
         ChevronDown,
         ChevronLeft,
         ChevronRight,
@@ -22,9 +27,12 @@ gpui_kit::assets::icon_assets!(
         LocateFixed,
         Maximize,
         PanelLeft,
+        RefreshCw,
         RotateCcw,
         RotateCw,
         Rows3,
+        Search,
+        Shuffle,
         SlidersHorizontal,
         X,
     ]
@@ -59,8 +67,15 @@ mod tests {
     fn reader_and_component_icons_are_embedded_and_listed() {
         let paths = ReaderAssets.list("icons/").unwrap();
         for icon in [
+            IconName::ArrowDown,
             IconName::ArrowLeft,
             IconName::ArrowUp,
+            IconName::CircleAlert,
+            IconName::CircleOff,
+            IconName::Clock,
+            IconName::RefreshCw,
+            IconName::Search,
+            IconName::Shuffle,
             IconName::Eye,
             IconName::FileArchive,
             IconName::FileImage,
