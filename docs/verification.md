@@ -775,15 +775,18 @@ no assertion or required CI gate was removed to hide it.
 
 ### PR #28 review corrections
 
-The review of `d6cbd93` had two P2 findings. Both are valid and in scope. They
-concern lazy folder navigation and access to an accepted sidebar path.
+The review of `d6cbd93` had two P2 findings. The final refresh found a third
+finding on `f7275db`. All three are valid and in scope. They concern lazy reads,
+accepted sidebar paths, and Locate.
 
 | Feedback | Outcome | Evidence |
 | --- | --- | --- |
 | [Resume canceled descendant reads](https://github.com/narumiruna/mangameeya-rust/pull/28#discussion_r4508034068) | Fixed. Accepted navigation resumes visible explicit expansions. Obsolete reads still keep their worker slots. | A deterministic model test rejects the old completion, loads the replacement, and checks the two-slot bound. A native folder-name click exposes the child page. |
 | [Keep hidden destinations accessible](https://github.com/narumiruna/mangameeya-rust/pull/28#discussion_r4508034070) | Fixed. A destination below a filtered hidden ancestor becomes the tree root. The hidden toggle does not change. | Model tests cover direct and nested destinations, dot and attribute-style hidden flags, failed reads, Back history, and hidden visibility already on. Native path input keeps the reader, source bytes, settings bytes, and central-browser state. |
+| [Resume reads after successful Locate](https://github.com/narumiruna/mangameeya-rust/pull/28#discussion_r4509139127) | Fixed. The live model resumes visible explicit reads after it accepts the located state. | Model tests cover cached and staged Locate, old-result rejection, the two-slot bound, and source selection/focus. A native Locate click loads the child page without replacing the reader. |
 
-The five new regression tests passed on native Windows and Linux. Four failed
+For the first correction (`f7275db`), five new regression tests passed on Windows
+and Linux. Four failed
 before the fixes; the existing hidden-visibility behavior passed before and after.
 Windows model tests passed 54 tests. Windows Files event tests passed 28 tests.
 The Linux full suite passed 340 tests with no failures or ignored tests. Windows
@@ -804,6 +807,21 @@ Logs and the detailed review ledger are under ignored
 `regressions-after.log`, `model.log`, `files.log`, `windows-tests.log`,
 `linux-tests.log`, `windows-clippy.log`, `linux-clippy.log`,
 `windows-rendering.log`, `linux-rendering.log`, and `ledger.md`.
+
+The successful-Locate correction adds two more regression tests. Both failed
+before the fix and passed after it. All seven review regression tests pass.
+The model covers both cached and staged success. It checks that source selection,
+focus, query clearing, and the scroll anchor remain correct after a child read.
+The native test uses the Locate button and checks the visible source and child.
+
+The updated Windows model suite passed 55 tests. The Files suite passed 29 tests.
+The Linux full suite passed 342 tests. The latest local Windows full run had
+**339 passing tests and the pre-existing IPC queue failure** at
+`src/instance.rs:539`, with none ignored. This is not a passing local run.
+Windows and Linux formatting, all-target Clippy, and production rendering passed.
+Normal CI for the new commit remains required; no gate was waived.
+Logs for this correction have the `locate-` prefix under
+`target/files-tree/review-28/`. Its detailed ledger is `r3-ledger.md`.
 
 ### Native capture review
 

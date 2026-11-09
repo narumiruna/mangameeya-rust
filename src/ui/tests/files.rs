@@ -711,6 +711,63 @@ fn review_folder_name_navigation_resumes_a_canceled_child_read(cx: &mut TestAppC
 }
 
 #[gpui_kit::test]
+fn review_locate_current_book_resumes_a_canceled_child_read(cx: &mut TestAppContext) {
+    let fixture = files_fixture(cx);
+    let root = book(&fixture, "resume-locate", 1).canonicalize().unwrap();
+    let ancestor = root.join("series");
+    let child = ancestor.join("volume");
+    std::fs::create_dir_all(&child).unwrap();
+    let source = ancestor.join("page.png");
+    let page = child.join("child.png");
+    std::fs::copy(root.join("1.png"), &source).unwrap();
+    std::fs::copy(root.join("1.png"), &page).unwrap();
+    fixture.sender.send(vec![source.clone()]).unwrap();
+    pump(&fixture, cx);
+    let reader_book = fixture
+        .view
+        .read_with(cx, |view, _| view.reader.book.as_ref().unwrap().clone());
+    browse(&fixture, &root, cx);
+    let old = fixture.view.update(cx, |view, cx| {
+        assert!(view.files_ui.model.expand(&ancestor));
+        let request = view.files_ui.model.take_requests().pop().unwrap();
+        assert!(
+            view.files_ui
+                .model
+                .complete(request.token, load_directory(&ancestor))
+        );
+        assert!(view.files_ui.model.expand(&child));
+        let old = view.files_ui.model.take_requests().pop().unwrap();
+        assert!(view.files_ui.model.collapse(&ancestor));
+        view.files_rebuild(cx);
+        old
+    });
+    render_windows(&fixture, cx);
+    click(&fixture, "files-locate", cx);
+    assert!(visible(&fixture, cx).contains(&page));
+    fixture.view.update(cx, |view, _| {
+        assert!(Arc::ptr_eq(
+            view.reader.book.as_ref().unwrap(),
+            &reader_book
+        ));
+        assert_eq!(view.files_ui.source.as_deref(), Some(source.as_path()));
+        assert_eq!(view.files_ui.model.selected(), Some(source.as_path()));
+        assert_eq!(view.files_ui.model.focused(), Some(source.as_path()));
+        assert!(view.files_ui.model.node(&child).unwrap().loaded);
+        assert!(
+            !view
+                .files_ui
+                .model
+                .complete(old.token, Err("obsolete".into()))
+        );
+    });
+    cx.update_window(fixture.window, |_, window, _| {
+        assert!(window.find(entry_id(&source)).visible());
+        assert!(window.find(entry_id(&page)).visible());
+    })
+    .unwrap();
+}
+
+#[gpui_kit::test]
 fn review_hidden_path_input_exposes_contents_without_changing_reader_or_settings(
     cx: &mut TestAppContext,
 ) {

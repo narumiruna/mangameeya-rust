@@ -749,6 +749,7 @@ impl FileTree {
                     self.invalidate();
                 }
                 self.state = candidate.state;
+                self.resume_visible_expansions();
                 self.error = None;
                 self.rebuild();
             }
@@ -2190,6 +2191,67 @@ mod tests {
         assert_eq!(tree.location(), Some(Path::new("root")));
         assert_eq!(tree.query(), "previous filter");
         assert_eq!(tree.scroll_anchor(), &old_scroll);
+    }
+
+    #[test]
+    fn review_successful_locate_resumes_canceled_descendants_after_install() {
+        for staged in [false, true] {
+            let mut tree = initialize(&[("a", true), ("other", true)]);
+            let entries: &[(&str, bool)] = if staged {
+                &[("b", true)]
+            } else {
+                &[("b", true), ("page.png", false)]
+            };
+            load_branch(&mut tree, "root/a", entries);
+            let ancestor = Path::new("root/a");
+            let child = Path::new("root/a/b");
+            let source = ancestor.join("page.png");
+            tree.expand(child);
+            let old = tree.take_requests().pop().unwrap();
+            tree.collapse(ancestor);
+            tree.set_query("page".into());
+            tree.locate(source.clone());
+            if staged {
+                let request = tree.take_requests().pop().unwrap();
+                assert_eq!(request.path, ancestor);
+                assert!(tree.complete(
+                    request.token,
+                    Ok(listing(
+                        ancestor,
+                        vec![item(ancestor, "b", true), item(ancestor, "page.png", false),]
+                    ))
+                ));
+            }
+            assert!(
+                tree.is_loading(child),
+                "successful Locate must resume the child"
+            );
+            assert!(tree.node(child).unwrap().expanded);
+            assert_eq!(tree.selected(), Some(source.as_path()));
+            assert_eq!(tree.focused(), Some(source.as_path()));
+            assert_eq!(tree.scroll_anchor().path.as_deref(), Some(source.as_path()));
+            assert_eq!(tree.query(), "");
+            let resumed = tree.take_requests().pop().unwrap();
+            assert_eq!(resumed.path, child);
+            assert_ne!(resumed.token, old.token);
+            tree.expand(Path::new("root/other"));
+            assert!(
+                tree.take_requests().is_empty(),
+                "old read still occupies its slot"
+            );
+            assert!(!tree.complete(old.token, Err("obsolete".into())));
+            let other = tree.take_requests().pop().unwrap();
+            assert_eq!(other.path, Path::new("root/other"));
+            assert!(tree.complete(
+                resumed.token,
+                Ok(listing(child, vec![item(child, "child.png", false),]))
+            ));
+            assert!(tree.complete(other.token, Ok(listing(&other.path, vec![]))));
+            assert!(names(&tree).contains(&"child.png"));
+            assert_eq!(tree.selected(), Some(source.as_path()));
+            assert_eq!(tree.focused(), Some(source.as_path()));
+            assert!(tree.take_requests().is_empty());
+        }
     }
 
     #[test]
