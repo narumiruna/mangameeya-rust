@@ -120,6 +120,15 @@ impl Preferences {
     }
 }
 
+/// Folder-image identity bound to the numeric bookmark saved with it.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct BookmarkImage {
+    pub page: usize,
+    #[serde(with = "stored_paths::path")]
+    pub image: PathBuf,
+}
+
 #[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct AppSettings {
@@ -128,16 +137,18 @@ pub struct AppSettings {
     #[serde(with = "stored_paths::recent")]
     pub recent: Vec<PathBuf>,
     /// Page indices are zero-based and are checked against a book when opened.
-    #[serde(with = "stored_paths::pages")]
+    #[serde(with = "stored_paths::map")]
     pub positions: HashMap<PathBuf, usize>,
-    #[serde(with = "stored_paths::pages")]
+    #[serde(with = "stored_paths::map")]
     pub bookmarks: HashMap<PathBuf, usize>,
+    #[serde(with = "stored_paths::map", skip_serializing_if = "HashMap::is_empty")]
+    pub bookmark_images: HashMap<PathBuf, BookmarkImage>,
 }
 
 // UTF-8 paths retain the legacy JSON format. Native paths use exactly one
 // {"unix": [u8]} or {"windows": [u16]} encoding, with no reserved string prefixes.
-// Each page map stays a JSON object unless it needs native keys; then it uses
-// [path, page] pairs. A foreign native encoding is an error, never a lossy path.
+// Each path map stays a JSON object unless it needs native keys; then it uses
+// [path, value] pairs. A foreign native encoding is an error, never a lossy path.
 mod stored_paths {
     use serde::de::{self, MapAccess, SeqAccess, Visitor};
     use serde::ser::{SerializeMap, SerializeSeq};
@@ -271,33 +282,48 @@ mod stored_paths {
         }
     }
 
-    pub(super) mod pages {
+    pub(super) mod path {
         use super::*;
 
-        pub fn serialize<S: Serializer>(
-            pages: &HashMap<PathBuf, usize>,
-            serializer: S,
-        ) -> Result<S::Ok, S::Error> {
-            if pages.keys().all(|path| path.to_str().is_some()) {
-                return pages.serialize(serializer);
-            }
-            let mut sequence = serializer.serialize_seq(Some(pages.len()))?;
-            for (path, page) in pages {
-                sequence.serialize_element(&(PathRef(path), page))?;
-            }
-            sequence.end()
+        pub fn serialize<S: Serializer>(path: &Path, serializer: S) -> Result<S::Ok, S::Error> {
+            PathRef(path).serialize(serializer)
         }
 
         pub fn deserialize<'de, D: Deserializer<'de>>(
             deserializer: D,
-        ) -> Result<HashMap<PathBuf, usize>, D::Error> {
-            struct PagesVisitor;
+        ) -> Result<PathBuf, D::Error> {
+            PathValue::deserialize(deserializer).map(|path| path.0)
+        }
+    }
 
-            impl<'de> Visitor<'de> for PagesVisitor {
-                type Value = HashMap<PathBuf, usize>;
+    pub(super) mod map {
+        use super::*;
+        use std::marker::PhantomData;
+
+        pub fn serialize<S: Serializer, T: Serialize>(
+            values: &HashMap<PathBuf, T>,
+            serializer: S,
+        ) -> Result<S::Ok, S::Error> {
+            if values.keys().all(|path| path.to_str().is_some()) {
+                return values.serialize(serializer);
+            }
+            let mut sequence = serializer.serialize_seq(Some(values.len()))?;
+            for (path, value) in values {
+                sequence.serialize_element(&(PathRef(path), value))?;
+            }
+            sequence.end()
+        }
+
+        pub fn deserialize<'de, D: Deserializer<'de>, T: Deserialize<'de>>(
+            deserializer: D,
+        ) -> Result<HashMap<PathBuf, T>, D::Error> {
+            struct PathMapVisitor<T>(PhantomData<T>);
+
+            impl<'de, T: Deserialize<'de>> Visitor<'de> for PathMapVisitor<T> {
+                type Value = HashMap<PathBuf, T>;
 
                 fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
-                    formatter.write_str("a path-to-page object or an array of [path, page] pairs")
+                    formatter.write_str("a path-to-value object or an array of [path, value] pairs")
                 }
 
                 fn visit_map<A: MapAccess<'de>>(self, map: A) -> Result<Self::Value, A::Error> {
@@ -308,15 +334,15 @@ mod stored_paths {
                     self,
                     mut sequence: A,
                 ) -> Result<Self::Value, A::Error> {
-                    let mut pages = HashMap::new();
-                    while let Some((PathValue(path), page)) = sequence.next_element()? {
-                        pages.insert(path, page);
+                    let mut values = HashMap::new();
+                    while let Some((PathValue(path), value)) = sequence.next_element()? {
+                        values.insert(path, value);
                     }
-                    Ok(pages)
+                    Ok(values)
                 }
             }
 
-            deserializer.deserialize_any(PagesVisitor)
+            deserializer.deserialize_any(PathMapVisitor(PhantomData))
         }
     }
 }
@@ -487,6 +513,8 @@ impl AppSettings {
             .retain(|path, _| !path.as_os_str().is_empty());
         self.bookmarks
             .retain(|path, _| !path.as_os_str().is_empty());
+        self.bookmark_images
+            .retain(|path, bookmark| self.bookmarks.get(path) == Some(&bookmark.page));
     }
 
     pub fn add_recent(&mut self, path: &Path) {
@@ -616,6 +644,7 @@ mod tests {
                 recent: vec![book.clone()],
                 positions: HashMap::from([(book.clone(), 12)]),
                 bookmarks: HashMap::from([(book.clone(), 8)]),
+                ..AppSettings::default()
             };
             assert_eq!(AppSettings::load_from(&path).unwrap(), expected);
             assert_eq!(fs::read(&path).unwrap(), source);
@@ -667,6 +696,7 @@ mod tests {
                 recent: vec![book.clone()],
                 positions: HashMap::from([(book.clone(), 12)]),
                 bookmarks: HashMap::from([(book.clone(), 8)]),
+                ..AppSettings::default()
             };
             let mut expected = settings.clone();
             expected.preferences.panel_layout.sidebar_width = expected_sidebar;
@@ -886,6 +916,8 @@ mod tests {
             "inspector_visible": true
         });
         assert_eq!(saved, expected);
+        assert!(settings.bookmark_images.is_empty());
+        assert!(saved.get("bookmark_images").is_none());
         assert_eq!(AppSettings::load_from(&path).unwrap(), settings);
     }
 
@@ -908,7 +940,147 @@ mod tests {
             serde_json::json!({"books/日本語.cbz": 12})
         );
         assert_eq!(saved["bookmarks"], serde_json::json!({"book.cbz": 8}));
+        assert!(settings.bookmark_images.is_empty());
+        assert!(saved.get("bookmark_images").is_none());
         assert_eq!(AppSettings::load_from(&path).unwrap(), settings);
+    }
+
+    #[test]
+    fn bookmark_images_utf8_round_trip_in_objects_and_pair_maps() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("settings.json");
+        let book = PathBuf::from("books/日本語");
+        let bookmark = BookmarkImage {
+            page: 8,
+            image: PathBuf::from("books/日本語/画像.png"),
+        };
+        for metadata in [
+            serde_json::json!({"books/日本語": bookmark}),
+            serde_json::json!([["books/日本語", bookmark]]),
+        ] {
+            let source = serde_json::to_vec(&serde_json::json!({
+                "bookmarks": {"books/日本語": 8},
+                "bookmark_images": metadata,
+            }))
+            .unwrap();
+            fs::write(&path, &source).unwrap();
+            let settings = AppSettings::load_from(&path).unwrap();
+            assert_eq!(settings.bookmark_images[&book], bookmark);
+            assert_eq!(fs::read(&path).unwrap(), source);
+            settings.save_to(&path).unwrap();
+            let saved: serde_json::Value =
+                serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+            assert_eq!(saved["bookmarks"], serde_json::json!({"books/日本語": 8}));
+            assert_eq!(
+                saved["bookmark_images"],
+                serde_json::json!({"books/日本語": {"page": 8, "image": "books/日本語/画像.png"}})
+            );
+            assert_eq!(AppSettings::load_from(&path).unwrap(), settings);
+        }
+        assert_eq!(fs::read_dir(directory.path()).unwrap().count(), 1);
+    }
+
+    #[test]
+    fn bookmark_images_keep_only_matching_nonempty_bookmark_keys() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("settings.json");
+        let mut settings = AppSettings::default();
+        for (book, page) in [("", 2), ("missing/../book", 3), ("stale", 4), ("orphan", 5)] {
+            let key = PathBuf::from(book);
+            settings.bookmark_images.insert(
+                key.clone(),
+                BookmarkImage {
+                    page,
+                    image: PathBuf::from("absent/../image.png"),
+                },
+            );
+            if book != "orphan" {
+                settings
+                    .bookmarks
+                    .insert(key, if book == "stale" { 0 } else { page });
+            }
+        }
+        let source = serde_json::to_vec(&settings).unwrap();
+        fs::write(&path, &source).unwrap();
+        let loaded = AppSettings::load_from(&path).unwrap();
+        assert_eq!(fs::read(&path).unwrap(), source);
+        settings.validate();
+        assert_eq!(loaded, settings);
+        assert_eq!(settings.bookmark_images.len(), 1);
+        assert_eq!(
+            settings.bookmark_images[Path::new("missing/../book")].page,
+            3
+        );
+        assert_eq!(
+            settings.bookmark_images[Path::new("missing/../book")].image,
+            Path::new("absent/../image.png")
+        );
+        assert_eq!(settings.bookmarks[Path::new("stale")], 0);
+        settings.bookmarks.remove(Path::new("missing/../book"));
+        settings.save_to(&path).unwrap();
+        let saved = AppSettings::load_from(&path).unwrap();
+        assert!(saved.bookmark_images.is_empty());
+        let json: serde_json::Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+        assert!(json.get("bookmark_images").is_none());
+        // Save validation does not change the caller's metadata.
+        assert_eq!(settings.bookmark_images.len(), 1);
+    }
+
+    fn assert_invalid_bookmark_images_is_preserved(path: &Path, metadata: &str) {
+        let source = format!(
+            r#"{{"recent":["book"],"positions":{{"book":12}},"bookmarks":{{"book":8}},"bookmark_images":{metadata}}}"#
+        );
+        fs::write(path, &source).unwrap();
+        let error = AppSettings::load_from(path).unwrap_err();
+        assert!(error.contains("Invalid settings"), "{source}: {error}");
+        assert!(
+            error.contains("The file was not changed"),
+            "{source}: {error}"
+        );
+        assert!(AppSettings::default().save_to(path).is_err(), "{source}");
+        assert_eq!(fs::read(path).unwrap(), source.as_bytes());
+    }
+
+    #[test]
+    fn malformed_bookmark_metadata_preserves_the_original_file() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("settings.json");
+        for page in [
+            "-1",
+            "18446744073709551616",
+            "0.0",
+            "8.0",
+            "1.5",
+            "8e0",
+            r#""8""#,
+            "null",
+            "true",
+            "false",
+            "[]",
+            "{}",
+        ] {
+            let metadata = format!(r#"{{"book":{{"page":{page},"image":"image.png"}}}}"#);
+            assert_invalid_bookmark_images_is_preserved(&path, &metadata);
+        }
+        for metadata in [
+            "null",
+            "true",
+            "8",
+            r#""metadata""#,
+            "[null]",
+            r#"{"book":null}"#,
+            r#"{"book":{}}"#,
+            r#"{"book":{"page":8}}"#,
+            r#"{"book":{"image":"image.png"}}"#,
+            r#"{"book":{"page":8,"image":"image.png","unknown":true}}"#,
+            r#"{"book":{"page":8,"page":8,"image":"image.png"}}"#,
+            r#"{"book":{"page":8,"image":"a.png","image":"b.png"}}"#,
+            r#"[["book"]]"#,
+            r#"[["book",{"page":8,"image":"image.png"},0]]"#,
+        ] {
+            assert_invalid_bookmark_images_is_preserved(&path, metadata);
+        }
+        assert_eq!(fs::read_dir(directory.path()).unwrap().count(), 1);
     }
 
     #[test]
@@ -1053,8 +1225,53 @@ mod tests {
     }
 
     #[cfg(any(unix, windows))]
+    fn assert_native_bookmark_images_round_trip(native: &Path, encoded: &serde_json::Value) {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("settings.json");
+        let utf8 = Path::new("books/日本語/image.png");
+        for (book, image, expected) in [
+            (
+                native,
+                native,
+                serde_json::json!([[encoded, {"page": 8, "image": encoded}]]),
+            ),
+            (
+                native,
+                utf8,
+                serde_json::json!([[encoded, {"page": 8, "image": "books/日本語/image.png"}]]),
+            ),
+            (
+                utf8,
+                native,
+                serde_json::json!({"books/日本語/image.png": {"page": 8, "image": encoded}}),
+            ),
+        ] {
+            let settings = AppSettings {
+                bookmarks: HashMap::from([(book.to_path_buf(), 8)]),
+                bookmark_images: HashMap::from([(
+                    book.to_path_buf(),
+                    BookmarkImage {
+                        page: 8,
+                        image: image.to_path_buf(),
+                    },
+                )]),
+                ..AppSettings::default()
+            };
+            settings.save_to(&path).unwrap();
+            let saved: serde_json::Value =
+                serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+            assert_eq!(saved["bookmark_images"], expected);
+            assert_eq!(AppSettings::load_from(&path).unwrap(), settings);
+            settings.save_to(&path).unwrap();
+            assert_eq!(AppSettings::load_from(&path).unwrap(), settings);
+        }
+        assert_eq!(fs::read_dir(directory.path()).unwrap().count(), 1);
+    }
+
+    #[cfg(any(unix, windows))]
     fn assert_native_path_round_trip(native: PathBuf, encoded: serde_json::Value) {
         assert!(native.to_str().is_none());
+        assert_native_bookmark_images_round_trip(&native, &encoded);
         let directory = tempfile::tempdir().unwrap();
         let path = directory.path().join("settings.json");
         let utf8 = PathBuf::from("books/日本語.cbz");
@@ -1196,6 +1413,12 @@ mod tests {
                 assert!(AppSettings::default().save_to(&path).is_err(), "{source}");
                 assert_eq!(fs::read(&path).unwrap(), source.as_bytes());
             }
+            for metadata in [
+                format!(r#"{{"book":{{"page":8,"image":{encoding}}}}}"#),
+                format!(r#"[[{encoding},{{"page":8,"image":"image.png"}}]]"#),
+            ] {
+                assert_invalid_bookmark_images_is_preserved(&path, &metadata);
+            }
         }
         assert_eq!(fs::read_dir(directory.path()).unwrap().count(), 1);
     }
@@ -1241,6 +1464,10 @@ mod tests {
                 format!(r#"{{"recent":[{encoding}]}}"#),
                 format!(r#"{{"positions":[[{encoding},1]]}}"#),
                 format!(r#"{{"bookmarks":[[{encoding},2]]}}"#),
+                format!(
+                    r#"{{"bookmarks":{{"book":8}},"bookmark_images":{{"book":{{"page":8,"image":{encoding}}}}}}}"#
+                ),
+                format!(r#"{{"bookmark_images":[[{encoding},{{"page":8,"image":"image.png"}}]]}}"#),
             ] {
                 fs::write(&path, &source).unwrap();
                 let error = AppSettings::load_from(&path).unwrap_err();

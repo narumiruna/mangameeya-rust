@@ -1630,10 +1630,7 @@ impl ReaderView {
                     let path = book.path.clone();
                     match command {
                         Bookmark => {
-                            self.reader
-                                .settings
-                                .bookmarks
-                                .insert(path, self.reader.current);
+                            self.reader.set_bookmark();
                             self.set_localized_message(
                                 Text::BookmarkSet,
                                 vec![("page", (self.reader.current + 1).to_string())],
@@ -1641,12 +1638,20 @@ impl ReaderView {
                                 cx,
                             );
                         }
-                        Resume => match self.reader.settings.bookmarks.get(&path).copied() {
-                            Some(page) => self.navigate(page, window, cx),
-                            None => self.set_localized_message(Text::NoBookmark, vec![], true, cx),
-                        },
+                        Resume => {
+                            if self.reader.resume_bookmark() {
+                                self.after_navigation(window, cx);
+                            } else {
+                                let text = if self.reader.settings.bookmarks.contains_key(&path) {
+                                    Text::BookmarkUnavailable
+                                } else {
+                                    Text::NoBookmark
+                                };
+                                self.set_localized_message(text, vec![], true, cx);
+                            }
+                        }
                         _ => {
-                            self.reader.settings.bookmarks.remove(&path);
+                            self.reader.clear_bookmark();
                             self.set_localized_message(Text::BookmarkDeleted, vec![], false, cx);
                         }
                     }
@@ -2609,9 +2614,7 @@ impl ReaderView {
             );
         }
         let direction = direction_label(language, self.reader.settings.preferences.rtl);
-        let marked = self.reader.book.as_ref().is_some_and(|book| {
-            self.reader.settings.bookmarks.get(&book.path) == Some(&self.reader.current)
-        });
+        let marked = self.reader.bookmark_index() == Some(self.reader.current);
         let left_visible = self.reader.settings.preferences.sidebar;
         let right_visible = self
             .reader

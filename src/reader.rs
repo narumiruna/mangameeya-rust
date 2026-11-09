@@ -2,6 +2,7 @@
 
 use crate::book::Book;
 use crate::imaging::Filters;
+use crate::settings::BookmarkImage;
 pub use crate::settings::{AppSettings, Background, FitMode, ReadingMode, SidebarMode};
 use std::sync::Arc;
 
@@ -59,6 +60,7 @@ impl Reader {
             .min(book.pages.len().saturating_sub(1));
         self.settings.add_recent(&book.path);
         self.book = Some(book);
+        self.rebase_bookmark();
         self.zoom = 1.0;
         self.rotation = 0;
         self.slideshow = false;
@@ -193,31 +195,69 @@ impl Reader {
             self.settings
                 .bookmarks
                 .insert(book.path.clone(), self.current);
+            if let Some(image) = book.image_page_path(self.current) {
+                self.settings.bookmark_images.insert(
+                    book.path.clone(),
+                    BookmarkImage {
+                        page: self.current,
+                        image: image.to_path_buf(),
+                    },
+                );
+            } else {
+                self.settings.bookmark_images.remove(&book.path);
+            }
             return true;
         }
         false
     }
 
-    /// Return whether a bookmark exists, including one at the current page.
-    pub fn resume_bookmark(&mut self) -> bool {
-        let index = self
-            .book
-            .as_ref()
-            .and_then(|book| self.settings.bookmarks.get(&book.path))
-            .copied();
-        if let Some(index) = index {
-            self.navigate(index);
-            true
+    /// Resolve cached page identity without reading image data. Legacy indices still clamp.
+    pub fn bookmark_index(&self) -> Option<usize> {
+        let book = self.book.as_ref()?;
+        let page = *self.settings.bookmarks.get(&book.path)?;
+        if let Some(image) = self
+            .settings
+            .bookmark_images
+            .get(&book.path)
+            .filter(|image| image.page == page)
+        {
+            book.image_page_index(&image.image, page)
+        } else if book.pages.is_empty() {
+            None
         } else {
-            false
+            Some(page.min(book.pages.len() - 1))
         }
     }
 
+    fn rebase_bookmark(&mut self) {
+        let Some(page) = self.bookmark_index() else {
+            return;
+        };
+        let path = &self.book.as_ref().expect("resolved bookmark").path;
+        if let Some(image) = self.settings.bookmark_images.get_mut(path)
+            && self.settings.bookmarks.get(path) == Some(&image.page)
+        {
+            image.page = page;
+            self.settings.bookmarks.insert(path.clone(), page);
+        }
+    }
+
+    /// Return whether the bookmark can be reached, including the current page.
+    pub fn resume_bookmark(&mut self) -> bool {
+        let Some(index) = self.bookmark_index() else {
+            return false;
+        };
+        self.navigate(index);
+        self.rebase_bookmark();
+        true
+    }
+
     pub fn clear_bookmark(&mut self) -> bool {
-        self.book
-            .as_ref()
-            .and_then(|book| self.settings.bookmarks.remove(&book.path))
-            .is_some()
+        let Some(book) = &self.book else {
+            return false;
+        };
+        self.settings.bookmark_images.remove(&book.path);
+        self.settings.bookmarks.remove(&book.path).is_some()
     }
 
     pub fn toggle_slideshow(&mut self) -> bool {
@@ -655,6 +695,132 @@ mod tests {
         assert!(reader.clear_bookmark());
         assert!(!reader.resume_bookmark());
         assert!(reader.settings.positions.is_empty());
+    }
+
+    #[test]
+    fn folder_bookmark_keeps_image_across_recursion_order_changes_and_reload() {
+        let directory = tempfile::tempdir().unwrap();
+        std::fs::create_dir(directory.path().join("00")).unwrap();
+        for name in ["10.png", "20.png", "00/1.png"] {
+            std::fs::write(directory.path().join(name), b"image").unwrap();
+        }
+        let mut reader = Reader::default();
+        reader.settings.preferences.remember_position = false;
+        reader.set_book(Arc::new(Book::open(directory.path(), false).unwrap()), None);
+        reader.navigate(1);
+        assert_eq!(reader.current_name(), Some("20.png"));
+        assert!(reader.set_bookmark());
+        let key = reader.book.as_ref().unwrap().path.clone();
+        let image = std::fs::canonicalize(directory.path().join("20.png")).unwrap();
+        assert_eq!(reader.settings.bookmark_images[&key].image, image);
+        let settings_path = directory.path().join("settings.json");
+        reader.settings.save_to(&settings_path).unwrap();
+        reader = Reader::new(AppSettings::load_from(&settings_path).unwrap());
+        reader.set_book(Arc::new(Book::open(directory.path(), true).unwrap()), None);
+        assert_eq!(reader.bookmark_index(), Some(2));
+        assert_eq!(reader.settings.bookmarks[&key], 2);
+        assert_eq!(reader.settings.bookmark_images[&key].page, 2);
+        assert!(reader.resume_bookmark());
+        assert_eq!(reader.current_name(), Some("20.png"));
+        assert!(
+            reader.resume_bookmark(),
+            "the current bookmarked page is reachable"
+        );
+        std::fs::remove_file(directory.path().join("10.png")).unwrap();
+        reader.set_book(Arc::new(Book::open(directory.path(), false).unwrap()), None);
+        assert_eq!(reader.bookmark_index(), Some(0));
+        assert!(reader.resume_bookmark());
+        assert_eq!(reader.current_name(), Some("20.png"));
+        std::fs::write(directory.path().join("00.png"), b"earlier image").unwrap();
+        reader.set_book(Arc::new(Book::open(directory.path(), false).unwrap()), None);
+        assert_eq!(reader.bookmark_index(), Some(1));
+        assert!(reader.resume_bookmark());
+        assert_eq!(reader.current_name(), Some("20.png"));
+        assert!(reader.clear_bookmark());
+        assert!(!reader.settings.bookmarks.contains_key(&key));
+        assert!(!reader.settings.bookmark_images.contains_key(&key));
+    }
+
+    #[test]
+    fn excluded_or_deleted_bookmark_image_does_not_fall_back_to_another_page() {
+        let directory = tempfile::tempdir().unwrap();
+        std::fs::create_dir(directory.path().join("00")).unwrap();
+        for name in ["10.png", "20.png", "00/1.png"] {
+            std::fs::write(directory.path().join(name), b"image").unwrap();
+        }
+        let mut reader = Reader::default();
+        reader.settings.preferences.remember_position = false;
+        reader.set_book(Arc::new(Book::open(directory.path(), true).unwrap()), None);
+        assert!(reader.current_name().unwrap().ends_with("1.png"));
+        assert!(reader.set_bookmark());
+        let stored = reader.settings.bookmark_images.clone();
+        for recursive in [false, true] {
+            if recursive {
+                std::fs::remove_file(directory.path().join("00/1.png")).unwrap();
+            }
+            reader.set_book(
+                Arc::new(Book::open(directory.path(), recursive).unwrap()),
+                None,
+            );
+            reader.navigate(1);
+            assert_eq!(reader.bookmark_index(), None);
+            assert!(!reader.resume_bookmark());
+            assert_eq!(reader.current_name(), Some("20.png"));
+            assert_eq!(reader.settings.bookmark_images, stored);
+        }
+        std::fs::write(directory.path().join("00/1.png"), b"restored image").unwrap();
+        reader.set_book(Arc::new(Book::open(directory.path(), true).unwrap()), None);
+        assert!(reader.resume_bookmark());
+        assert!(reader.current_name().unwrap().ends_with("1.png"));
+    }
+
+    #[test]
+    fn legacy_bookmarks_keep_numeric_behavior_until_set_again() {
+        let (_directory, book) = book(3);
+        let key = book.path.clone();
+        let mut settings = AppSettings::default();
+        settings.bookmarks.insert(key.clone(), usize::MAX);
+        let mut reader = Reader::new(settings);
+        reader.set_book(book, None);
+        assert!(reader.settings.bookmark_images.is_empty());
+        assert!(reader.resume_bookmark());
+        assert_eq!(reader.current, 2);
+        assert_eq!(reader.settings.bookmarks[&key], usize::MAX);
+        assert!(reader.set_bookmark());
+        assert_eq!(reader.settings.bookmark_images[&key].page, 2);
+        reader.settings.bookmarks.insert(key.clone(), 0);
+        assert_eq!(
+            reader.bookmark_index(),
+            Some(0),
+            "a changed numeric entry must not use stale image metadata"
+        );
+        assert!(reader.clear_bookmark());
+        assert!(reader.settings.bookmark_images.is_empty());
+    }
+
+    #[test]
+    fn archive_bookmarks_keep_numeric_storage_without_image_metadata() {
+        use std::io::Write;
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("book.cbz");
+        let mut archive = zip::ZipWriter::new(std::fs::File::create(&path).unwrap());
+        for name in ["1.png", "2.png"] {
+            archive
+                .start_file(name, zip::write::SimpleFileOptions::default())
+                .unwrap();
+            archive.write_all(b"image").unwrap();
+        }
+        archive.finish().unwrap();
+        let mut reader = Reader::default();
+        reader.set_book(Arc::new(Book::open(&path, false).unwrap()), None);
+        reader.navigate(1);
+        assert!(reader.set_bookmark());
+        assert!(reader.settings.bookmark_images.is_empty());
+        reader.navigate(0);
+        assert!(reader.resume_bookmark());
+        assert_eq!(reader.current, 1);
+        assert!(reader.clear_bookmark());
+        assert!(reader.settings.bookmarks.is_empty());
     }
 
     #[test]

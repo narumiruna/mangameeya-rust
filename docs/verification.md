@@ -867,3 +867,94 @@ Logs for this correction have the `locate-` prefix under
   feature note. Keep the HTML studies as design references. No settings conversion
   or comic-file recovery is required; do not reset reading history or bookmarks.
   No package was published, version tag created, or release workflow dispatched.
+
+## Stable folder bookmarks
+
+This fix started on 2026-11-09 from `main` at `f776f56`, on
+`narumi/fix/stable-folder-bookmarks`. It resolves the confirmed bookmark restore
+defect. A bookmark for `20.png` resumed `10.png` after Include subfolders added
+`00/1.png` before the original page index.
+
+### Behavior and compatibility
+
+- New folder bookmarks store the cached canonical source image path. Resolution
+  compares cached page sources; it does not read or decode image bytes.
+- The existing `bookmarks` numeric map and its JSON format remain intact. Optional
+  `bookmark_images` records contain `page` and `image`. A record is used only when
+  its `page` matches the companion numeric bookmark. Validation removes orphaned
+  or stale records. Empty metadata maps are not written.
+- When the same image has a new index, the reader updates both saved indices.
+  It does not change the current page until the user resumes the bookmark.
+  A duplicate alias keeps its previous index when that index still reads the
+  same image.
+- If the image is not in the reopened book's image list, the bookmark remains
+  stored. Resume reports an unavailable-image error and does not select another
+  image. Restoring the image or subfolder policy and reopening recovers it.
+- Legacy bookmarks remain numeric until set again. Old data has no historical
+  image identity, so the reader does not guess one. Archive bookmarks retain
+  numeric behavior. Renames, moved images, content hashing, and stable reading
+  positions are outside this fix.
+- Native non-Unicode book keys and image paths use the existing lossless path
+  encoding. Settings retain atomic replacement, the 8 MiB cap, exact invalid-file
+  preservation, and the existing save-epoch ordering.
+- Bookmark shortcuts, menu actions, and the toolbar use the Reader methods. The
+  toolbar checks the resolved image. The new unavailable-image message is present
+  in English, Japanese, and Traditional Chinese.
+
+### Verification results
+
+| Check | Result |
+| --- | --- |
+| Independent recursion reproduction | Failed before the fix; passed after it |
+| Windows bookmark-filtered tests | 11 passed; includes the two native control tests |
+| Windows settings tests | 27 passed |
+| Linux full suite | 352 passed; no failures or ignored tests |
+| Windows full suite | **349 passed; 1 pre-existing IPC failure; none ignored** |
+| Windows and Linux formatting | Passed |
+| Windows and Linux all-target/all-feature Clippy with `-D warnings` | Passed |
+| Windows and Linux production rendering | Passed |
+| Release/version/DMG mock suite | 21 passed |
+| Pinned changenote v0.10.0 validation | Passed; new patch note; no product version files changed |
+| Final read-only review and diff checks | No material defect found; whitespace checks passed |
+
+The Windows full-suite failure is
+`instance::tests::queue_is_bounded_and_rejects_overflow` at `src/instance.rs:539`:
+Winsock 10054 (`ConnectionReset`). The same failure was recorded before this fix
+and before the Files feature. IPC code and tests are unchanged. The Windows local
+full suite is not a pass. The required CI gates remain in place before merge and
+release; they are not waived by the Linux pass or the focused Windows passes.
+
+The original reproduction and its before/after logs are under ignored
+`target/bookmark-review/`: `probe/`, `recursion-probe.log`, and
+`recursion-probe-after.log`. Other logs include `bookmark-fix-tests.log`,
+`settings-metadata-tests.log`, `windows-full.log`, `linux-full.log`,
+`windows-clippy.log`, `linux-clippy.log`, `windows-rendering.log`,
+`linux-rendering.log`, and `release-tests.log`. The first release-mock attempt
+lacked `jq` on PATH; adding the existing `target/tools/bin/` for the child process
+allowed all 21 tests to pass. No system or repository tool configuration changed.
+
+Regression coverage includes recursive/non-recursive reopening, inserted and
+removed earlier images, missing/excluded/restored targets, settings reload,
+position memory off, legacy clamping, archive behavior, stale metadata binding,
+unchanged alias positions, malformed/native settings, and source-byte preservation.
+Native events cover setting, updating, resuming, deleting, persistence, the toolbar
+state, and the unavailable-target message in all three locales. Local rendering
+checks events and geometry; this work does not claim new macOS Metal pixels.
+
+### Handoff and recovery
+
+- **Maintainer:** Publish the final branch for review and run normal required CI
+  on Windows, Linux, arm64 macOS, and Intel macOS. Expected result: platform test,
+  rendering, package, and installer evidence for this change. Those remote checks
+  were not run for this local worktree. Existing merge/release gates still apply.
+- **Platform maintainer:** With the final build and a native desktop, check physical
+  bookmark shortcuts, native menus, and assistive-technology announcements.
+  Expected result: platform-specific input and accessibility evidence. Headless
+  tests do not establish those physical behaviors. This is not an added agent
+  completion gate.
+- **Downgrade/recovery:** Close the application and back up `settings.json`. In a
+  working copy for an older build, remove only the top-level `bookmark_images`
+  field if that build does not support it. Keep `bookmarks`, `positions`, `recent`,
+  and preferences. Numeric bookmarks remain usable without stable-image tracking.
+  Do not reset settings or change comic files. No package, tag, or release dispatch
+  was made by this work.

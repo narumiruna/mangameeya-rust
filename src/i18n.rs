@@ -138,6 +138,7 @@ translations! {
     BookClosed => ("Comic closed.", "漫画を閉じました。", "已關閉漫畫。"),
     BookmarkSet => ("Bookmark: page {page}", "しおり：{page} ページ", "書籤：第 {page} 頁"),
     NoBookmark => ("This comic has no bookmark.", "この漫画にしおりはありません。", "本書尚無書籤。"),
+    BookmarkUnavailable => ("The bookmarked image is not in this book's current image list.", "しおりの画像は現在の画像一覧にありません。", "書籤所指的圖片不在目前的圖片清單中。"),
     BookmarkDeleted => ("Bookmark deleted.", "しおりを削除しました。", "已刪除本書書籤。"),
     AboutTitle => ("About MangaMeeya Rust", "MangaMeeya Rust について", "關於 MangaMeeya Rust"),
     AboutDescription => ("Read image folders, ZIP/CBZ, and RAR/CBR offline. Source comics are not modified.", "画像フォルダー、ZIP/CBZ、RAR/CBR をオフラインで読めます。元の漫画は変更しません。", "離線閱讀圖片資料夾、ZIP/CBZ 與 RAR/CBR。原始漫畫不會被修改。"),
