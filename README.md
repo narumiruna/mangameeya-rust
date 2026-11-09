@@ -3,6 +3,7 @@
 [English](README.md) | [正體中文](README.tw.md) | [日本語](README.ja.md)
 
 An offline comic reader for **Windows and macOS**, rewritten in Rust with [GPUI Kit](https://github.com/longbridge/gpui-kit).
+Reading works offline. Optional checks for new versions contact GitHub.
 The GPU draws the interface directly. The application does not use Tauri, WebView, TypeScript, or Node.js.
 
 ## Features
@@ -113,7 +114,7 @@ Covers distinguish queued, loading, unsupported, and failed sources. Full names,
 The toolbar groups file commands, panels, reading modes, zoom, reading direction, bookmarks, reading tools, and fullscreen.
 The **Single page / Two pages / Continuous** buttons select a mode directly. Selecting the current mode again does not change it.
 Mode changes keep the current fit mode or custom zoom. `S` and `C` keep their existing toggle behavior.
-Fullscreen uses the existing commands and shortcuts. This update does not add a focus mode, theme switch, or dependency.
+Fullscreen uses the existing commands and shortcuts. It does not add a focus mode or theme switch.
 The interface continues to use GPUI Kit, ActiveTheme, and Lucide icons.
 
 You can hide each side panel independently and drag its edge to change its width. Panel visibility and preferred widths are saved and restored.
@@ -138,11 +139,22 @@ Opening or closing it does not change reader panel visibility, widths, the selec
 
 - **Reading**: reading-position memory, reading direction, and Black, Dark gray, or Paper backgrounds. The background applies only to the reading area. Direction changes in either window update both controls; selecting the current direction does not change it.
 - **General settings**: language selection and corrupt-settings backup/reset.
+- **New version notifications**: installed version, check status, **Check for updates on startup**, manual **Check for updates**, and **Open download page** when a newer stable version is available.
 
-Changes apply immediately and use the existing automatic save. There are no Save or Apply buttons. Save errors appear in Preferences.
+Changes apply immediately and save automatically. There are no Save or Apply buttons. Save errors appear in Preferences.
 While Preferences has focus, `Escape` or `Ctrl+W` closes only that window; macOS `Command+W` and Windows `Alt+F4` do the same. The book stays open, and the application keeps running.
 Reader navigation and zoom shortcuts do not act through Preferences. **File → Close comic** still closes the book, not Preferences.
 Closing the reader or choosing **Quit** closes both windows and exits the application. macOS `Command+Q` also quits.
+
+### New version notifications
+
+**Check for updates on startup** is enabled by default. The application checks once per full application launch, not periodically. Launches that only send paths to the running reader do not repeat the startup check. Turn off the checkbox under **Preferences → New version notifications** to disable automatic checks; manual checks still work.
+
+Use **Check for updates** in Preferences to check manually. **Help → Check for updates** and the native app-menu command open Preferences and start a check. If a newer stable SemVer release is available, Preferences shows **Open download page** and the reader shows a nonmodal banner. You can dismiss the banner for the current check; the next application launch checks again if startup checks are enabled. Network failures do not interrupt reading; check status and errors appear in Preferences.
+
+Checks use only `https://api.github.com/repos/narumiruna/mangameeya-rust/releases/latest`, without credentials. Requests identify the application version in `User-Agent`, validate TLS, have an approximately 10-second total timeout, and limit the JSON response size. Prereleases are not offered.
+
+The application never downloads or installs release payloads. Only when you select **Open download page** does it open the fixed [GitHub Releases page](https://github.com/narumiruna/mangameeya-rust/releases) in your browser. Download and install the release manually. The first version with these notifications also requires manual installation. Package signing is unchanged; updater SDK research remains deferred.
 
 ### Zoom and page navigation
 
@@ -176,13 +188,15 @@ GPUI component text uses the matching locale; component strings not supplied by 
 
 ## Local data
 
-Preferences, reading positions, recent files, and bookmarks are stored in the user's `settings.json`. Saves use a temporary file and atomic replacement.
-The independent Preferences window does not change the settings schema. Existing settings need no conversion.
+Reading preferences, reading positions, recent files, and bookmarks are stored in the user's `settings.json`. Saves use a temporary file and atomic replacement.
+The independent Preferences window and new version notifications do not change the `settings.json` schema. Existing settings need no conversion.
 
 - Windows: `%APPDATA%\MangaMeeya\MangaMeeya Rust\config\settings.json`
 - macOS: `~/Library/Application Support/org.MangaMeeya.MangaMeeya-Rust/settings.json`
 
 `directories::ProjectDirs` determines the actual path.
+New version notifications save the `check_on_startup` boolean separately in `release-notifications.json` in the same config directory. Read or validation errors in this file disable automatic checks and appear under **Preferences → New version notifications**; manual checks remain available. Update checks do not change book data or `settings.json`.
+
 If the settings file is corrupt, the application keeps the original and shows an error.
 Under **Preferences → General settings**, select **Back up and reset settings** to save a `settings.json.corrupt-*` backup before resetting.
 Local storage from the older WebView version is not read, deleted, or migrated automatically.

@@ -1,7 +1,8 @@
 # MangaMeeya Rust — 確認式自動更新實作計畫
 
 - 日期：2026-11-07
-- 狀態：**已核准 SDK 層級修訂；source hardening 與原生 gate 執行中，完整功能仍未完成**
+- 狀態：**已暫緩；使用者於 2026-11-09 將目前範圍縮減為新版提醒，不實作自動下載或安裝**
+- 目前範圍與驗證界線：[`../release-notifications.md`](../release-notifications.md)。以下保留自動安裝的研究、未完成工作及驗收條件，不代表已交付。
 - Objective：方案 2｜下載後，由使用者確認並重新啟動更新
 - 基準：`main`，`527b1de4f2ce3546d6e3cca1a866b9d2dcb614d1`，應用程式版本 `0.4.0`
 - 初次 preflight 分支：`narumi/feat/confirmed-auto-update`（PR #16 已由 owner 合併）

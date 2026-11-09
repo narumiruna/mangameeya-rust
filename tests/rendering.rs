@@ -159,6 +159,22 @@ fn assert_preferences_hierarchy(window: &mut Window, language: Language, error: 
     assert_eq!(reading.label(), Some(language.text(Text::ReadingTab)));
     assert_eq!(general.label(), Some(language.text(Text::GeneralSettings)));
     assert!(reading.bounds().bottom() < general.bounds().top());
+    let releases = window
+        .within("preferences-content")
+        .find("release-preferences");
+    assert_eq!(
+        releases.label(),
+        Some(language.text(Text::ReleaseNotifications))
+    );
+    assert!(general.bounds().bottom() < releases.bounds().top());
+    for (id, text) in [
+        ("release-check-on-startup", Text::ReleaseCheckOnStartup),
+        ("check-for-updates", Text::CheckForUpdates),
+    ] {
+        let control = window.within("release-preferences").find(id);
+        assert_eq!(control.label(), Some(language.text(text)));
+        assert!(contains_bounds(releases.bounds(), control.bounds()));
+    }
     for id in [
         "remember-position",
         "reading-direction-rtl",
@@ -221,6 +237,8 @@ fn capture_preferences_sizes(
         "language-en",
         "language-ja",
         "language-zh-Hant",
+        "release-check-on-startup",
+        "check-for-updates",
     ];
     if error {
         controls.extend(["settings-save-error", "reset-corrupt-settings"]);

@@ -3,6 +3,7 @@
 [English](README.md) | [正體中文](README.tw.md) | [日本語](README.ja.md)
 
 以 Rust 與 [GPUI Kit](https://github.com/longbridge/gpui-kit) 完整改寫的離線漫畫閱讀器，同時支援 **Windows 與 macOS**。
+閱讀可離線使用；可選的新版本檢查會連線至 GitHub。
 介面直接由 GPU 繪製，不使用 Tauri、WebView、TypeScript 或 Node.js。
 
 ## 功能
@@ -111,7 +112,7 @@ macOS 同時支援 `Command+O`、`Command+Shift+O`、`Command+S`、`Command+W`�
 ### 工具列與面板
 
 工具列依開啟與左側面板、閱讀模式、縮放與閱讀方向、書籤與閱讀工具及全螢幕分組。單頁／雙頁／連續按鈕直接選擇指定模式；重複選取目前模式不會切換至其他模式。切換模式會保留目前的適應方式或自訂縮放；`S`、`C` 仍保留既有切換行為。
-全螢幕沿用既有命令與快捷鍵，不是新增的專注模式。介面沿用 GPUI Kit、ActiveTheme 與 Lucide icons，不新增主題切換或相依套件。
+全螢幕沿用既有命令與快捷鍵，不是新增的專注模式，也不新增主題切換。介面沿用 GPUI Kit、ActiveTheme 與 Lucide icons。
 
 左右面板可獨立收合，拖曳邊界可調整寬度；顯示狀態與偏好寬度會儲存，重新開啟後恢復。
 
@@ -134,11 +135,22 @@ macOS 同時支援 `Command+O`、`Command+Shift+O`、`Command+S`、`Command+W`�
 
 - **閱讀**：記住閱讀位置、閱讀方向，以及黑色、深灰或紙色的閱讀背景。背景只套用於閱讀區。在任一視窗變更閱讀方向，兩邊控制項都會同步；重複選取目前方向不會變更。
 - **一般設定**：語言選擇及損壞設定的備份與重設。
+- **新版提醒**：已安裝版本、檢查狀態、「啟動時檢查新版」、手動「檢查新版」，以及有較新穩定版時的「開啟下載頁」按鈕。
 
-變更會立即生效，並沿用既有的自動儲存；視窗中沒有「儲存」或「套用」按鈕。儲存錯誤會顯示在偏好設定中。
+變更會立即生效並自動儲存；視窗中沒有「儲存」或「套用」按鈕。儲存錯誤會顯示在偏好設定中。
 焦點位於偏好設定時，按 `Escape` 或 `Ctrl+W` 只會關閉該視窗；macOS 的 `Command+W` 與 Windows 的 `Alt+F4` 也相同。漫畫仍保持開啟，程式不會結束。
 偏好設定使用中不會觸發閱讀器的翻頁或縮放快捷鍵。**檔案 → 關閉漫畫** 仍會關閉漫畫，而非偏好設定。
 關閉閱讀視窗或選擇「結束」會關閉兩個視窗並結束程式；macOS 的 `Command+Q` 也會結束程式。
+
+### 新版提醒
+
+「啟動時檢查新版」預設啟用。程式每次完整啟動只檢查一次，不會定期檢查。再次啟動若只是將路徑交給現有閱讀視窗，不會重複啟動檢查。在 **偏好設定 → 新版提醒** 取消勾選，即可停用自動檢查；手動檢查仍可使用。
+
+在偏好設定按「檢查新版」可手動檢查。**說明 → 檢查新版** 與原生應用程式選單的相同命令會開啟偏好設定並開始檢查。若有較新的穩定 SemVer 版本，偏好設定會顯示「開啟下載頁」按鈕，閱讀器也會顯示不阻擋操作的通知橫幅。關閉橫幅只會隱藏本次檢查的通知；若啟動檢查仍啟用，下次啟動程式會再次檢查。網路錯誤不會中斷閱讀；檢查狀態與錯誤會顯示在偏好設定。
+
+檢查只使用 `https://api.github.com/repos/narumiruna/mangameeya-rust/releases/latest`，不使用認證資料。請求會在 `User-Agent` 標示程式版本、驗證 TLS、限制總逾時約 10 秒，並限制 JSON 回應大小。不會通知預先發行版。
+
+程式不會下載或安裝發行檔案。只有使用者按下「開啟下載頁」時，才會在瀏覽器開啟固定的 [GitHub Releases 頁面](https://github.com/narumiruna/mangameeya-rust/releases)。請手動下載並安裝；首次支援這項通知的版本也需要手動安裝。套件簽署維持不變；updater SDK 研究仍暫緩。
 
 ### 縮放與頁碼
 
@@ -165,13 +177,16 @@ GPUI 元件文字會使用對應的 locale；GPUI 未提供的元件字串（包
 
 ## 本機資料
 
-偏好、閱讀位置、最近開啟與書籤存於使用者的 `settings.json`，以暫存檔及 atomic replacement 儲存。
-獨立偏好設定視窗不會變更設定結構，既有設定無需轉換。
+閱讀偏好、閱讀位置、最近開啟與書籤存於使用者的 `settings.json`，以暫存檔及 atomic replacement 儲存。
+獨立偏好設定視窗與新版提醒不會變更 `settings.json` 結構，既有設定無需轉換。
 
 - Windows：`%APPDATA%\MangaMeeya\MangaMeeya Rust\config\settings.json`
 - macOS：`~/Library/Application Support/org.MangaMeeya.MangaMeeya-Rust/settings.json`
 
-實際路徑由 `directories::ProjectDirs` 決定。設定檔損壞時會保留原檔並顯示錯誤；可在「偏好設定 → 一般設定」按「備份並重設設定」，先保留 `settings.json.corrupt-*` 再重設。
+實際路徑由 `directories::ProjectDirs` 決定。
+新版提醒的 `check_on_startup` 布林值另存於相同設定目錄的 `release-notifications.json`。此檔案讀取或驗證失敗時，會停用自動檢查，並在 **偏好設定 → 新版提醒** 顯示錯誤；手動檢查仍可使用。更新檢查不會變更書籍資料或 `settings.json`。
+
+設定檔損壞時會保留原檔並顯示錯誤；可在「偏好設定 → 一般設定」按「備份並重設設定」，先保留 `settings.json.corrupt-*` 再重設。
 舊版 WebView local storage 不會被讀取、刪除或自動遷移。
 單一程序的 lock 與經驗證的 loopback endpoint 也位於此目錄，關閉程式會移除 endpoint。
 
