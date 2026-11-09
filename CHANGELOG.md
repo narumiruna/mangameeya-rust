@@ -1,3 +1,13 @@
+## 0.7.0
+
+### Minor Changes
+
+- Add an independent Files sidebar with expandable folders, separate selection and reading, location history, current-book location, loaded-folder search, and a session-only hidden-items view.
+
+### Patch Changes
+
+- Keep folder bookmarks on the same image when subfolder inclusion or page order changes, and report unavailable images without opening another page.
+
 ## 0.6.0
 
 ### Minor Changes
