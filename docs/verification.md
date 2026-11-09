@@ -116,6 +116,10 @@ requires the exact visible pair regardless of concurrent poll order, still check
 exactly two held slots, and requires the exact next source after completion
 without a timer. Runtime work was not serialized and no priority criterion was
 removed. The failed jobs remain in [run 42628620728](https://github.com/narumiruna/mangameeya-rust/actions/runs/42628620728).
+The next Linux run passed Rust and native geometry tests, then found unused
+macOS/Windows-only example helpers under all-target Clippy. Those helpers and
+imports now have matching platform cfg guards, without suppressing warnings.
+That failure remains in [run 42629998109](https://github.com/narumiruna/mangameeya-rust/actions/runs/42629998109).
 
 Controlled-worker regressions check painted queued/loading/failed labels,
 visible-before-overscan dispatch, out-of-order completion without a timer tick,

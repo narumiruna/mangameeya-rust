@@ -17,10 +17,12 @@ mod windows_capture;
 
 use anyhow::{Context, Result};
 use browser_fixture::BrowserFixture;
+#[cfg(any(target_os = "macos", target_os = "windows"))]
 use gpui_kit::{
     AppContext, Bounds, Window, WindowBounds, WindowOptions, px, size,
     test::{TestQueryExt, TestWindowExt},
 };
+#[cfg(any(target_os = "macos", target_os = "windows"))]
 use mangameeya_rust::{
     i18n::Language,
     settings::{AppSettings, SidebarMode},
@@ -129,6 +131,7 @@ fn save_report(output: &Path, report: &Value) -> Result<()> {
     Ok(())
 }
 
+#[cfg(any(target_os = "macos", target_os = "windows"))]
 fn settings(source: &Path) -> AppSettings {
     let mut settings = AppSettings::default();
     settings.preferences.language = Language::TraditionalChinese;
@@ -138,6 +141,7 @@ fn settings(source: &Path) -> AppSettings {
     settings
 }
 
+#[cfg(any(target_os = "macos", target_os = "windows"))]
 fn options() -> WindowOptions {
     WindowOptions {
         window_bounds: Some(WindowBounds::Windowed(Bounds::new(
@@ -151,6 +155,7 @@ fn options() -> WindowOptions {
 }
 
 // Use a generic source label, not browser toolbar IDs that changed in the plan.
+#[cfg(any(target_os = "macos", target_os = "windows"))]
 fn launch_source(window: &mut Window, cx: &mut gpui_kit::App, source: &Path) {
     window.render_frame(cx);
     let label = source.file_name().unwrap().to_string_lossy();
@@ -158,6 +163,7 @@ fn launch_source(window: &mut Window, cx: &mut gpui_kit::App, source: &Path) {
     window.click(id, cx);
 }
 
+#[cfg(any(target_os = "macos", target_os = "windows"))]
 fn enter_browser(window: &mut Window, cx: &mut gpui_kit::App) -> Result<()> {
     window.render_frame(cx);
     anyhow::ensure!(
