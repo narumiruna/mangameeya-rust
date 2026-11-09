@@ -526,6 +526,25 @@ fn delayed_listing(fixture: &Fixture, name: &str, cx: &mut TestAppContext) -> Pa
     path
 }
 
+fn finish_delayed_workers(
+    fixture: &Fixture,
+    gate: &Arc<Mutex<super::super::browser::CoverJobGate>>,
+    cx: &mut TestAppContext,
+) {
+    // Do not leave a parked future holding the gate that stores its own waker.
+    fixture
+        .view
+        .update(cx, |view, _| view.browser.worker_gate = None);
+    let started = gate.lock().unwrap().started.clone();
+    for path in started {
+        gate.lock().unwrap().release(path);
+    }
+    cx.run_until_parked();
+    fixture
+        .view
+        .read_with(cx, |view, _| assert_eq!(view.browser.active_jobs(), 0));
+}
+
 #[gpui_kit::test]
 fn delayed_workers_prioritize_visible_rows_and_refill_on_completion_without_ticks(
     cx: &mut TestAppContext,
@@ -617,6 +636,7 @@ fn delayed_workers_prioritize_visible_rows_and_refill_on_completion_without_tick
         );
     })
     .unwrap();
+    finish_delayed_workers(&fixture, &gate, cx);
 }
 
 #[gpui_kit::test]
@@ -688,6 +708,7 @@ fn obsolete_delayed_jobs_hold_actual_slots_across_navigation_scroll_and_resize(
             assert_eq!(view.browser.cache_count(), 0);
         });
     }
+    finish_delayed_workers(&fixture, &gate, cx);
 }
 
 #[gpui_kit::test]
