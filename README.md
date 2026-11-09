@@ -76,9 +76,21 @@ cargo run --locked -- /path/to/book.cbz
 macOS also supports `Command+O`, `Command+Shift+O`, `Command+S`, `Command+W`, `Command+Q`, `Command+,`, and `Control+Command+F`.
 The mouse wheel scrolls without directly turning pages. Hold `Ctrl` while using the wheel to zoom. In single-page and two-page layouts, click the left or right edge of the reading area to turn pages.
 
+### Files sidebar
+
+The **File** tab has an expandable folder tree, independent of the central browser. Click a disclosure arrow to expand or collapse a folder; click its name to navigate the sidebar. A single book click selects it without changing the reader. Double-click a book, press `Enter` on its row, or use **Read selection** to read it. A selection hidden by filtering or collapse cannot be read with that button. **Read this folder** opens the current folder's images using the existing **Include subfolders** preference; it does not combine child archives into one book.
+
+- The tree has one root. **Parent** selects the parent within the tree or changes the root when moving above it. At a filesystem root, Parent is disabled. **Back** restores the previous sidebar location, selection, search, and scroll position, for up to 32 previous locations.
+- **Locate current book** clears the search, loads and expands the source's ancestors, and focuses its row. For a source outside the tree, its containing folder becomes the root. If hidden items are needed, Locate shows them and reports the change.
+- **Search loaded folders** filters only folders already loaded, including collapsed branches. It does not scan the disk or load unvisited folders. Matching ancestor chains expand temporarily; clearing the search restores normal expansion.
+- **Show hidden items** includes dot-prefixed entries and, on Windows, entries with Hidden or System attributes. This toggle affects only the sidebar and lasts only for the session. Expansion, navigation, selection, and search are also session-only; central-browser filtering is unchanged.
+- The location field shows an ordinary folder path, including Windows drive and UNC paths without an internal verbatim prefix. Edit the path and press `Enter` to navigate; `Escape` cancels changes. Invalid paths keep the previous location and reader. Long-name tooltips show full paths.
+
+With focus in the Files tree, `↑`/`↓` and `Home`/`End` move between visible rows. `Enter` reads a book or navigates a folder. `→` expands a folder or enters its children; it does nothing on files. `←` collapses a folder or focuses its parent. Search-expanded branches stay expanded until the query is cleared. `Backspace` and `Alt+↑` move to the parent only in non-editable Files controls. Inputs keep normal text editing. These shortcuts do not change reader or central-browser shortcuts. Sidebar navigation does not pause the slideshow or replace the central canvas; the central `Backspace` workflow below is unchanged.
+
 ### File browser
 
-Press `Backspace` while reading to replace only the central canvas with a black cover grid. The toolbar, side panels, and status bar stay in place. Select a file, then press `Enter` or double-click it to read. Folders open in the browser; **Open this folder** reads its images. `Escape` closes a popup first, then returns to the current book before it exits fullscreen. Search inputs keep their normal text-editing keys.
+Press `Backspace` while reading to replace only the central canvas with a black cover grid. The toolbar, side panels, and status bar stay in place. Select a file, then press `Enter` or double-click it to read. Folders open in the browser; **File → Read this folder** reads the central folder's images. `Escape` closes a popup first, then returns to the current book before it exits fullscreen. Search inputs keep their normal text-editing keys.
 
 The browser keeps the query, sort, selection, and scroll position when you return from reading. Reading retains the page, zoom, filters, and scroll position. Browsing pauses the slideshow and disables reading controls. The **Browser** tools tab controls cover size, file names, and metadata. These browser preferences are not saved between launches.
 

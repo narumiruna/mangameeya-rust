@@ -1284,6 +1284,264 @@ fn capture_browser_states(cx: &mut HeadlessAppContext, temporary: &Path, folder:
     assert_eq!(std::fs::read(source).unwrap(), original_bytes);
 }
 
+// Files coverage uses separate windows and native fixtures. Keep the original
+// reader and central-browser capture workflows unchanged.
+fn capture_files_states(cx: &mut HeadlessAppContext, temporary: &Path, source_folder: &Path) {
+    let root = temporary.join("files-native-漫畫");
+    std::fs::create_dir(&root).unwrap();
+    let source = root.join("1.png");
+    std::fs::copy(source_folder.join("2.png"), &source).unwrap();
+    let long_name = format!("長い名前-漫畫-{}-10.png", "readable-name-".repeat(10));
+    std::fs::copy(source_folder.join("1.png"), root.join(&long_name)).unwrap();
+    let a = root.join("folder2");
+    let b = root.join("folder10");
+    for folder in [&a, &b] {
+        std::fs::create_dir(folder).unwrap();
+        std::fs::copy(&source, folder.join("child.png")).unwrap();
+    }
+    let root = root.canonicalize().unwrap();
+    let source = root.join("1.png");
+    let bytes = std::fs::read(&source).unwrap();
+    let entry =
+        |path: &Path| gpui_kit::SharedString::from(format!("files-entry:{:?}", path.as_os_str()));
+    let toggle =
+        |path: &Path| gpui_kit::SharedString::from(format!("files-toggle:{:?}", path.as_os_str()));
+    let original_windows = cx.update(|cx| cx.windows().len());
+    for language in Language::ALL {
+        for sidebar_width in [216, 224, 320] {
+            let mut settings = AppSettings::default();
+            settings.preferences.language = language;
+            settings.preferences.sidebar = true;
+            settings.preferences.sidebar_mode = mangameeya_rust::settings::SidebarMode::Files;
+            settings.preferences.panel_layout.sidebar_width = sidebar_width;
+            // The minimum viewport cannot contain a 320 px Files panel, the
+            // inspector, and the required 280 px central slot at the same time.
+            settings.preferences.panel_layout.inspector_visible = false;
+            let (sender, launches) = mpsc::channel();
+            let (reader, view) = open_reader_fixture(
+                cx,
+                temporary.join(format!("files-{}-{sidebar_width}.json", language.code())),
+                settings,
+                None,
+                launches,
+            );
+            sender.send(vec![source.clone()]).unwrap();
+            settle(cx, reader);
+            for folder in [root.join("folder2"), root.join("folder10")] {
+                cx.update_window(reader, |_, window, cx| window.click(toggle(&folder), cx))
+                    .unwrap();
+                settle(cx, reader);
+            }
+            for (width, height, suffix) in [
+                (1280., 800., "1280x800"),
+                (960., 640., "960x640"),
+                (800., 540., "800x540"),
+            ] {
+                cx.update_window(reader, |_, window, cx| {
+                    window.resize(size(px(width), px(height)));
+                    window.bounds_changed(cx);
+                    window.click("files-locate", cx);
+                })
+                .unwrap();
+                settle(cx, reader);
+                let shell = cx
+                    .update_window(reader, |_, window, _| browser_shell_bounds(window))
+                    .unwrap();
+                for browsing in [false, true] {
+                    if browsing {
+                        cx.update_window(reader, |_, window, cx| {
+                            window.click("browser-toggle", cx)
+                        })
+                        .unwrap();
+                        settle(cx, reader);
+                    }
+                    cx.update_window(reader, |_, window, cx| window.click("files-locate", cx))
+                        .unwrap();
+                    settle(cx, reader);
+                    cx.update_window(reader, |_, window, _| {
+                        assert_desktop_geometry(window, language);
+                        assert_eq!(
+                            browser_shell_bounds(window),
+                            shell,
+                            "Files must not alter the shell between central modes"
+                        );
+                        assert_eq!(window.try_find("browser-grid").is_some(), browsing);
+                        assert_eq!(window.find("page-input").value(), Some("1"));
+                        let sidebar = window.find("sidebar").bounds();
+                        assert!(
+                            (f32::from(sidebar.size.width) - sidebar_width as f32).abs() < 1.,
+                            "requested Files width: {sidebar_width}, {sidebar:?}"
+                        );
+                        let panel = window.find("files-panel").bounds();
+                        assert!(contains_bounds(sidebar, panel));
+                        let tree = window.find("files-tree");
+                        assert_eq!(tree.role(), Some(gpui_kit::Role::Tree));
+                        assert_eq!(tree.label(), Some(language.text(Text::FilesTree)));
+                        assert!(contains_bounds(panel, tree.bounds()));
+                        let controls = [
+                            "files-back",
+                            "files-parent",
+                            "files-locate",
+                            "files-hidden",
+                            "path-input",
+                            "files-search",
+                            "files-search-hint",
+                            "files-read-selected",
+                            "files-read-folder",
+                        ];
+                        for (index, id) in controls.iter().enumerate() {
+                            let control = window.find(*id);
+                            assert!(
+                                control.visible(),
+                                "Files control: {language:?} {suffix} {sidebar_width} {id}"
+                            );
+                            assert!(
+                                contains_bounds(panel, control.bounds()),
+                                "Files control must fit at every width: {id}"
+                            );
+                            for other in &controls[index + 1..] {
+                                let a = control.bounds();
+                                let b = window.find(*other).bounds();
+                                assert!(
+                                    a.right() <= b.left() + px(0.5)
+                                        || b.right() <= a.left() + px(0.5)
+                                        || a.bottom() <= b.top() + px(0.5)
+                                        || b.bottom() <= a.top() + px(0.5),
+                                    "Files controls overlap: {id}, {other}"
+                                );
+                            }
+                        }
+                        for (id, text) in [
+                            ("files-back", Text::FilesBack),
+                            ("files-parent", Text::ParentFolder),
+                            ("files-locate", Text::FilesLocate),
+                            ("files-hidden", Text::FilesHidden),
+                            ("files-search", Text::FilesSearchLoaded),
+                            ("files-read-selected", Text::FilesReadSelected),
+                            ("files-read-folder", Text::FilesReadFolder),
+                        ] {
+                            assert_eq!(
+                                window.find(id).label(),
+                                Some(language.text(text)),
+                                "localized Files label: {id}"
+                            );
+                        }
+                        assert_eq!(
+                            window.find("files-search-hint").label(),
+                            Some(language.text(Text::FilesSearchHint))
+                        );
+                        assert_ne!(window.find("files-read-selected").disabled(), Some(true));
+                        assert_ne!(window.find("files-read-folder").disabled(), Some(true));
+                        let active = window.find(entry(&source));
+                        assert!(
+                            active.visible() && contains_bounds(tree.bounds(), active.bounds()),
+                            "current source must be reachable"
+                        );
+                        assert_eq!(active.checked(), Some(true));
+                        assert!(window.find("files-current-marker").visible());
+                        assert!(
+                            window.try_find(entry(&root)).is_none(),
+                            "location is not a duplicate tree row"
+                        );
+                    })
+                    .unwrap();
+                    snapshot(
+                        cx,
+                        reader,
+                        &format!(
+                            "files-{}-{suffix}-w{sidebar_width}-{}",
+                            language.code(),
+                            if browsing { "browsing" } else { "reading" }
+                        ),
+                    );
+                    // Reveal the first siblings independently of the selected row.
+                    cx.update_window(reader, |_, window, cx| {
+                        window.click("files-locate", cx);
+                        window.press("home", cx);
+                    })
+                    .unwrap();
+                    settle(cx, reader);
+                    cx.update_window(reader, |_, window, _| {
+                        let icon = |path: &Path| {
+                            gpui_kit::SharedString::from(format!(
+                                "files-icon:{:?}",
+                                path.as_os_str()
+                            ))
+                        };
+                        let first = window.find(icon(&root.join("folder2"))).bounds();
+                        let second = window.find(icon(&root.join("folder10"))).bounds();
+                        assert!(
+                            (f32::from(first.left() - second.left())).abs() < 0.5,
+                            "sibling icon columns must align"
+                        );
+                        assert!(contains_bounds(window.find("files-tree").bounds(), first));
+                    })
+                    .unwrap();
+                    // At 800x540 the tree can show two rows. Reveal the second
+                    // sibling through the composite keyboard focus as well.
+                    cx.update_window(reader, |_, window, cx| {
+                        window.press("down", cx);
+                        window.press("down", cx);
+                    })
+                    .unwrap();
+                    settle(cx, reader);
+                    cx.update_window(reader, |_, window, _| {
+                        let second = window.find(entry(&root.join("folder10")));
+                        assert!(second.visible() && contains_bounds(window.find("files-tree").bounds(), second.bounds()), "sibling must be keyboard-reachable: {language:?} {suffix} w{sidebar_width}");
+                    }).unwrap();
+                    cx.update_window(reader, |_, window, cx| window.press("end", cx))
+                        .unwrap();
+                    settle(cx, reader);
+                    cx.update_window(reader, |_, window, _| {
+                        let long = window.find(entry(&root.join(&long_name)));
+                        assert_eq!(
+                            long.label(),
+                            Some(long_name.as_str()),
+                            "long names must retain their complete accessible names"
+                        );
+                        assert!(
+                            long.visible()
+                                && contains_bounds(
+                                    window.find("files-tree").bounds(),
+                                    long.bounds()
+                                )
+                        );
+                        assert_eq!(
+                            window.find("page-input").value(),
+                            Some("1"),
+                            "Files End must not navigate the reader"
+                        );
+                    })
+                    .unwrap();
+                    snapshot(
+                        cx,
+                        reader,
+                        &format!(
+                            "files-{}-{suffix}-w{sidebar_width}-{}-end",
+                            language.code(),
+                            if browsing { "browsing" } else { "reading" }
+                        ),
+                    );
+                }
+                cx.update_window(reader, |_, window, cx| window.click("browser-resume", cx))
+                    .unwrap();
+                settle(cx, reader);
+            }
+            cx.update_window(reader, |_, window, _| window.remove_window())
+                .unwrap();
+            cx.run_until_parked();
+            drop(view);
+            drop(sender);
+            assert_eq!(cx.update(|cx| cx.windows().len()), original_windows);
+        }
+    }
+    assert_eq!(
+        std::fs::read(source).unwrap(),
+        bytes,
+        "Files captures must not modify source pages"
+    );
+}
+
 fn open_reader(
     cx: &mut HeadlessAppContext,
     settings_path: PathBuf,
@@ -1364,6 +1622,7 @@ fn main() {
             .unwrap();
     }
     capture_browser_states(&mut cx, temporary.path(), &folder);
+    capture_files_states(&mut cx, temporary.path(), &folder);
     let settings_path = temporary.path().join("settings.json");
     let (sender, launches) = mpsc::channel();
     let (window, view) = open_reader(&mut cx, settings_path.clone(), launches);

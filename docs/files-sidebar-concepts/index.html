@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <link rel="icon" href="data:,">
+  <link rel="stylesheet" href="styles.css">
+  <title>三種檔案側欄方案 — MangaMeeya Rust</title>
+</head>
+<body class="comparison">
+  <header class="comparison-top"><span class="comparison-wordmark">MANGAMEEYA RUST</span><span>FILES SIDEBAR · 3 INTERACTIVE STUDIES</span></header>
+  <main>
+    <h1>檔案側欄的三種導覽方案</h1>
+    <p class="comparison-intro">三種「檔案」側欄方案，同一個閱讀視窗。改善原有清單的對齊、層級與路徑資訊，並清楚區分「選取」、「瀏覽」與「開始閱讀」。</p>
+    <div class="shared-rules" aria-label="三案共同原則"><span>固定圖示欄，檔名靠左</span><span>定位目前書籍</span><span>一般 Windows 路徑</span><span>選取不等於開啟</span><span>隱藏項目可切換</span></div>
+    <div class="concept-grid"><article class="concept-card"><div class="card-preview" aria-label="精簡清單的結構示意，非實際畫面截圖"><div class="preview-window"><div class="preview-sidebar"><strong class="preview-title">內容導覽</strong><div class="preview-tabs"><span>檔案</span><span>縮圖</span><span>最近</span></div><div class="preview-path">Comics / 夜行列車　⌑</div><div class="preview-row folder"><i></i>特典</div><div class="preview-row"><i></i>夜行列車 第 01 卷</div><div class="preview-row"><i></i>夜行列車 第 02 卷</div><div class="preview-row selected"><i></i>夜行列車 第 03 卷</div><div class="preview-row"><i></i>夜行列車 第 04 卷</div></div><div class="preview-canvas"><img src="reader-art.svg" alt=""></div></div></div><div class="concept-copy"><div class="concept-number">01 / COMPACT LIST</div><h2>精簡清單</h2><p>保留熟悉的檔案清單，先修正對齊、路徑與操作回饋。</p><div class="concept-tradeoff"><strong>優點</strong> 學習成本低，接近現有側欄。<br><strong>取捨</strong> 深層目錄仍要逐層進入。</div><a class="concept-link" href="01-compact.html">開啟互動原型 <span aria-hidden="true">↗</span></a></div></article>
+<article class="concept-card"><div class="card-preview" aria-label="階層導覽的結構示意，非實際畫面截圖"><div class="preview-window"><div class="preview-sidebar"><strong class="preview-title">內容導覽</strong><div class="preview-tabs"><span>檔案</span><span>縮圖</span><span>最近</span></div><div class="preview-path">Comics / 夜行列車　⌑</div><div class="preview-row folder"><span>⌄</span><i></i>Comics</div><div class="preview-row folder indent"><span>⌄</span><i></i>夜行列車</div><div class="preview-row deep"><i></i>第 01 卷</div><div class="preview-row deep selected"><i></i>第 03 卷　· 閱讀中</div><div class="preview-row folder indent"><span>›</span><i></i>短篇集</div></div><div class="preview-canvas"><img src="reader-art.svg" alt=""></div></div></div><div class="concept-copy"><div class="concept-number">02 / EXPANDABLE FOLDERS</div><h2>階層導覽</h2><p>真正可展開的資料夾，不必離開目前位置就能查看其他系列。</p><div class="concept-tradeoff"><strong>優點</strong> 可同時查看多個目錄層級。<br><strong>取捨</strong> 長檔名的可用寬度較少。</div><a class="concept-link" href="02-tree.html">開啟互動原型 <span aria-hidden="true">↗</span></a></div></article>
+<article class="concept-card"><div class="card-preview" aria-label="閱讀優先的結構示意，非實際畫面截圖"><div class="preview-window"><div class="preview-sidebar"><strong class="preview-title">內容導覽</strong><div class="preview-tabs"><span>檔案</span><span>縮圖</span><span>最近</span></div><div class="preview-current-card">● 正在閱讀<strong>夜行列車 · 第 03 卷</strong>18 / 48 頁　━━━━━<br>⌑ 顯示所在位置</div><div class="preview-row selected"><i></i>第 03 卷　· 閱讀中</div><div class="preview-row"><i></i>第 04 卷　· 未讀</div><div class="preview-row"><i></i>第 05 卷　· 未讀</div></div><div class="preview-canvas"><img src="reader-art.svg" alt=""></div></div></div><div class="concept-copy"><div class="concept-number">03 / READING FIRST</div><h2>閱讀優先</h2><p>先看到正在讀的書與同系列，再前往其他資料夾。</p><div class="concept-tradeoff"><strong>優點</strong> 目前書籍與接續閱讀更明確。<br><strong>取捨</strong> 書籍卡片會減少清單高度。</div><a class="concept-link" href="03-reading-first.html">開啟互動原型 <span aria-hidden="true">↗</span></a></div></article></div>
+    <section class="recommendation"><strong>建議從 01 開始</strong><p>先修正現有側欄的基本操作。若需要跨系列管理大量資料夾，再選 02；若主要連續閱讀同系列，選 03。</p></section>
+  </main>
+  <footer class="comparison-footer"><span>全部為本機 HTML，無外部字型或套件。使用示範書籍與原創 SVG，不讀取真實檔案。<br>上方選單與右側影像工具保留外觀；頁碼、側欄與檔案導覽可操作。</span><span><a href="README.md">範圍與驗證說明</a> · <a href="../file-browser-concepts/index.html">先前的中央瀏覽方案</a></span></footer>
+</body>
+</html>

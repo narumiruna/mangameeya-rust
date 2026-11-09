@@ -14,9 +14,12 @@ gpui_kit::assets::icon_assets!(
         ChevronRight,
         Columns2,
         Ellipsis,
+        FileArchive,
+        FileImage,
         FileText,
         FolderOpen,
         Info,
+        LocateFixed,
         Maximize,
         PanelLeft,
         RotateCcw,
@@ -56,6 +59,13 @@ mod tests {
     fn reader_and_component_icons_are_embedded_and_listed() {
         let paths = ReaderAssets.list("icons/").unwrap();
         for icon in [
+            IconName::ArrowLeft,
+            IconName::ArrowUp,
+            IconName::Eye,
+            IconName::FileArchive,
+            IconName::FileImage,
+            IconName::Folder,
+            IconName::LocateFixed,
             IconName::ArrowLeftRight,
             IconName::Bookmark,
             IconName::Check,

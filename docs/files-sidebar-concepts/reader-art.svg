@@ -1,0 +1,53 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="840" height="1110" viewBox="0 0 840 1110">
+<defs>
+  <pattern id="tone" width="6" height="6" patternUnits="userSpaceOnUse"><circle cx="1" cy="1" r=".7" fill="#737373"/></pattern>
+  <pattern id="windows" width="32" height="39" patternUnits="userSpaceOnUse"><rect x="8" y="8" width="12" height="19" fill="#fff"/></pattern>
+  <linearGradient id="sky" x2="0" y2="1"><stop stop-color="#a5a5a5"/><stop offset="1" stop-color="#f2f2f2"/></linearGradient>
+</defs>
+<rect width="840" height="1110" fill="#fff"/>
+<g stroke="#171717" stroke-width="4">
+<rect x="28" y="28" width="784" height="400" fill="url(#sky)"/>
+<path d="M28 215h55v-70h65v95h28V95h71v145h25V175h64v65h18V121h84v119h22v-76h50v76h26V80h62v160h29V155h61v85h27V110h68v130h29v-45h48v99H28Z" fill="#3b3b3b"/>
+<path d="M176 95h71v145h-71zm178 26h84v119h-84zm182-41h62v160h-62zm117 75h61v85h-61Z" fill="url(#windows)" stroke="none"/>
+<path d="M28 296 812 257v111L28 422Z" fill="#aaa"/>
+<path d="m28 307 784-39M28 391l784-59" stroke="#171717" stroke-width="11"/>
+<path d="m80 325 670-37v65L80 399Z" fill="#f7f7f7"/>
+<path d="m105 339 72-4v28l-72 5zm91-5 72-4v28l-72 5zm91-5 72-4v28l-72 5zm91-5 72-4v28l-72 5zm91-5 72-4v28l-72 5zm91-5 72-4v28l-72 5zm91-5 72-4v28l-72 5Z" fill="#222" stroke-width="2"/>
+<path d="m210 277 500-29m-530 16 310-17M40 120l78-4m535-49 130-13" stroke="#fff" stroke-width="2"/>
+<rect x="54" y="53" width="205" height="45" fill="#fff" stroke-width="2"/>
+<rect x="28" y="446" width="339" height="312" fill="#e2e2e2"/>
+<path d="M30 555h335M30 580h335M70 446v312m230-312v312" stroke-width="8"/>
+<path d="M75 460h220v96H75Z" fill="#3b3b3b"/>
+<path d="m87 467 192 76m-192-50 114 45" stroke="#aaa" stroke-width="2"/>
+<path d="M95 758v-89q8-56 56-57 57 0 62 58v88" fill="#222"/>
+<path d="M126 620q-12-17-5-42 7-25 31-25 31 0 36 34l-3 35-23 17Z" fill="#fff"/>
+<path d="M120 588q-16-45 28-48 34 0 42 43l-19-9-9 14-14-10-15 11Z" fill="#222"/>
+<path d="m176 686 50-24 8 18-55 29-30-26" fill="#fff"/>
+<rect x="220" y="649" width="29" height="44" rx="3" fill="#eee" stroke-width="2"/>
+<rect x="385" y="446" width="427" height="312" fill="#fff"/>
+<path d="m387 660 423-111v207H387Z" fill="url(#tone)" stroke="none"/>
+<path d="m400 740 390-99m-390 69 390-97m-390 67 390-97" stroke-width="2"/>
+<ellipse cx="657" cy="520" rx="105" ry="45" fill="#fff" stroke-width="2"/>
+<path d="m610 554-17 21 38-16" fill="#fff" stroke-width="2"/>
+<path d="M520 758v-77q0-57 48-62 41 0 50 47l14 92" fill="#f5f5f5"/>
+<path d="M544 619q-6-30 4-50 19-26 42-4 13 18 9 42l-20 23Z" fill="#fff"/>
+<path d="M543 590q-11-31 16-40 38-10 48 32l-23-8-8 17-13-16-11 17Z" fill="#222"/>
+<path d="m536 689 33 26 51-17m-28-24 32 17" fill="none"/>
+<rect x="28" y="776" width="784" height="306" fill="#ddd"/>
+<path d="M28 899h784v183H28Z" fill="url(#tone)" stroke="none"/>
+<path d="m28 1078 784-223m-784 150 784-181m-784 115 784-140" stroke-width="2"/>
+<path d="m252 778-77 304m379-304 77 304" stroke-width="8"/>
+<path d="m245 800 318 2 54 208-426 6Z" fill="#fff"/>
+<path d="M272 820h258v104H272Z" fill="#252525"/>
+<path d="M302 833h84v79h-84zm114 0h84v79h-84Z" fill="#ccc"/>
+<path d="M210 1045h386" stroke-width="17"/>
+<circle cx="258" cy="976" r="13" fill="#222"/><circle cx="551" cy="976" r="13" fill="#222"/>
+<path d="M61 804v175m22-157v118m654-145v146m20-126v153" stroke-width="2"/>
+<rect x="617" y="1001" width="167" height="54" fill="#fff" stroke-width="2"/>
+</g>
+<g fill="#171717" font-family="sans-serif" text-anchor="middle">
+<text x="156" y="83" font-size="22" letter-spacing="4">NIGHT TRAIN</text>
+<text x="657" y="526" font-size="19">The last train.</text>
+<text x="700" y="1035" font-size="16" letter-spacing="2">TO BE CONTINUED</text>
+</g>
+</svg>

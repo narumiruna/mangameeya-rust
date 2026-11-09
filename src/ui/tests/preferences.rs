@@ -308,7 +308,6 @@ fn drafts_created_before_preferences_open_survive_language_change_and_reopen(
     cx.update_window(fixture.window, |_, window, cx| {
         fixture.view.update(cx, |view, cx| {
             view.controls_pending = false;
-            view.path_pending = false;
             for (input, value) in [
                 (&view.page_input, "003"),
                 (&view.path_input, "/draft/日本語/正體中文"),

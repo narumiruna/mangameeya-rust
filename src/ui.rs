@@ -2,6 +2,7 @@
 
 mod assets;
 mod browser;
+mod files;
 mod preferences;
 pub use assets::ReaderAssets;
 
@@ -142,6 +143,13 @@ impl Command {
 enum ContentMode {
     Reading,
     Browsing,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum OpenSource {
+    External,
+    CentralBrowser,
+    Sidebar,
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -333,6 +341,7 @@ pub struct ReaderView {
     book_recursive: bool,
     browser: browser::BrowserUi,
     reading_origin: Option<PathBuf>,
+    sidebar_folder_origin: Option<PathBuf>,
     pending_browser_selection: Option<PathBuf>,
     settings_path: PathBuf,
     focus: FocusHandle,
@@ -356,13 +365,12 @@ pub struct ReaderView {
     continuous: ListState,
     continuous_target: Option<usize>,
     thumbnails: ListState,
-    files: ListState,
+    files_ui: files::FilesUi,
     paged_scroll: gpui_kit::ScrollHandle,
     horizontal_scroll: gpui_kit::ScrollHandle,
     viewer_size: Size<Pixels>,
     viewer_bounds: Bounds<Pixels>,
     controls_pending: bool,
-    path_pending: bool,
     page_input: Entity<InputState>,
     zoom_input: Entity<InputState>,
     zoom_open: bool,
@@ -455,16 +463,13 @@ impl ReaderView {
                 }
             },
         ));
-        subscriptions.push(cx.subscribe_in(
-            &path_input,
-            window,
-            |this, input, event, window, cx| {
+        subscriptions.push(
+            cx.subscribe_in(&path_input, window, |this, _, event, window, cx| {
                 if matches!(event, InputEvent::PressEnter { .. }) {
-                    let path = PathBuf::from(input.read(cx).value().as_ref());
-                    this.browse(path, window, cx);
+                    this.files_submit_path(window, cx);
                 }
-            },
-        ));
+            }),
+        );
         subscriptions.push(
             cx.subscribe_in(&interval_input, window, |this, _, event, _, cx| {
                 if matches!(event, InputEvent::PressEnter { .. } | InputEvent::Blur) {
@@ -531,6 +536,7 @@ impl ReaderView {
         let continuous = ListState::new(0, ListAlignment::Top, px(500.));
         let thumbnails = ListState::new(0, ListAlignment::Top, px(300.));
         let browser = browser::BrowserUi::new(window, cx);
+        let files_ui = files::FilesUi::new(window, cx);
         let mut view = Self {
             reader: Reader::new(settings),
             content_mode: ContentMode::Browsing,
@@ -538,6 +544,7 @@ impl ReaderView {
             book_recursive: false,
             browser,
             reading_origin: None,
+            sidebar_folder_origin: None,
             pending_browser_selection: None,
             settings_path,
             focus,
@@ -561,13 +568,12 @@ impl ReaderView {
             continuous,
             continuous_target: None,
             thumbnails,
-            files: ListState::new(0, ListAlignment::Top, px(200.)),
+            files_ui,
             paged_scroll: Default::default(),
             horizontal_scroll: Default::default(),
             viewer_size: size(px(800.), px(600.)),
             viewer_bounds: Bounds::default(),
             controls_pending: false,
-            path_pending: false,
             page_input,
             zoom_input,
             zoom_open: false,
@@ -599,7 +605,8 @@ impl ReaderView {
         };
         view.update_language(window, cx);
         let home = initial_directory();
-        view.browse(home, window, cx);
+        view.browse(home.clone(), window, cx);
+        view.files_browse(home, false, window, cx);
         cx.spawn_in(window, async move |view, cx| {
             loop {
                 cx.background_executor().timer(TICK).await;
@@ -771,6 +778,9 @@ impl ReaderView {
         self.path_input.update(cx, |input, cx| {
             input.set_placeholder(language.text(Text::FolderPath), window, cx);
         });
+        self.files_ui.search.update(cx, |input, cx| {
+            input.set_placeholder(language.text(Text::FilesSearchLoaded), window, cx);
+        });
         self.message = language.format(self.message_translation.0, &self.message_translation.1);
     }
 
@@ -859,14 +869,6 @@ impl ReaderView {
             self.sync_controls(window, cx);
             if let Some(book) = &self.reader.book {
                 window.set_window_title(&format!("{} — MangaMeeya Rust", book.title));
-            }
-        }
-        if self.path_pending {
-            self.path_pending = false;
-            if let Some(listing) = &self.listing {
-                let path = listing.path.to_string_lossy().into_owned();
-                self.path_input
-                    .update(cx, |input, cx| input.set_value(path, window, cx));
             }
         }
         let mut requested_path = None;
@@ -971,18 +973,18 @@ impl ReaderView {
     }
 
     fn open_path(&mut self, path: PathBuf, window: &mut Window, cx: &mut Context<Self>) {
-        self.open_path_from(path, false, window, cx);
+        self.open_path_from(path, OpenSource::External, window, cx);
     }
 
     fn open_browser_path(&mut self, path: PathBuf, window: &mut Window, cx: &mut Context<Self>) {
         self.remember_browser_location();
-        self.open_path_from(path, true, window, cx);
+        self.open_path_from(path, OpenSource::CentralBrowser, window, cx);
     }
 
     fn open_path_from(
         &mut self,
         path: PathBuf,
-        from_browser: bool,
+        source: OpenSource,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
@@ -990,6 +992,7 @@ impl ReaderView {
         self.zoom_open = false;
         self.focus.focus(window, cx);
         self.open_revision += 1;
+        self.files_cancel_reveal(cx);
         // A newer open intent owns the current location even before it succeeds.
         // Do not let an older directory enumeration replace its return snapshot.
         self.listing_revision += 1;
@@ -1024,21 +1027,33 @@ impl ReaderView {
                 .and_then(|parent| path.file_name().map(|name| parent.join(name)))
                 .unwrap_or_else(|| book.path.clone());
             let folder_book = book.path.is_dir();
-            Ok::<_, String>((book, origin, folder_book))
+            let mut source_entry = std::path::absolute(&path).map_err(|error| error.to_string())?;
+            if source_entry
+                .components()
+                .any(|part| part == std::path::Component::ParentDir)
+            {
+                let target = path.canonicalize().map_err(|error| error.to_string())?;
+                source_entry = crate::file_tree::normalize_entry_path(&path, &target)?;
+            }
+            Ok::<_, String>((book, origin, folder_book, source_entry))
         });
-        cx.spawn(async move |view, cx| {
+        cx.spawn_in(window, async move |view, cx| {
             let result = task.await;
-            _ = view.update(cx, |view, cx| {
+            _ = view.update_in(cx, |view, window, cx| {
                 if revision != view.open_revision || view.closing {
                     return;
                 }
                 view.opening = false;
                 match result {
-                    Ok((book, origin, folder_book)) => {
+                    Ok((book, origin, folder_book, source_entry)) => {
                         view.content_mode = ContentMode::Reading;
                         view.paused_viewer_size = None;
                         view.listing_revision += 1;
-                        view.reading_origin = (!from_browser).then_some(origin);
+                        view.reading_origin =
+                            (source != OpenSource::CentralBrowser).then_some(origin);
+                        view.sidebar_folder_origin =
+                            (source == OpenSource::Sidebar && folder_book && !explicit_image)
+                                .then(|| source_entry.clone());
                         view.book_recursive = folder_book && recursive;
                         let key = (book.path.clone(), view.book_recursive);
                         view.browser.model.known_pages.insert(key, book.pages.len());
@@ -1048,7 +1063,7 @@ impl ReaderView {
                         view.reader.set_book(Arc::new(book), explicit);
                         view.book_revision += 1;
                         view.image_revision = 0;
-                        view.clear_images(None, cx);
+                        view.clear_images(Some(window), cx);
                         view.geometry.clear();
                         view.visible.borrow_mut().clear();
                         view.visible_thumbnails.borrow_mut().clear();
@@ -1066,6 +1081,12 @@ impl ReaderView {
                         view.paged_scroll.set_offset(point(px(0.), px(0.)));
                         view.dirty = true;
                         view.controls_pending = true;
+                        view.files_after_open(
+                            source_entry,
+                            source == OpenSource::External,
+                            window,
+                            cx,
+                        );
                         view.set_localized_message(
                             Text::BookOpened,
                             vec![
@@ -1114,8 +1135,6 @@ impl ReaderView {
                 }
                 match result {
                     Ok(listing) => {
-                        view.files
-                            .reset_with_uniform_height(listing.entries.len(), px(32.));
                         view.listing = Some(listing);
                         view.browser_listing_changed(cx);
                         if let Some(target) = view.pending_browser_selection.take() {
@@ -1133,7 +1152,6 @@ impl ReaderView {
                             view.rebuild_browser(cx);
                             view.reveal_browser_selection();
                         }
-                        view.path_pending = true;
                     }
                     Err(error) => {
                         view.listing_error = Some(error);
@@ -1299,8 +1317,11 @@ impl ReaderView {
 
     fn show_browser(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let origin = self.reading_origin.take();
+        let folder = self.sidebar_folder_origin.take();
         self.enter_browser(window, cx);
-        if let Some(origin) = origin {
+        if let Some(folder) = folder {
+            self.browse(folder, window, cx);
+        } else if let Some(origin) = origin {
             let parent = origin.parent().unwrap_or(&origin).to_path_buf();
             self.browse(parent, window, cx);
             self.pending_browser_selection = Some(origin);
@@ -1444,6 +1465,8 @@ impl ReaderView {
                 self.paused_viewer_size = None;
                 self.book_recursive = false;
                 self.reading_origin = None;
+                self.sidebar_folder_origin = None;
+                self.files_close(cx);
                 self.pending_browser_selection = None;
                 self.listing_revision += 1;
                 self.clear_browser_covers(cx);
@@ -1467,6 +1490,11 @@ impl ReaderView {
             Sidebar => {
                 self.reader.settings.preferences.sidebar =
                     !self.reader.settings.preferences.sidebar;
+                if !self.reader.settings.preferences.sidebar
+                    && self.files_ui.focus.contains_focused(window, cx)
+                {
+                    self.focus.focus(window, cx);
+                }
                 self.dirty = true;
                 self.relayout(cx);
             }
@@ -1658,7 +1686,9 @@ impl ReaderView {
                 cx.notify();
             }
             OpenListedFolder => {
-                if let Some(listing) = &self.listing {
+                if self.content_mode == ContentMode::Browsing
+                    && let Some(listing) = &self.listing
+                {
                     self.open_browser_path(listing.path.clone(), window, cx);
                 }
             }
@@ -2034,6 +2064,11 @@ impl ReaderView {
             0 => menu
                 .menu(language.text(Text::OpenComic), Box::new(OpenFile))
                 .menu(language.text(Text::OpenFolder), Box::new(OpenFolder))
+                .menu_with_disabled(
+                    language.text(Text::FilesReadFolder),
+                    Box::new(OpenListedFolder),
+                    self.content_mode != ContentMode::Browsing || self.listing.is_none(),
+                )
                 .separator()
                 .label(language.text(Text::OpenOptions))
                 .menu_with_check(
@@ -2783,7 +2818,8 @@ impl ReaderView {
                                 .text_color(cx.theme().primary)
                         },
                     )
-                    .on_click(cx.listener(move |this, _, _, cx| {
+                    .on_click(cx.listener(move |this, _, window, cx| {
+                        this.focus.focus(window, cx);
                         this.reader.settings.preferences.sidebar_mode = mode;
                         this.dirty = true;
                         cx.notify();
@@ -2903,14 +2939,19 @@ impl ReaderView {
                                     .test_text(language.text(Text::ContentNavigation)),
                             ),
                     )
-                    .child(
-                        div()
-                            .text_xs()
-                            .text_color(cx.theme().muted_foreground)
-                            .child(language.format(
-                                Text::PageCount,
-                                &[("count", self.page_count().to_string())],
-                            )),
+                    .when(
+                        self.reader.settings.preferences.sidebar_mode == SidebarMode::Thumbnails,
+                        |heading| {
+                            heading.child(
+                                div()
+                                    .text_xs()
+                                    .text_color(cx.theme().muted_foreground)
+                                    .child(language.format(
+                                        Text::PageCount,
+                                        &[("count", self.page_count().to_string())],
+                                    )),
+                            )
+                        },
                     ),
             )
             .child(tabs)
@@ -3048,122 +3089,6 @@ impl ReaderView {
                         ),
                 )
                 .on_click(cx.listener(move |this, _, window, cx| this.navigate(index, window, cx))),
-            )
-            .into_any_element()
-    }
-
-    fn render_files(&self, cx: &mut Context<Self>) -> gpui_kit::AnyElement {
-        let language = self.language();
-        let mut body = div().flex().flex_col().flex_1().min_h_0();
-        if let Some(listing) = &self.listing {
-            let parent = listing.parent.clone();
-            let path = listing.path.clone();
-            body = body.child(
-                div()
-                    .p_2()
-                    .flex()
-                    .flex_col()
-                    .gap_2()
-                    .child(
-                        div()
-                            .flex()
-                            .gap_1()
-                            .child(
-                                Button::new("parent-folder")
-                                    .small()
-                                    .label(language.text(Text::ParentFolder))
-                                    .disabled(parent.is_none())
-                                    .on_click(cx.listener(move |this, _, window, cx| {
-                                        if let Some(parent) = &parent {
-                                            this.browse(parent.clone(), window, cx);
-                                        }
-                                    })),
-                            )
-                            .child(self.button(
-                                "open-current-folder",
-                                language.text(Text::OpenCurrentFolder),
-                                Command::OpenListedFolder,
-                                cx,
-                            )),
-                    )
-                    .child(
-                        Input::new(&self.path_input)
-                            .id("path-input")
-                            .aria_label(language.text(Text::FolderPath))
-                            .small(),
-                    )
-                    .child(
-                        div()
-                            .text_xs()
-                            .truncate()
-                            .child(path.to_string_lossy().into_owned()),
-                    ),
-            );
-            let view = cx.entity().downgrade();
-            body = body.child(
-                div()
-                    .relative()
-                    .flex_1()
-                    .min_h_0()
-                    .child(
-                        list(self.files.clone(), move |index, _, cx| {
-                            view.update(cx, |this, cx| this.file_entry(index, cx))
-                                .unwrap_or_else(|_| div().into_any_element())
-                        })
-                        .size_full(),
-                    )
-                    .child(Scrollbar::vertical(&self.files).mode(ScrollbarMode::Always)),
-            );
-        } else {
-            body = body.child(div().p_4().child(language.text(Text::FolderLoading)));
-        }
-        if let Some(error) = &self.listing_error {
-            body = body.child(
-                div()
-                    .p_3()
-                    .text_color(cx.theme().danger)
-                    .child(language.format(Text::FolderError, &[("error", error.clone())])),
-            );
-        }
-        body.into_any_element()
-    }
-
-    fn file_entry(&self, index: usize, cx: &mut Context<Self>) -> gpui_kit::AnyElement {
-        let Some(entry) = self
-            .listing
-            .as_ref()
-            .and_then(|listing| listing.entries.get(index))
-        else {
-            return div().into_any_element();
-        };
-        let target = entry.path.clone();
-        let identity = entry.entry_path.clone();
-        let directory = entry.is_directory;
-        let prefix = match entry.kind {
-            EntryKind::Folder => "▸",
-            EntryKind::Archive => "▣",
-            EntryKind::Image => "▧",
-        };
-        div()
-            .px_2()
-            .child(
-                Button::new(SharedString::from(format!(
-                    "entry:{}",
-                    entry.path.display()
-                )))
-                .small()
-                .ghost()
-                .w_full()
-                .label(format!("{prefix} {}", entry.name))
-                .tooltip(entry.path.to_string_lossy().into_owned())
-                .on_click(cx.listener(move |this, _, window, cx| {
-                    if directory {
-                        this.browse(target.clone(), window, cx);
-                    } else {
-                        this.browser.model.selected = Some(identity.clone());
-                        this.open_browser_path(target.clone(), window, cx);
-                    }
-                })),
             )
             .into_any_element()
     }
@@ -4041,7 +3966,7 @@ pub fn init(cx: &mut App) {
 
 fn bind_commands(cx: &mut App) {
     use Command::*;
-    let navigation = "Reader && !Input && !PopoverContent && !PopupMenu && !Dialog";
+    let navigation = "Reader && !Input && !PopoverContent && !PopupMenu && !Dialog && !FilesTree";
     let reader = "Reader";
     for (key, command) in [
         ("space", Next),
@@ -4065,7 +3990,7 @@ fn bind_commands(cx: &mut App) {
         ("tab", Sidebar),
     ] {
         let context = if key == "tab" {
-            "Reader && !Input && !PopoverContent && !PopupMenu && !Dialog && !FileBrowser"
+            "Reader && !Input && !PopoverContent && !PopupMenu && !Dialog && !FileBrowser && !FilesTree"
         } else {
             navigation
         };
@@ -4080,7 +4005,7 @@ fn bind_commands(cx: &mut App) {
         cx.bind_keys([KeyBinding::new(
             key,
             command,
-            Some("Reader && !Input && !PopoverContent && !PopupMenu && !Dialog"),
+            Some("Reader && !Input && !PopoverContent && !PopupMenu && !Dialog && !FilesTree"),
         )]);
     }
     for (key, command) in [
@@ -4093,7 +4018,11 @@ fn bind_commands(cx: &mut App) {
         ("-", ZoomOut),
         ("0", ZoomReset),
     ] {
-        cx.bind_keys([KeyBinding::new(key, command, Some("Reader && !Input"))]);
+        cx.bind_keys([KeyBinding::new(
+            key,
+            command,
+            Some("Reader && !Input && !FilesTree"),
+        )]);
     }
     for (key, command) in [
         ("ctrl-o", OpenFile),
@@ -4133,6 +4062,7 @@ fn set_native_menus(language: Language, cx: &mut App) {
         Menu::new(language.text(Text::File)).items([
             MenuItem::action(language.text(Text::OpenComic), OpenFile),
             MenuItem::action(language.text(Text::OpenFolder), OpenFolder),
+            MenuItem::action(language.text(Text::FilesReadFolder), OpenListedFolder),
             MenuItem::action(
                 language.text(Text::IncludeSubfolders),
                 ToggleRecursiveFolder,

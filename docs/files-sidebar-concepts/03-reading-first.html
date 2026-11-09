@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <link rel="icon" href="data:,">
+  <link rel="stylesheet" href="styles.css">
+  <script src="prototype.js" defer></script>
+  <title>03 閱讀優先 — MangaMeeya Files Sidebar</title>
+</head>
+<body data-variant="reading">
+  <header class="study-header">
+    <div class="study-title"><a class="back-link" href="index.html" aria-label="返回方案比較">←</a><div><div class="eyebrow">FILES SIDEBAR / READING FIRST</div><h1><span>03</span> 閱讀優先</h1></div><span class="study-tag">適合連續閱讀</span></div>
+    <nav class="variant-nav" aria-label="切換設計方案"><a href="01-compact.html" ><span>01</span>精簡清單</a><a href="02-tree.html" ><span>02</span>階層導覽</a><a href="03-reading-first.html" aria-current="page"><span>03</span>閱讀優先</a></nav>
+  </header>
+  <p class="study-description">先看到正在讀的書與同系列，再前往其他資料夾。</p>
+  <main class="app-shell" aria-label="MangaMeeya 介面原型">
+    <div class="titlebar"><span class="app-symbol" aria-hidden="true">M</span><span id="window-title">夜行列車 第 03 卷.cbz — MangaMeeya Rust</span><span class="demo-badge">示範資料</span><span class="window-actions" aria-hidden="true">─　□　×</span></div>
+    <div class="menubar" aria-label="選單外觀示意，無互動"><span>檔案</span><span>檢視</span><span>縮放</span><span>移動</span><span>書籤</span><span>工具</span><span>說明</span></div>
+    <div class="reader-toolbar">
+      <button class="toolbar-button sidebar-toggle" id="sidebar-toggle" aria-controls="sidebar" aria-expanded="true"><span data-icon="panel"></span><span>內容導覽</span></button>
+      <div class="static-controls" aria-label="閱讀模式外觀示意，無互動"><span class="active">單頁</span><span>雙頁</span><span>連續</span><i></i><span>適合視窗 <small>▾</small></span><span>右 → 左</span></div>
+      <span class="toolbar-fill"></span><span class="toolbar-note">閱讀畫面保留</span><span class="toolbar-decoration" data-icon="bookmark" aria-hidden="true"></span>
+    </div>
+    <div class="workspace" id="workspace">
+      <aside class="sidebar" id="sidebar" aria-label="內容導覽">
+        <header class="sidebar-heading"><strong>內容導覽</strong><span class="sidebar-caption">LIBRARY</span></header>
+        <div class="sidebar-tabs" role="tablist" aria-label="導覽分類">
+          <button id="tab-files" role="tab" aria-controls="panel-files" aria-selected="true" tabindex="0" data-tab="files">檔案</button>
+          <button id="tab-thumbnails" role="tab" aria-controls="panel-thumbnails" aria-selected="false" tabindex="-1" data-tab="thumbnails">縮圖</button>
+          <button id="tab-recent" role="tab" aria-controls="panel-recent" aria-selected="false" tabindex="-1" data-tab="recent">最近</button>
+        </div>
+        <section id="panel-files" class="tab-panel" role="tabpanel" aria-labelledby="tab-files"></section>
+        <section id="panel-thumbnails" class="tab-panel" role="tabpanel" aria-labelledby="tab-thumbnails" hidden></section>
+        <section id="panel-recent" class="tab-panel" role="tabpanel" aria-labelledby="tab-recent" hidden></section>
+        <footer class="sidebar-footer"><span class="current-dot"></span><span id="sidebar-reading-title">正在閱讀 · 第 03 卷</span></footer>
+      </aside>
+      <section class="reading-area" aria-label="保留的中央閱讀畫面">
+        <div class="canvas-label"><span class="live-dot"></span><span id="canvas-title">夜行列車 · 第 03 卷</span><span class="canvas-label-end">原創示意內容</span></div>
+        <div class="reader-scroll"><img class="manga-page" src="reader-art.svg" alt="原創黑白漫畫示意：列車穿過城市，旅客在車站等待。"></div>
+        <div class="reader-page-label"><span id="reader-page-label">第 18 頁 / 48 頁</span><span>瀏覽資料夾不會切換這個畫面</span></div>
+      </section>
+      <aside class="inspector" aria-label="既有閱讀工具外觀示意">
+        <header class="inspector-heading"><strong>閱讀工具</strong><span data-icon="sliders" aria-hidden="true"></span></header>
+        <div class="inspector-tabs"><span class="active">影像</span><span>播放</span></div>
+        <p class="inspector-section-label">影像調整</p>
+        <div class="reference-slider"><span>亮度</span><small>100%</small><div><i></i></div></div>
+        <div class="reference-slider"><span>對比</span><small>100%</small><div><i></i></div></div>
+        <div class="reference-slider"><span>灰階</span><small>0%</small><div><i class="at-start"></i></div></div>
+        <div class="reference-rotation"><span>旋轉</span><span>↶　↷</span></div>
+        <div class="reference-reset">↺　重設濾鏡</div>
+        <p class="inspector-note">影像工具僅保留外觀。<br>此次原型比較左側檔案導覽。</p>
+        <p class="inspector-bottom">所有書籍與路徑均為示範資料。<br>不存取磁碟，不修改閱讀紀錄。</p>
+      </aside>
+    </div>
+    <footer class="statusbar"><span id="status-message" role="status" aria-live="polite">目前書籍已定位</span><div class="page-controls"><button id="previous-page" aria-label="上一頁">‹</button><span><b id="page-number">18</b> / <span id="page-total">48</span></span><button id="next-page" aria-label="下一頁">›</button><div class="progress-track"><span id="reading-progress"></span></div><span id="progress-value">38%</span></div><span class="status-scope">HTML PROTOTYPE</span></footer>
+  </main>
+  <footer class="study-footer"><p><strong>操作比較</strong> 目前書籍固定在頂部。切換資料夾後，仍可隨時定位回正在閱讀的系列。</p><span>本機 HTML · 不修改 Rust</span></footer>
+</body>
+</html>
