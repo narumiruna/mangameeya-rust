@@ -4,6 +4,7 @@ mod assets;
 mod browser;
 mod files;
 mod preferences;
+mod release_notifications;
 pub use assets::ReaderAssets;
 
 use crate::{
@@ -90,6 +91,7 @@ enum Command {
     RotateRight,
     ResetFilters,
     Settings,
+    CheckForUpdates,
     About,
     ClearHistory,
     Escape,
@@ -344,6 +346,7 @@ pub struct ReaderView {
     sidebar_folder_origin: Option<PathBuf>,
     pending_browser_selection: Option<PathBuf>,
     settings_path: PathBuf,
+    release_notifications: release_notifications::ReleaseNotifications,
     focus: FocusHandle,
     preferences_window: Option<AnyWindowHandle>,
     closing: bool,
@@ -546,6 +549,7 @@ impl ReaderView {
             reading_origin: None,
             sidebar_folder_origin: None,
             pending_browser_selection: None,
+            release_notifications: release_notifications::ReleaseNotifications::new(&settings_path),
             settings_path,
             focus,
             preferences_window: None,
@@ -693,6 +697,7 @@ impl ReaderView {
         match change {
             Change::Language(language) => self.set_language(language, window, cx),
             Change::Reset => self.reset_corrupt_settings(window, cx),
+            Change::ReleaseStartupCheck(enabled) => self.set_release_startup_check(enabled, cx),
             Change::Remember(value)
                 if self.reader.settings.preferences.remember_position != value =>
             {
@@ -1677,6 +1682,13 @@ impl ReaderView {
                 self.relayout(cx);
             }
             Settings => self.open_preferences(window, cx),
+            CheckForUpdates => {
+                self.release_notifications
+                    .preferences_scroll
+                    .scroll_to_bottom();
+                self.check_for_updates(cx);
+                self.open_preferences(window, cx);
+            }
             About => window.open_dialog(cx, move |dialog, _, _| {
                 dialog
                     .title(language.text(Text::AboutTitle))
@@ -2168,7 +2180,14 @@ impl ReaderView {
                 .menu(language.text(Text::ResetFilters), Box::new(ResetFilters))
                 .separator()
                 .menu(language.text(Text::Preferences), Box::new(Settings)),
-            _ => menu.menu(language.text(Text::AboutMenu), Box::new(About)),
+            _ => menu
+                .menu_with_disabled(
+                    language.text(Text::CheckForUpdates),
+                    Box::new(CheckForUpdates),
+                    self.release_notifications.checking(),
+                )
+                .separator()
+                .menu(language.text(Text::AboutMenu), Box::new(About)),
         }
     }
 
@@ -3865,6 +3884,7 @@ impl Render for ReaderView {
             .text_color(cx.theme().foreground)
             .text_size(px(13.))
             .child(self.render_chrome(window.viewport_size().width < px(1200.), cx))
+            .child(self.render_release_notice(cx))
             .child(workspace)
             .child(self.render_status(cx))
             .when(
@@ -4063,6 +4083,7 @@ fn set_native_menus(language: Language, cx: &mut App) {
     cx.set_menus([
         Menu::new("MangaMeeya Rust").items([
             MenuItem::action(language.text(Text::AboutMenu), About),
+            MenuItem::action(language.text(Text::CheckForUpdates), CheckForUpdates),
             MenuItem::action(language.text(Text::Preferences), Settings),
             MenuItem::separator(),
             MenuItem::action(language.text(Text::Quit), Quit),
@@ -4145,7 +4166,7 @@ pub fn run() -> anyhow::Result<()> {
     application.run(move |cx| {
         init(cx);
         let bounds = Bounds::centered(None, size(px(1280.), px(800.)), cx);
-        let (handle, _) = gpui_kit::open_window(
+        let (handle, view) = gpui_kit::open_window(
             WindowOptions {
                 window_bounds: Some(WindowBounds::Windowed(bounds)),
                 window_min_size: Some(size(px(800.), px(540.))),
@@ -4172,6 +4193,9 @@ pub fn run() -> anyhow::Result<()> {
         )
         .expect("Cannot open the native GPUI window");
         *reader_window.borrow_mut() = Some(handle);
+        // Only the real application launch checks automatically. ReaderView
+        // construction stays offline for tests and embedded rendering checks.
+        view.update(cx, |view, cx| view.check_for_updates_on_startup(cx));
         cx.activate(true);
     });
     Ok(())

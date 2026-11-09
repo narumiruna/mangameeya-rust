@@ -1,6 +1,9 @@
 # Hardened updater SDK sources
 
-These files build and test altered SDKs. They do not enable application updates.
+These files build and test altered SDKs. They do not enable automatic installation.
+The notification-only feature described in
+[`../../docs/release-notifications.md`](../../docs/release-notifications.md) does
+not load these SDKs. Native installation work is deferred.
 The reader, normal CI and release packaging remain unchanged. The full native
 GPUI/update gate and production signing prerequisites remain open.
 

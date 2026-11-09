@@ -1,6 +1,6 @@
 //! Independent Preferences window. The reader owns all settings and save operations.
 
-use super::{Command, ReaderView, background_color};
+use super::{Command, ReaderView, background_color, release_notifications::ReleaseNotifications};
 use crate::{
     i18n::{Language, Text},
     settings::Background,
@@ -8,7 +8,7 @@ use crate::{
 use gpui_kit::assets::IconName;
 use gpui_kit::base::TestTextExt;
 use gpui_kit::component::{
-    ActiveTheme, Icon, Selectable, Sizable, button::Button, checkbox::Checkbox,
+    ActiveTheme, Disableable, Icon, Selectable, Sizable, button::Button, checkbox::Checkbox,
 };
 use gpui_kit::{
     AnyWindowHandle, App, AppContext, Bounds, Context, DisplayId, FocusHandle, Focusable,
@@ -23,6 +23,7 @@ pub(super) enum Change {
     Direction(bool),
     Background(Background),
     Language(Language),
+    ReleaseStartupCheck(bool),
     Reset,
 }
 
@@ -347,6 +348,101 @@ impl PreferencesView {
             )
     }
 
+    fn releases(
+        &self,
+        language: Language,
+        state: &ReleaseNotifications,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement {
+        let status = state.status_text(language);
+        let mut section = div()
+            .id("release-preferences")
+            .test_support()
+            .role(gpui_kit::Role::Group)
+            .aria_label(language.text(Text::ReleaseNotifications))
+            .flex()
+            .flex_col()
+            .gap_3()
+            .border_t_1()
+            .border_color(cx.theme().border)
+            .pt_5()
+            .child(
+                div()
+                    .font_weight(gpui_kit::FontWeight::SEMIBOLD)
+                    .child(language.text(Text::ReleaseNotifications)),
+            )
+            .child(language.format(
+                Text::CurrentVersion,
+                &[("version", env!("CARGO_PKG_VERSION").to_owned())],
+            ))
+            .child(
+                div()
+                    .text_xs()
+                    .text_color(cx.theme().muted_foreground)
+                    .child(language.text(Text::ReleaseCheckDescription)),
+            )
+            .child(
+                Checkbox::new("release-check-on-startup")
+                    .label(language.text(Text::ReleaseCheckOnStartup))
+                    .accessibility_label(language.text(Text::ReleaseCheckOnStartup))
+                    .checked(state.preferences.check_on_startup)
+                    .on_change(cx.listener(|this, value, _, cx| {
+                        this.change(Change::ReleaseStartupCheck(*value), cx);
+                    })),
+            )
+            .child(
+                div()
+                    .id("release-check-status")
+                    .test_support()
+                    .role(gpui_kit::Role::Status)
+                    .aria_label(status.clone())
+                    .text_xs()
+                    .child(status),
+            )
+            .child(
+                div()
+                    .flex()
+                    .flex_wrap()
+                    .gap_2()
+                    .child(
+                        Button::new("check-for-updates")
+                            .small()
+                            .label(language.text(Text::CheckForUpdates))
+                            .accessibility_label(language.text(Text::CheckForUpdates))
+                            .disabled(state.checking())
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                this.forward(Command::CheckForUpdates, cx);
+                            })),
+                    )
+                    .when(state.available(), |buttons| {
+                        buttons.child(
+                            Button::new("release-preferences-open")
+                                .small()
+                                .outline()
+                                .label(language.text(Text::OpenReleases))
+                                .accessibility_label(language.text(Text::OpenReleases))
+                                .on_click(|_, _, cx| {
+                                    cx.open_url(crate::release_check::RELEASES_URL);
+                                }),
+                        )
+                    }),
+            );
+        if let Some(error) = &state.preference_error {
+            let label = language.format(Text::ReleasePreferencesError, &[("error", error.clone())]);
+            section = section.child(
+                div()
+                    .id("release-preferences-error")
+                    .test_support()
+                    .role(gpui_kit::Role::Alert)
+                    .aria_label(label.clone())
+                    .text_xs()
+                    .text_color(cx.theme().danger)
+                    .child(label),
+            );
+        }
+        section
+    }
+
     fn general(&self, language: Language, cx: &mut Context<Self>) -> impl IntoElement {
         let mut languages = div().flex().flex_wrap().gap_2();
         for choice in Language::ALL {
@@ -414,6 +510,7 @@ impl Render for PreferencesView {
         let rtl = prefs.rtl;
         let background = prefs.background;
         let error = reader.save_error.clone();
+        let release_notifications = reader.release_notifications.clone();
         window.set_window_title(language.text(Text::Preferences));
 
         let mut content = div()
@@ -424,6 +521,7 @@ impl Render for PreferencesView {
             .flex_1()
             .min_h_0()
             .overflow_y_scroll()
+            .track_scroll(&release_notifications.preferences_scroll)
             .child(
                 div()
                     .flex()
@@ -432,7 +530,8 @@ impl Render for PreferencesView {
                     .px(px(28.))
                     .py(px(24.))
                     .child(self.reading(language, remember, rtl, background, cx))
-                    .child(self.general(language, cx)),
+                    .child(self.general(language, cx))
+                    .child(self.releases(language, &release_notifications, cx)),
             );
         if let Some(error) = error {
             content = content.child(

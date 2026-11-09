@@ -10,6 +10,7 @@ mod desktop;
 mod files;
 mod i18n;
 mod preferences;
+mod release_notifications;
 mod visual;
 mod zoom;
 

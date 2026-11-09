@@ -2,7 +2,11 @@
 
 ## Status
 
-**Blocked at the technical gate. No automatic-update feature is implemented.**
+**Native automatic installation is deferred and has not passed the technical gate.**
+
+The user reduced the active scope to
+[release notifications](release-notifications.md) on 2026-11-09. Notification
+checks do not resolve or replace the installation requirements below.
 
 The approved plan is [2026-11-07_confirmed-auto-update-plan.md](plans/2026-11-07_confirmed-auto-update-plan.md).
 Work started from `main` at `527b1de4f2ce3546d6e3cca1a866b9d2dcb614d1`
