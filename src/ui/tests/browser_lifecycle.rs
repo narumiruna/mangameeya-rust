@@ -14,6 +14,72 @@ fn browse(fixture: &Fixture, path: &Path, cx: &mut TestAppContext) {
 }
 
 #[gpui_kit::test]
+fn unchanged_cover_failures_survive_navigation_until_refresh_or_source_change(
+    cx: &mut TestAppContext,
+) {
+    let fixture = fixture(cx);
+    let a = book(&fixture, "negative-cache-a", 0);
+    let b = book(&fixture, "negative-cache-b", 0);
+    let corrupt = a.join("broken.png");
+    std::fs::write(&corrupt, b"invalid PNG").unwrap();
+    std::fs::write(a.join("unsupported.rar"), b"not parsed").unwrap();
+    browse(&fixture, &a, cx);
+    for _ in 0..5 {
+        pump(&fixture, cx);
+    }
+    let attempted = fixture.view.read_with(cx, |view, _| {
+        assert_eq!(view.browser.active_jobs(), 0);
+        assert_eq!(view.browser.failure_count(), 2);
+        view.browser.requested_count()
+    });
+    browse(&fixture, &b, cx);
+    browse(&fixture, &a, cx);
+    for _ in 0..3 {
+        pump(&fixture, cx);
+    }
+    fixture.view.read_with(cx, |view, _| {
+        assert_eq!(
+            view.browser.requested_count(),
+            attempted,
+            "returning to unchanged failed/unsupported sources must not retry"
+        );
+        assert_eq!(view.browser.failure_count(), 2);
+    });
+    cx.update_window(fixture.window, |_, window, cx| {
+        window.click("browser-refresh", cx)
+    })
+    .unwrap();
+    for _ in 0..5 {
+        pump(&fixture, cx);
+    }
+    fixture.view.read_with(cx, |view, _| {
+        assert_eq!(
+            view.browser.requested_count(),
+            attempted + 2,
+            "explicit refresh must retry both terminal outcomes"
+        );
+        assert_eq!(view.browser.failure_count(), 2);
+    });
+    image::RgbaImage::from_pixel(120, 200, image::Rgba([80, 160, 220, 255]))
+        .save(&corrupt)
+        .unwrap();
+    browse(&fixture, &b, cx);
+    browse(&fixture, &a, cx);
+    for _ in 0..5 {
+        pump(&fixture, cx);
+    }
+    fixture.view.read_with(cx, |view, _| {
+        assert_eq!(
+            view.browser.requested_count(),
+            attempted + 3,
+            "only the changed source should get another attempt"
+        );
+        assert_eq!(view.browser.cache_count(), 1);
+        assert_eq!(view.browser.active_jobs(), 0);
+    });
+}
+
+#[gpui_kit::test]
 fn canonical_aliases_share_one_cover_worker_slot(cx: &mut TestAppContext) {
     let fixture = fixture(cx);
     let folder = book(&fixture, "aliases", 1);
@@ -427,4 +493,292 @@ fn failed_navigation_keeps_loading_the_retained_listing_after_scroll(cx: &mut Te
             Some(&folder.join("60.png").canonicalize().unwrap())
         );
     });
+}
+
+fn delayed_listing(fixture: &Fixture, name: &str, cx: &mut TestAppContext) -> PathBuf {
+    let path = fixture.directory.path().join(name);
+    fixture.view.update(cx, |view, cx| {
+        view.listing_revision += 1;
+        view.listing = Some(DirectoryListing {
+            path: path.clone(),
+            parent: path.parent().map(Path::to_path_buf),
+            entries: (0..1000)
+                .map(|index| {
+                    let name = format!("comic-{index:05}.cbz");
+                    let path = path.join(&name);
+                    book::DirectoryEntry {
+                        name,
+                        path: path.clone(),
+                        entry_path: path,
+                        kind: EntryKind::Archive,
+                        is_directory: false,
+                        size: Some(12),
+                        modified: None,
+                        created: None,
+                    }
+                })
+                .collect(),
+        });
+        view.browser_listing_changed(cx);
+    });
+    render_windows(fixture, cx);
+    render_windows(fixture, cx);
+    path
+}
+
+fn finish_delayed_workers(
+    fixture: &Fixture,
+    gate: &Arc<Mutex<super::super::browser::CoverJobGate>>,
+    cx: &mut TestAppContext,
+) {
+    // Do not leave a parked future holding the gate that stores its own waker.
+    fixture
+        .view
+        .update(cx, |view, _| view.browser.worker_gate = None);
+    let started = gate.lock().unwrap().started.clone();
+    for path in started {
+        gate.lock().unwrap().release(path);
+    }
+    cx.run_until_parked();
+    fixture
+        .view
+        .read_with(cx, |view, _| assert_eq!(view.browser.active_jobs(), 0));
+}
+
+#[gpui_kit::test]
+fn delayed_workers_prioritize_visible_rows_and_refill_on_completion_without_ticks(
+    cx: &mut TestAppContext,
+) {
+    let fixture = fixture(cx);
+    pump(&fixture, cx);
+    let gate = Arc::new(Mutex::new(super::super::browser::CoverJobGate::default()));
+    fixture
+        .view
+        .update(cx, |view, _| view.browser.worker_gate = Some(gate.clone()));
+    let path = delayed_listing(&fixture, "priority", cx);
+    fixture.view.update(cx, |view, cx| {
+        view.browser.grid.scroll_to(ListOffset {
+            item_ix: 10,
+            offset_in_item: px(17.),
+        });
+        cx.notify();
+    });
+    render_windows(&fixture, cx);
+    let (first, before, retained_failures) = fixture.view.update(cx, |view, cx| {
+        let first = view.browser.grid.logical_scroll_top().item_ix * view.browser.columns;
+        let before = view.browser.requested_count();
+        let retained_failures = view.browser.failure_sources();
+        view.browser_tick(cx);
+        assert_eq!(view.browser.active_jobs(), 2);
+        (first, before, retained_failures)
+    });
+    cx.run_until_parked();
+    let expected: Vec<_> = (first..first + 3)
+        .map(|index| path.join(format!("comic-{index:05}.cbz")))
+        .collect();
+    assert_eq!(
+        gate.lock()
+            .unwrap()
+            .started
+            .iter()
+            .cloned()
+            .collect::<HashSet<_>>(),
+        expected[..2].iter().cloned().collect::<HashSet<_>>(),
+        "both actual slots must contain visible sources, not preceding overscan"
+    );
+    // Concurrent jobs can be first polled in either order on different hosts.
+    // Dispatch priority does not impose a start order within the visible pair.
+    for _ in 0..4 {
+        fixture.view.update(cx, |view, cx| view.browser_tick(cx));
+        render_windows(&fixture, cx);
+    }
+    assert_eq!(
+        gate.lock().unwrap().started.len(),
+        2,
+        "held jobs cannot be replaced by redraws"
+    );
+    // Finish the second job first. No tick or timer runs after this release.
+    gate.lock().unwrap().release(expected[1].clone());
+    cx.run_until_parked();
+    let started = gate.lock().unwrap().started.clone();
+    assert_eq!(started.len(), 3);
+    assert_eq!(
+        started.last(),
+        Some(&expected[2]),
+        "completion must refill with the next visible source without a timer"
+    );
+    assert_eq!(
+        started.iter().cloned().collect::<HashSet<_>>(),
+        expected.iter().cloned().collect::<HashSet<_>>()
+    );
+    fixture.view.read_with(cx, |view, _| {
+        assert_eq!(view.browser.active_jobs(), 2);
+        assert_eq!(view.browser.requested_count() - before, 3);
+        let mut expected_failures = retained_failures.clone();
+        expected_failures.insert(expected[1].clone());
+        assert_eq!(
+            view.browser.failure_sources(),
+            expected_failures,
+            "only the completed current source may add a failure"
+        );
+    });
+    render_windows(&fixture, cx);
+    cx.update_window(fixture.window, |_, window, _| {
+        let pending = path.join(format!("comic-{:05}.cbz", first + 3));
+        for (path, state) in [
+            (&expected[0], Text::CoverLoading),
+            (&expected[1], Text::CoverFailed),
+            (&pending, Text::CoverPending),
+        ] {
+            let id: gpui_kit::ElementId = super::super::browser::browser_entry_id(path).into();
+            let label = Language::TraditionalChinese.text(state);
+            let status = window.within(id.clone()).find("browser-cover-status");
+            assert_eq!(status.label(), Some(label));
+            assert!(status.visible());
+            assert!(
+                gpui_kit::base::test_support::texts(window)
+                    .iter()
+                    .any(|text| text.path().contains(&id)
+                        && text.visible()
+                        && text.text() == label),
+                "cover state must paint text, not only expose an accessible label"
+            );
+        }
+        let tile = window.find(super::super::browser::browser_entry_id(&expected[1]));
+        let description = tile.description().unwrap();
+        assert!(description.contains(&crate::file_tree::display_path(&expected[1])));
+        assert!(
+            description.contains("Cannot read"),
+            "failed tooltip must retain its reason"
+        );
+    })
+    .unwrap();
+    finish_delayed_workers(&fixture, &gate, cx);
+}
+
+#[gpui_kit::test]
+fn obsolete_delayed_jobs_hold_actual_slots_across_navigation_scroll_and_resize(
+    cx: &mut TestAppContext,
+) {
+    let fixture = fixture(cx);
+    pump(&fixture, cx);
+    let gate = Arc::new(Mutex::new(super::super::browser::CoverJobGate::default()));
+    fixture
+        .view
+        .update(cx, |view, _| view.browser.worker_gate = Some(gate.clone()));
+    delayed_listing(&fixture, "obsolete", cx);
+    fixture.view.update(cx, |view, cx| view.browser_tick(cx));
+    cx.run_until_parked();
+    let old = gate.lock().unwrap().started.clone();
+    assert_eq!(old.len(), 2);
+    let current = delayed_listing(&fixture, "current", cx);
+    let retained_failures = fixture
+        .view
+        .read_with(cx, |view, _| view.browser.failure_sources());
+    cx.update_window(fixture.window, |_, window, cx| {
+        window.resize(size(px(800.), px(540.)));
+        window.bounds_changed(cx);
+    })
+    .unwrap();
+    for _ in 0..3 {
+        render_windows(&fixture, cx);
+    }
+    fixture.view.update(cx, |view, cx| {
+        view.browser.grid.scroll_to(ListOffset {
+            item_ix: 8,
+            offset_in_item: px(11.),
+        });
+        cx.notify();
+    });
+    render_windows(&fixture, cx);
+    let first = fixture.view.update(cx, |view, cx| {
+        view.browser_tick(cx);
+        assert_eq!(view.browser.active_jobs(), 2, "obsolete jobs still execute");
+        view.browser.grid.logical_scroll_top().item_ix * view.browser.columns
+    });
+    cx.run_until_parked();
+    assert_eq!(
+        gate.lock().unwrap().started,
+        old,
+        "navigation cannot free synchronous slots"
+    );
+    for (index, path) in old.iter().enumerate() {
+        gate.lock().unwrap().release(path.clone());
+        cx.run_until_parked();
+        let started = gate.lock().unwrap().started.clone();
+        assert_eq!(
+            started.len(),
+            3 + index,
+            "each completion frees exactly one actual slot"
+        );
+        assert_eq!(
+            started.last(),
+            Some(&current.join(format!("comic-{:05}.cbz", first + index)))
+        );
+        fixture.view.read_with(cx, |view, _| {
+            assert_eq!(view.browser.active_jobs(), 2);
+            assert_eq!(
+                view.browser.failure_sources(),
+                retained_failures,
+                "obsolete errors must not enter the cache; prior source failures remain"
+            );
+            assert_eq!(view.browser.cache_count(), 0);
+        });
+    }
+    finish_delayed_workers(&fixture, &gate, cx);
+}
+
+#[gpui_kit::test]
+fn unsupported_sources_do_not_retry_on_redraw_or_decoded_dimension_changes(
+    cx: &mut TestAppContext,
+) {
+    let fixture = fixture(cx);
+    let folder = fixture.directory.path().join("unsupported");
+    std::fs::create_dir(&folder).unwrap();
+    let file = folder.join("original-name.cbr");
+    std::fs::write(&file, b"RAR placeholder; classified before parsing").unwrap();
+    browse(&fixture, &folder, cx);
+    pump(&fixture, cx);
+    let before = fixture.view.read_with(cx, |view, _| {
+        assert_eq!(view.browser.failure_count(), 1);
+        assert_eq!(view.browser.active_jobs(), 0);
+        view.browser.requested_count()
+    });
+    for width in [100., 220., 140., 100.] {
+        cx.update_window(fixture.window, |_, window, cx| {
+            window.resize(size(px(400. + width * 4.), px(540.)));
+            window.bounds_changed(cx);
+        })
+        .unwrap();
+        fixture.view.update(cx, |view, cx| {
+            view.browser.tile_slider.update(cx, |_, cx| {
+                cx.emit(SliderEvent::Change(
+                    gpui_kit::component::slider::SliderValue::Single(width),
+                ));
+            });
+        });
+        pump(&fixture, cx);
+        fixture.view.read_with(cx, |view, _| {
+            assert_eq!(view.browser.requested_count(), before)
+        });
+    }
+    cx.update_window(fixture.window, |_, window, _| {
+        let id = super::super::browser::browser_entry_id(&file.canonicalize().unwrap());
+        let tile = window.find(id.clone());
+        let description = tile.description().unwrap();
+        assert!(description.contains("original-name.cbr"));
+        assert!(description.contains(&crate::file_tree::display_path(
+            &file.canonicalize().unwrap()
+        )));
+        assert!(
+            description.contains("RAR/CBR"),
+            "full backend reason remains available"
+        );
+        let status = window.within(id).find("browser-cover-status");
+        assert_eq!(
+            status.label(),
+            Some(Language::TraditionalChinese.text(Text::CoverUnsupported))
+        );
+    })
+    .unwrap();
 }

@@ -1,5 +1,188 @@
 # Native rewrite verification
 
+## Central browser visual parity (2026-11-09)
+
+This follow-up implements the browser visual-parity plan from base `3ffd520`.
+It keeps the native shell, black central grid, source files, saved reading data,
+settings schema, and the public `book::read_cover` signature unchanged.
+
+### Design and native comparison
+
+The reference is [proposal 04](file-browser-concepts/04-integrated.html), not a new
+full-window library. The generated sources contain PNG, JPEG, landscape artwork,
+Stored/Deflated CBZ with natural-order differences, a valid classic ZIP larger
+than 64 MiB, long CJK and unspaced names, empty and nested-only folders, ZIP64,
+RAR, a corrupt CBZ, and a corrupt first folder image. No comic assets are committed.
+
+| Requirement | Before | Current implementation |
+| --- | --- | --- |
+| Retained shell | Existing native toolbar, panels, and status | Same bounds when switching central content |
+| Titles | Inherited button nowrap; reserved two-line space | Explicit normal wrapping, clamp and ellipsis; two/three lines |
+| Default information | Metadata on, including `— · —` | Cover and filename only; optional metadata has meaningful unknown text |
+| Header | Path, full-width search, wrapping text actions | Breadcrumbs/results, bounded search, sort/direction, folder checkbox, primary Open; one row at 900 central logical px, explicit compact rows below |
+| Return to reading | Duplicate central and top controls | Existing top button or Escape; shuffle only for Random |
+| Missing cover | Shared Unicode glyph | Queued/loading/unsupported/failed SVG and text, full name/path/reason tooltip |
+| Large classic ZIP | Total source capped at 64 MiB | Bounded index and selected-member reads; total size alone does not reject it |
+| Paths and tabs | Internal Windows prefix; truncated Recent tab | Display-only path normalization; short visible Recent label, full accessible label |
+
+The baseline capture uses a detached `3ffd520` worktree and its own Cargo target
+directory. An earlier shared-target capture showed the changed header and was
+rejected as baseline evidence. The isolated baseline reproduces the original
+single-line names, metadata gaps, three-level header, and missing large-ZIP cover.
+
+Reproduce the isolated native capture with:
+
+```sh
+cargo run --locked --example browser_capture -- /absolute/new/output-directory
+cargo test --locked --example browser_capture
+```
+
+The output directory must be new and outside the repository. `report.json` records
+the revision, dirty paths, platform, renderer, logical and physical sizes, scale,
+fixture categories, and image colors. The macOS workflow captures 1600×1000,
+1280×800, 960×640, and 800×540 logical px at the native offscreen scale. Generated
+images are evidence, not committed assets or artwork pixel-parity claims.
+
+The fixture opens its preloaded synthetic Recent item before polling startup work.
+This prevents automatic cover reads from the constructor's initial home listing;
+the constructor still enumerates that location internally. It does not load user
+settings. Native captures are made only after the synthetic book and folder load.
+
+### Cover safety and lifecycle
+
+The classic-ZIP reader uses one nonblocking, validated regular-file handle. It reads
+at most a 65,557-byte footer window, plus four locator-signature bytes for a maximal
+comment, at most 4096 records, and at most 2 MiB combined central/local/footer
+metadata. It snapshots only the selected compressed member, capped at 64 MiB.
+Actual output is capped at 128 MiB and must match the declared size and CRC.
+The existing image allocation and pixel limits remain. The 32 MiB retained-pixel
+cache is not a total process-memory limit.
+
+The zip crate never receives the live file. It receives an immutable, validated
+metadata-only archive for name decoding, then a generated one-member archive for
+the bounded compressed payload. Tests cover duplicate raw/resolved names, local
+mismatches and overlap, alternate footers, ZIP64 and encryption, metadata/count and
+compressed-member limits, CRC, forged output sizes, source mutation/replacement,
+FIFO replacement, Unicode names, and image allocation limits. A 67,110,290-byte
+valid archive required 65,904 bytes in nine cover-path reads and decoded the exact
+naturally first PNG. Manual Book opening retains its existing format support.
+
+Visible items precede overscan. Actual completion refills the queue, including
+after obsolete jobs finish. At most two real jobs run; a timeout cannot release
+a still-running synchronous read. Failure keys use source identity and metadata,
+not requested image dimensions. The 2048-entry negative cache survives normal
+folder navigation and image generations. Explicit refresh clears it; changed
+listed source metadata permits a new attempt. Folder-child changes that do not
+change the listed folder metadata can require F5.
+
+ZIP64, RAR/CBR, multi-disk, encryption, unsupported methods/layouts, and oversized
+selected members remain explicit unsupported outcomes. Metadata signatures can
+conservatively reject rare valid names/comments. Regular-file I/O is finite by
+byte count but is not cancellable or bounded by elapsed time. Timestamp/length
+and Unix ctime checks detect ordinary in-place edits; they are not an atomic
+filesystem snapshot. Immutable validated input, byte limits, and CRC retain the
+resource boundary even under undetected concurrent rewrites.
+
+### Checks and retained artifacts
+
+Local checks used Rust 1.99.1, macOS 26.6.2 arm64, Apple M4, 16 GiB memory, and
+`DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer`. Historical results below
+are not substitutes for this follow-up's evidence.
+
+| Check | Result |
+| --- | --- |
+| Clean `3ffd520` baseline full Rust suite | 352 passed, no failures or ignored tests |
+| Baseline native rendering | Passed; the separate isolated example capture reproduces the old browser |
+| `cargo fmt --all -- --check` | Passed |
+| `cargo test --locked --all-features` | 386 passed, no failures or ignored tests; normal parallel execution |
+| `cargo clippy --locked --all-targets --all-features -- -D warnings` | Passed |
+| `cargo test --locked --test rendering` | Passed with real Metal, all retained scenarios, and 35 added browser captures |
+| `cargo test --locked --example browser_capture` | 1 passed; real fixture formats, CRC, sizes and center colors checked |
+| Focused cover reader tests | 46 passed |
+| Pinned `changenote 0.10.0` status | Passed; one patch note, no version-file edits or tags |
+| Release/recovery unittest suite with pinned CLI | 21 passed; uploads and native packaging commands are mocked |
+| HTML proposal verifier | 387 passed offline; reference-only, not native evidence |
+| `git diff --check` | Passed |
+
+The first complete run had 383 passes and three failures after negative-cache
+retention changed. Those tests assumed navigation erased all prior failures.
+They now compare exact retained source sets, still reject stale results, and check
+explicit refresh and changed-source retry. The final full run passes. Logs retain
+the initial failures; no assertion was replaced with a permissive count bound.
+
+The first hosted Windows and Linux jobs also exposed a test-only ordering error:
+both visible workers started, but their first polls were reversed. The check now
+requires the exact visible pair regardless of concurrent poll order, still checks
+exactly two held slots, and requires the exact next source after completion
+without a timer. Runtime work was not serialized and no priority criterion was
+removed. The failed jobs remain in [run 42628620728](https://github.com/narumiruna/mangameeya-rust/actions/runs/42628620728).
+The next Linux run passed Rust and native geometry tests, then found unused
+macOS/Windows-only example helpers under all-target Clippy. Those helpers and
+imports now have matching platform cfg guards, without suppressing warnings.
+That failure remains in [run 42629998109](https://github.com/narumiruna/mangameeya-rust/actions/runs/42629998109).
+
+Controlled-worker regressions check painted queued/loading/failed labels,
+visible-before-overscan dispatch, out-of-order completion without a timer tick,
+and obsolete slots across folder/scroll/resize changes. Production native-text
+checks separately verify real file names at 100/140/220 logical px and two/three
+lines, including CJK, unspaced names and volume pairs. They check actual painted
+bounds, not only accessible labels. Real Metal pixel checks cover all 11 supported
+sources, natural ZIP order, the large archive, and all four landscape corners to
+prove contain rather than crop. Terminal states, selected-error metadata, empty
+results and disabled Open also have captures. The existing three-language,
+three-size, four-panel shell matrix remains.
+
+Local retained evidence:
+
+- `/tmp/mangameeya-browser-parity-before-isolated/`: four baseline PNGs and report.
+- `/tmp/mangameeya-browser-parity-after/`: four implementation PNGs and report.
+- `/tmp/mangameeya-browser-parity-proposal04/`: same-client-size HTML reference and
+  report. Explanatory page content, mock OS title bar and outer preview padding
+  are removed only for capture; UI styles and artwork are unchanged.
+- `target/ui-smoke/browser-parity-*`: 35 production browser PNGs and metrics JSON.
+  Native title captures use `browser-parity-native-titles-<width>-<lines>-lines.png`.
+- `target/browser-parity/`: baseline, final, focused, initial-failure, lint,
+  changenote, release and capture logs. These are generated, untracked evidence.
+
+The 1600×1000 logical capture is 3200×2000 physical pixels at offscreen scale 2.
+On this host, the 17-item fixture with 11 supported sources took 888.7 ms with an
+empty application cover cache and 285.2 ms for a retained-cache reading/browser
+round trip. These are single-run wall times including events and rendering, not
+cold OS disk measurements, a benchmark distribution, or a latency guarantee.
+
+[PR #31](https://github.com/narumiruna/mangameeya-rust/pull/31) retains the hosted
+Windows, Linux, both macOS architectures and release-configuration checks, with
+actual conclusions and native macOS capture artifacts. Use those exact revision
+results, not local cross-compilation, for hosted-platform claims. CI artifacts
+expire under repository retention. The example and rendering tests reproduce the
+captures; none are committed. Local Windows cross-checking could not pass the
+dependency's resource compiler step because `llvm-rc` was unavailable. A temporary
+macOS harness type-checked the Windows helper but does not establish Windows runtime
+or pixels. No workflow, gate, compiler manifest or assertion was bypassed.
+
+### External handoff and recovery
+
+- **Windows platform maintainer or runner:** Use the new native build and
+  `browser_capture` example on Windows at 100%, 125%, 150%, and 200% scaling. The
+  example has a 15-second watchdog, validates the HWND's process ID, calls
+  client-only `PrintWindow` off the UI thread, and requires synthetic artwork
+  pixels. It records actual client/image size and window DPI; it never captures
+  the desktop or changes display settings. Inspect native text, menus, IME and
+  focus on the intended desktop. These physical paths and Windows pixels remain
+  unverified until executed. Event/geometry or macOS checks do not establish that
+  the supplied Windows screenshot's visual problem is fixed. Existing CI/release
+  gates remain in effect.
+- **Product maintainer or user:** With proposal 04 and same-size native before/after
+  captures, review density, long-name identification and reading comfort. The
+  expected result is a recorded visual assessment, not an artwork pixel match.
+  Individual failures in the original Windows library still need format, size
+  and reason data from that system; comic contents need not be shared. This
+  subjective review is not a new agent completion gate.
+- **Recovery:** Revert the UI and bounded-reader changes separately if needed.
+  No settings migration, reset, source-file recovery, installation, package
+  publication or version tag is part of this work. Do not reset history or
+  bookmarks. Generated captures and reports remain outside version control.
+
 ## Scope
 
 The application uses Rust and GPUI Kit 0.9.0 on Windows and macOS. The former Tauri and TypeScript application, Node dependencies, frontend tests, and WebView configuration are removed.

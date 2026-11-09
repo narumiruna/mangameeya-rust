@@ -2,11 +2,13 @@
 
 use super::*;
 use crate::browser::{BrowserModel, BrowserSnapshot, SortKey, columns, row_count};
-use gpui_kit::component::menu::PopupMenuItem;
+use gpui_kit::component::{checkbox::Checkbox, menu::PopupMenuItem};
 use std::time::SystemTime;
 
 const COVER_CACHE_BYTES: usize = 32 * 1024 * 1024;
 const MAX_COVER_JOBS: usize = 2;
+const MAX_COVER_FAILURES: usize = 2048;
+const WIDE_HEADER_WIDTH: f32 = 900.;
 const TILE_GAP: f32 = 12.;
 
 pub(super) fn browser_entry_id(path: &Path) -> SharedString {
@@ -67,9 +69,81 @@ struct CoverKey {
     height: u32,
 }
 
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
+struct CoverSourceKey {
+    path: PathBuf,
+    size: Option<u64>,
+    modified: Option<SystemTime>,
+}
+
+impl CoverKey {
+    fn source(&self) -> CoverSourceKey {
+        CoverSourceKey {
+            path: self.path.clone(),
+            size: self.size,
+            modified: self.modified,
+        }
+    }
+}
+
 struct Cover {
     page: CachedPage,
     used: u64,
+}
+
+struct CoverFailure {
+    error: book::CoverError,
+    used: u64,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum CoverStatus {
+    Pending,
+    Loading,
+    Ready,
+    Unsupported,
+    Failed,
+}
+
+impl CoverStatus {
+    fn text(self) -> Text {
+        match self {
+            Self::Pending => Text::CoverPending,
+            Self::Loading => Text::CoverLoading,
+            Self::Ready => Text::CoverReady,
+            Self::Unsupported => Text::CoverUnsupported,
+            Self::Failed => Text::CoverFailed,
+        }
+    }
+
+    fn icon(self) -> IconName {
+        match self {
+            Self::Pending => IconName::Clock,
+            Self::Loading => IconName::LoaderCircle,
+            Self::Ready => IconName::Check,
+            Self::Unsupported => IconName::CircleOff,
+            Self::Failed => IconName::CircleAlert,
+        }
+    }
+}
+
+// Tests pause workers before synchronous I/O, without timeouts or fake cancellation.
+#[cfg(test)]
+#[derive(Default)]
+pub(super) struct CoverJobGate {
+    pub(super) started: Vec<PathBuf>,
+    released: HashSet<PathBuf>,
+    wakers: HashMap<PathBuf, std::task::Waker>,
+}
+
+#[cfg(test)]
+impl CoverJobGate {
+    pub(super) fn release(&mut self, path: PathBuf) {
+        self.released.insert(path.clone());
+        if let Some(waker) = self.wakers.remove(&path) {
+            waker.wake();
+        }
+    }
 }
 
 pub(super) struct BrowserUi {
@@ -89,7 +163,7 @@ pub(super) struct BrowserUi {
     listing_revision: u64,
     clock: u64,
     covers: HashMap<CoverKey, Cover>,
-    failures: HashMap<CoverKey, String>,
+    failures: HashMap<CoverSourceKey, CoverFailure>,
     inflight: HashSet<(u64, CoverKey)>,
     visible_rows: Rc<RefCell<HashSet<usize>>>,
     search_pending: bool,
@@ -97,6 +171,8 @@ pub(super) struct BrowserUi {
     scroll_anchor: Option<(PathBuf, ListOffset)>,
     #[cfg(test)]
     requested_count: usize,
+    #[cfg(test)]
+    pub(super) worker_gate: Option<Arc<Mutex<CoverJobGate>>>,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -143,7 +219,7 @@ impl BrowserUi {
             tile_width: 140.,
             show_names: true,
             name_lines: 2,
-            metadata: true,
+            metadata: false,
             scale: window.scale_factor(),
             viewport_height: 0.,
             generation: 0,
@@ -158,6 +234,8 @@ impl BrowserUi {
             scroll_anchor: None,
             #[cfg(test)]
             requested_count: 0,
+            #[cfg(test)]
+            worker_gate: None,
             _subscriptions: subscriptions,
         }
     }
@@ -169,7 +247,7 @@ impl BrowserUi {
             } else {
                 0.
             }
-            + if self.metadata { 36. } else { 0. }
+            + if self.metadata { 22. } else { 0. }
             + 24.
     }
 
@@ -189,6 +267,45 @@ impl BrowserUi {
             .saturating_mul(self.columns)
             .min(self.model.order.len());
         start.min(end)..end
+    }
+
+    fn request_positions(&self) -> Vec<usize> {
+        let range = self.requested_range();
+        let top = self.grid.logical_scroll_top();
+        let start = top.item_ix.saturating_mul(self.columns);
+        let height = f32::from(self.grid.viewport_bounds().size.height);
+        let rows = ((height + f32::from(top.offset_in_item)) / self.row_height()).ceil() as usize;
+        let end = top
+            .item_ix
+            .saturating_add(rows)
+            .saturating_mul(self.columns);
+        // Visible rows precede both overscan rows, including when scrolled down.
+        range
+            .clone()
+            .filter(|position| (start..end).contains(position))
+            .chain(range.filter(|position| !(start..end).contains(position)))
+            .collect()
+    }
+
+    fn cover_status(&self, key: &CoverKey) -> CoverStatus {
+        if self.covers.contains_key(key) {
+            CoverStatus::Ready
+        } else if let Some(failure) = self.failures.get(&key.source()) {
+            match failure.error {
+                book::CoverError::Unsupported(_) => CoverStatus::Unsupported,
+                book::CoverError::Failed(_) => CoverStatus::Failed,
+            }
+        } else if self.inflight.iter().any(|(generation, task)| {
+            *generation == self.generation && task.source() == key.source()
+        }) {
+            CoverStatus::Loading
+        } else {
+            CoverStatus::Pending
+        }
+    }
+
+    fn cache_failure(&mut self, key: CoverSourceKey, error: book::CoverError) {
+        cache_cover_failure(&mut self.failures, key, error, self.clock);
     }
 
     fn cover_key(&self, entry: &book::DirectoryEntry) -> CoverKey {
@@ -228,6 +345,9 @@ impl BrowserUi {
     pub(super) fn failure_count(&self) -> usize {
         self.failures.len()
     }
+    pub(super) fn failure_sources(&self) -> HashSet<PathBuf> {
+        self.failures.keys().map(|key| key.path.clone()).collect()
+    }
     pub(super) fn requested_count(&self) -> usize {
         self.requested_count
     }
@@ -258,6 +378,101 @@ impl BrowserUi {
             .values()
             .flat_map(|cover| cover.page.tiles.iter().map(|tile| tile.image.clone()))
             .collect()
+    }
+}
+
+fn cache_cover_failure(
+    failures: &mut HashMap<CoverSourceKey, CoverFailure>,
+    key: CoverSourceKey,
+    error: book::CoverError,
+    clock: u64,
+) {
+    if !failures.contains_key(&key)
+        && failures.len() >= MAX_COVER_FAILURES
+        && let Some(oldest) = failures
+            .iter()
+            .min_by_key(|(_, failure)| failure.used)
+            .map(|(key, _)| key.clone())
+    {
+        failures.remove(&oldest);
+    }
+    failures.insert(key, CoverFailure { error, used: clock });
+}
+
+#[test]
+fn negative_cover_cache_is_source_scoped_and_bounded() {
+    let mut failures = HashMap::new();
+    let mut key = CoverKey {
+        path: PathBuf::from("source.cbr"),
+        size: Some(12),
+        modified: None,
+        width: 100,
+        height: 140,
+    };
+    let source = key.source();
+    cache_cover_failure(
+        &mut failures,
+        source.clone(),
+        book::CoverError::Unsupported("RAR safety limit".into()),
+        0,
+    );
+    key.width = 440;
+    key.height = 616;
+    assert!(
+        failures.contains_key(&key.source()),
+        "resize must not retry source limitations"
+    );
+    key.size = Some(13);
+    assert!(
+        !failures.contains_key(&key.source()),
+        "source change permits retry"
+    );
+    for index in 1..=MAX_COVER_FAILURES {
+        key.path = PathBuf::from(format!("source-{index}.cbr"));
+        cache_cover_failure(
+            &mut failures,
+            key.source(),
+            book::CoverError::Unsupported("RAR safety limit".into()),
+            index as u64,
+        );
+        assert!(failures.len() <= MAX_COVER_FAILURES);
+    }
+    assert!(
+        !failures.contains_key(&source),
+        "evict the least recently used source"
+    );
+}
+
+#[test]
+fn metadata_uses_only_known_fields_in_every_language() {
+    for language in Language::ALL {
+        let pages = language.format(Text::BrowserPageCount, &[("count", "12".into())]);
+        assert_eq!(browser_metadata(language, Some(12), None), pages);
+        assert_eq!(browser_metadata(language, None, Some(0.5)), "50%");
+        assert_eq!(
+            browser_metadata(language, Some(12), Some(0.5)),
+            format!("{pages} · 50%")
+        );
+        assert_eq!(
+            browser_metadata(language, None, None),
+            language.text(Text::BrowserInformationUnknown)
+        );
+        assert!(!browser_metadata(language, None, None).contains('—'));
+    }
+}
+
+fn browser_metadata(language: Language, pages: Option<usize>, progress: Option<f64>) -> String {
+    let mut fields = Vec::new();
+    if let Some(count) = pages {
+        fields.push(language.format(Text::BrowserPageCount, &[("count", count.to_string())]));
+    }
+    if let Some(progress) = progress {
+        fields.push(format!("{:.0}%", progress * 100.));
+    }
+    if fields.is_empty() {
+        language.text(Text::BrowserInformationUnknown).to_owned()
+    } else {
+        fields.join(" · ")
     }
 }
 
@@ -403,13 +618,15 @@ impl ReaderView {
                 page.release(None, cx);
             }
         });
-        self.browser.failures.clear();
+        // Source failures survive ordinary navigation and image generations.
+        // Only explicit refresh or a changed source key permits another attempt.
         self.browser.visible_rows.borrow_mut().clear();
         // Running synchronous reads cannot be cancelled. Keep their slots until completion.
     }
 
     pub(super) fn browser_refresh(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.remember_browser_location();
+        self.browser.failures.clear();
         self.clear_browser_covers(cx);
         self.browser.model.known_pages.clear();
         self.browser.model.shuffle();
@@ -505,21 +722,20 @@ impl ReaderView {
         }
         // ListState may repaint rows without rebuilding the parent view.
         // Use its current viewport, not all previously rendered rows.
-        let range = self.browser.requested_range();
+        let positions = self.browser.request_positions();
         self.browser.clock = self.browser.clock.wrapping_add(1);
         let stamp = self.browser.clock;
         let mut requests = Vec::new();
-        for position in range {
+        for position in positions {
             let entry = &listing.entries[self.browser.model.order[position]];
             let key = self.browser.cover_key(entry);
             if let Some(cover) = self.browser.covers.get_mut(&key) {
                 cover.used = stamp;
-            } else if !self.browser.failures.contains_key(&key)
-                && !self
-                    .browser
-                    .inflight
-                    .contains(&(self.browser.generation, key.clone()))
-            {
+            } else if let Some(failure) = self.browser.failures.get_mut(&key.source()) {
+                failure.used = stamp;
+            } else if !self.browser.inflight.iter().any(|(generation, task)| {
+                *generation == self.browser.generation && task.source() == key.source()
+            }) {
                 requests.push((key, entry.clone()));
             }
         }
@@ -529,26 +745,51 @@ impl ReaderView {
             }
             let generation = self.browser.generation;
             let listing_revision = self.listing_revision;
-            if !self.browser.inflight.insert((generation, key.clone())) {
-                // Different native entries may alias the same canonical source.
-                // Only one worker owns a given slot until its completion.
+            // Native aliases and resized versions share a source worker slot.
+            if self.browser.inflight.iter().any(|(job_generation, task)| {
+                *job_generation == generation && task.source() == key.source()
+            }) {
                 continue;
             }
+            self.browser.inflight.insert((generation, key.clone()));
+            cx.notify();
             #[cfg(test)]
             {
                 self.browser.requested_count += 1;
             }
             let task_key = key.clone();
+            #[cfg(test)]
+            let gate = self.browser.worker_gate.clone();
             let task = cx.background_spawn(async move {
-                let source = book::read_cover(&entry)?;
+                #[cfg(test)]
+                if let Some(gate) = gate {
+                    let mut started = false;
+                    std::future::poll_fn(|cx| {
+                        let mut gate = gate.lock().unwrap();
+                        if !started {
+                            gate.started.push(entry.path.clone());
+                            started = true;
+                        }
+                        if gate.released.contains(&entry.path) {
+                            std::task::Poll::Ready(())
+                        } else {
+                            gate.wakers.insert(entry.path.clone(), cx.waker().clone());
+                            std::task::Poll::Pending
+                        }
+                    })
+                    .await;
+                }
+                let source = book::read_cover_classified(&entry)?;
                 let decoded =
-                    imaging::decode_thumbnail(&source.bytes, task_key.width, task_key.height)?;
+                    imaging::decode_thumbnail(&source.bytes, task_key.width, task_key.height)
+                        .map_err(book::CoverError::Failed)?;
                 let page = cached_page(
                     vec![(decoded, image::Delay::from_numer_denom_ms(0, 1))],
                     source.bytes.len(),
                     generation,
-                )?;
-                Ok::<_, String>((page, source.page_count))
+                )
+                .map_err(book::CoverError::Failed)?;
+                Ok::<_, book::CoverError>((page, source.page_count))
             });
             cx.spawn(async move |view, cx| {
                 let result = task.await;
@@ -561,6 +802,9 @@ impl ReaderView {
                         if let Ok((page, _)) = result {
                             page.release(None, cx);
                         }
+                        // Obsolete synchronous jobs still owned their slots. Refill
+                        // only after their actual completion, never after a timeout.
+                        this.browser_tick(cx);
                         return;
                     }
                     match result {
@@ -574,9 +818,10 @@ impl ReaderView {
                             }
                             if page.allocation > COVER_CACHE_BYTES {
                                 page.release(None, cx);
-                                this.browser
-                                    .failures
-                                    .insert(key, "Cover exceeds cache budget".into());
+                                this.browser.cache_failure(
+                                    key.source(),
+                                    book::CoverError::Failed("Cover exceeds cache budget".into()),
+                                );
                             } else {
                                 let mut bytes: usize = this
                                     .browser
@@ -611,9 +856,11 @@ impl ReaderView {
                             }
                         }
                         Err(error) => {
-                            this.browser.failures.insert(key, error);
+                            this.browser.cache_failure(key.source(), error);
                         }
                     }
+                    // Start the next visible job without waiting for the reader timer.
+                    this.browser_tick(cx);
                     cx.notify();
                 });
             })
@@ -656,6 +903,8 @@ impl ReaderView {
         let key = self.browser.cover_key(entry);
         let selected = self.browser.model.selected.as_ref() == Some(&entry.entry_path);
         let language = self.language();
+        let status = self.browser.cover_status(&key);
+        let status_text = language.text(status.text());
         let picture = if let Some(cover) = self.browser.covers.get(&key) {
             img(cover.page.tiles[0].image.clone())
                 .size_full()
@@ -663,67 +912,94 @@ impl ReaderView {
                 .into_any_element()
         } else {
             div()
+                .id("browser-cover-status")
+                .test_support()
+                .aria_label(status_text)
                 .size_full()
                 .flex()
+                .flex_col()
                 .items_center()
                 .justify_center()
-                .text_3xl()
-                .child(match entry.kind {
-                    EntryKind::Folder => "▸",
-                    EntryKind::Archive => "▣",
-                    EntryKind::Image => "▧",
-                })
+                .gap_2()
+                .bg(gpui_kit::rgb(0x18181b))
+                .text_color(gpui_kit::rgb(0xa1a1aa))
+                .child(Icon::new(status.icon()).size_6())
+                .child(
+                    div()
+                        .text_xs()
+                        .whitespace_normal()
+                        .text_center()
+                        .child(status_text.test_text(status_text)),
+                )
                 .into_any_element()
         };
-        let tooltip = self.browser.failures.get(&key).map_or_else(
-            || entry.entry_path.to_string_lossy().into_owned(),
-            |error| language.format(Text::ErrorDetails, &[("error", error.clone())]),
+        let mut tooltip = format!(
+            "{}\n{}\n{status_text}",
+            entry.name,
+            crate::file_tree::display_path(&entry.entry_path)
         );
-        let mut content = div().flex().flex_col().w_full().min_w_0().gap_1().child(
-            div()
-                .w_full()
-                .h(px(self.browser.tile_width * 1.4))
-                .child(picture),
-        );
+        if let Some(failure) = self.browser.failures.get(&key.source()) {
+            tooltip.push('\n');
+            tooltip.push_str(&failure.error.to_string());
+        }
+        let mut content = div()
+            .flex()
+            .flex_col()
+            .flex_none()
+            .w(px(self.browser.tile_width))
+            .min_w_0()
+            .gap_1()
+            .child(
+                div()
+                    .id("browser-cover")
+                    .test_support()
+                    .aria_label(status_text)
+                    .w_full()
+                    .h(px(self.browser.tile_width * 1.4))
+                    .flex_none()
+                    .child(picture),
+            );
         if self.browser.show_names {
             content = content.child(
                 div()
                     .w_full()
-                    .h(px(self.browser.name_lines as f32 * 18. + 4.))
+                    .id("browser-title")
+                    .test_support()
+                    .h(px(self.browser.name_lines as f32 * 18.))
+                    .flex_none()
                     .line_height(px(18.))
                     .text_size(px(12.))
+                    // Button content inherits nowrap. Ellipsis also keeps GPUI's
+                    // cached text layout correct when the line clamp changes.
+                    .whitespace_normal()
                     .line_clamp(self.browser.name_lines)
-                    .child(entry.name.clone()),
+                    .text_ellipsis()
+                    .child(entry.name.clone().test_text(entry.name.clone())),
             );
         }
         if self.browser.metadata {
-            let pages = self
-                .browser
-                .model
-                .page_count(entry, &self.reader.settings)
-                .map_or_else(
-                    || "—".to_owned(),
-                    |count| {
-                        language.format(Text::BrowserPageCount, &[("count", count.to_string())])
-                    },
-                );
-            let progress = self
-                .browser
-                .model
-                .progress(entry, &self.reader.settings)
-                .map_or_else(|| "—".to_owned(), |value| format!("{:.0}%", value * 100.));
+            let metadata = browser_metadata(
+                language,
+                self.browser.model.page_count(entry, &self.reader.settings),
+                self.browser.model.progress(entry, &self.reader.settings),
+            );
             content = content.child(
                 div()
+                    .id("browser-tile-metadata")
+                    .test_support()
+                    .w_full()
                     .text_xs()
-                    .h(px(32.))
+                    .h(px(18.))
+                    .flex_none()
                     .overflow_hidden()
-                    .child(format!("{pages} · {progress}")),
+                    .text_ellipsis()
+                    .child(metadata.clone().test_text(metadata)),
             );
         }
         let path = entry.entry_path.clone();
         Button::new(browser_entry_id(&entry.entry_path))
             .ghost()
-            .p_2()
+            .p_1()
             .w(px(self.browser.tile_width + TILE_GAP))
             .h(px(self.browser.row_height() - 8.))
             .accessibility_label(entry.name.clone())
@@ -781,123 +1057,232 @@ impl ReaderView {
         let path = self
             .listing
             .as_ref()
-            .map(|listing| listing.path.to_string_lossy().into_owned())
+            .map(|listing| crate::file_tree::display_path(&listing.path))
             .unwrap_or_default();
-        let toolbar = div()
-            .bg(cx.theme().background)
-            .text_color(cx.theme().foreground)
+        let wide = f32::from(self.viewer_size.width) >= WIDE_HEADER_WIDTH;
+        let current_name = self
+            .listing
+            .as_ref()
+            .map(|listing| {
+                listing
+                    .path
+                    .file_name()
+                    .map(|name| name.to_string_lossy().into_owned())
+                    .unwrap_or_else(|| path.clone())
+            })
+            .unwrap_or_default();
+        let location = div()
+            .id("browser-location")
+            .test_support()
+            .aria_label(path.clone())
             .flex()
-            .flex_col()
-            .gap_2()
-            .p_3()
-            .flex_none()
-            .child(div().text_xs().truncate().child(path))
+            .flex_1()
+            .min_w_0()
+            .items_center()
+            .gap_1()
             .child(
-                Input::new(&self.browser.search)
-                    .id("browser-search")
-                    .aria_label(language.text(Text::BrowserSearch))
-                    .small(),
+                Button::new("browser-parent")
+                    .small()
+                    .ghost()
+                    .w(px(28.))
+                    .h(px(28.))
+                    .icon(IconName::ArrowUp)
+                    .accessibility_label(language.text(Text::ParentFolder))
+                    .tooltip(path.clone())
+                    .disabled(parent.is_none())
+                    .on_click(cx.listener(move |this, _, window, cx| {
+                        if let Some(parent) = &parent {
+                            this.remember_browser_location();
+                            this.browse(parent.clone(), window, cx);
+                        }
+                    })),
+            )
+            .when(wide, |location| {
+                location
+                    .child(
+                        div().min_w_0().flex_1().text_xs().truncate().child(
+                            self.listing
+                                .as_ref()
+                                .and_then(|listing| listing.parent.as_ref())
+                                .map(|path| crate::file_tree::display_path(path))
+                                .unwrap_or_default(),
+                        ),
+                    )
+                    .child(Icon::new(IconName::ChevronRight).small())
+            })
+            .child(
+                div()
+                    .min_w_0()
+                    .flex_1()
+                    .text_xs()
+                    .truncate()
+                    .child(current_name.clone().test_text(current_name)),
             )
             .child(
                 div()
-                    .flex()
-                    .flex_wrap()
-                    .items_center()
-                    .gap_1()
-                    .child(
-                        Button::new("browser-parent")
-                            .small()
-                            .ghost()
-                            .label(language.text(Text::ParentFolder))
-                            .disabled(parent.is_none())
-                            .on_click(cx.listener(move |this, _, window, cx| {
-                                if let Some(parent) = &parent {
-                                    this.remember_browser_location();
-                                    this.browse(parent.clone(), window, cx);
-                                }
-                            })),
-                    )
-                    .child(
-                        Button::new("browser-sort")
-                            .small()
-                            .ghost()
-                            .accessibility_label(language.text(Text::BrowserSort))
-                            .label(language.text(sort_text(self.browser.model.sort)))
-                            .dropdown_menu(move |menu, _, cx| {
-                                if let Some(view) = sort_owner.upgrade() {
-                                    view.read(cx).browser_sort_menu(menu, sort_owner.clone())
-                                } else {
-                                    menu
-                                }
-                            }),
-                    )
-                    .child(
-                        Button::new("browser-reverse")
-                            .small()
-                            .ghost()
-                            .label(language.text(Text::BrowserReverse))
-                            .selected(self.browser.model.descending)
-                            .toggled(self.browser.model.descending)
-                            .on_click(cx.listener(|this, _, _, cx| {
-                                this.browser.model.descending = !this.browser.model.descending;
-                                this.rebuild_browser(cx);
-                            })),
-                    )
-                    .child(
-                        Button::new("browser-folders-first")
-                            .small()
-                            .ghost()
-                            .label(language.text(Text::BrowserFoldersFirst))
-                            .selected(self.browser.model.folders_first)
-                            .toggled(self.browser.model.folders_first)
-                            .on_click(cx.listener(|this, _, _, cx| {
-                                this.browser.model.folders_first =
-                                    !this.browser.model.folders_first;
-                                this.rebuild_browser(cx);
-                            })),
-                    )
-                    .child(
-                        Button::new("browser-shuffle")
-                            .small()
-                            .ghost()
-                            .label(language.text(Text::BrowserShuffle))
-                            .on_click(cx.listener(|this, _, _, cx| {
-                                this.browser.model.sort = SortKey::Random;
-                                this.browser.model.shuffle();
-                                this.rebuild_browser(cx);
-                            })),
-                    )
-                    .child(self.button(
-                        "browser-refresh",
-                        language.text(Text::BrowserRefresh),
-                        Command::BrowserRefresh,
-                        cx,
+                    .id("browser-results")
+                    .test_support()
+                    .aria_label(language.format(
+                        Text::BrowserResults,
+                        &[("count", self.browser.model.order.len().to_string())],
                     ))
-                    .child(
-                        self.button(
-                            "browser-open",
-                            language.text(Text::BrowserOpen),
-                            Command::BrowserOpen,
-                            cx,
-                        )
-                        .disabled(self.browser.model.selected.is_none()),
-                    )
-                    .child(
-                        self.button(
-                            "browser-resume",
-                            language.text(Text::ContinueReading),
-                            Command::ContinueReading,
-                            cx,
-                        )
-                        .disabled(self.reader.book.is_none()),
-                    ),
-            )
-            .when(
-                matches!(self.browser.model.sort, SortKey::Pages | SortKey::Progress),
-                |toolbar| {
-                    toolbar.child(div().text_xs().child(language.text(Text::BrowserKnownHint)))
-                },
+                    .flex_none()
+                    .text_xs()
+                    .text_color(cx.theme().muted_foreground)
+                    .child(language.format(
+                        Text::BrowserResults,
+                        &[("count", self.browser.model.order.len().to_string())],
+                    )),
             );
+        let search = Input::new(&self.browser.search)
+            .id("browser-search")
+            .aria_label(language.text(Text::BrowserSearch))
+            .small()
+            .prefix(Icon::new(IconName::Search).small())
+            .w(px(if wide { 136. } else { 112. }))
+            .flex_none();
+        let controls = div()
+            .id("browser-actions")
+            .test_support()
+            .flex()
+            .items_center()
+            .gap_1()
+            .min_w_0()
+            .when(wide, |controls| controls.flex_none())
+            .when(!wide, |controls| controls.w_full())
+            .child(
+                Button::new("browser-sort")
+                    .small()
+                    .ghost()
+                    .accessibility_label(language.text(Text::BrowserSort))
+                    .tooltip(language.text(Text::BrowserSort))
+                    .label(language.text(sort_text(self.browser.model.sort)))
+                    .when(wide, |button| button.w(px(112.)).flex_none())
+                    .when(!wide, |button| button.flex_1().min_w_0().max_w(px(160.)))
+                    .dropdown_menu(move |menu, _, cx| {
+                        if let Some(view) = sort_owner.upgrade() {
+                            view.read(cx).browser_sort_menu(menu, sort_owner.clone())
+                        } else {
+                            menu
+                        }
+                    }),
+            )
+            .child(
+                Button::new("browser-reverse")
+                    .small()
+                    .ghost()
+                    .w(px(28.))
+                    .h(px(28.))
+                    .flex_none()
+                    .icon(if self.browser.model.descending {
+                        IconName::ArrowDown
+                    } else {
+                        IconName::ArrowUp
+                    })
+                    .accessibility_label(language.text(if self.browser.model.descending {
+                        Text::BrowserReverse
+                    } else {
+                        Text::BrowserAscending
+                    }))
+                    .tooltip(language.text(if self.browser.model.descending {
+                        Text::BrowserReverse
+                    } else {
+                        Text::BrowserAscending
+                    }))
+                    .selected(self.browser.model.descending)
+                    .toggled(self.browser.model.descending)
+                    .on_click(cx.listener(|this, _, _, cx| {
+                        this.browser.model.descending = !this.browser.model.descending;
+                        this.rebuild_browser(cx);
+                    })),
+            )
+            .child(
+                Checkbox::new("browser-folders-first")
+                    .small()
+                    .accessibility_label(language.text(Text::BrowserFoldersFirst))
+                    .tooltip(language.text(Text::BrowserFoldersFirst))
+                    .checked(self.browser.model.folders_first)
+                    .flex_none()
+                    .when(wide, |checkbox| {
+                        checkbox.label(language.text(Text::BrowserFoldersFirst))
+                    })
+                    .when(!wide, |checkbox| checkbox.w(px(24.)).h(px(28.)).p_1())
+                    .on_change(cx.listener(|this, checked: &bool, _, cx| {
+                        this.browser.model.folders_first = *checked;
+                        this.rebuild_browser(cx);
+                    })),
+            )
+            .when(self.browser.model.sort == SortKey::Random, |controls| {
+                controls.child(
+                    Button::new("browser-shuffle")
+                        .small()
+                        .ghost()
+                        .w(px(28.))
+                        .h(px(28.))
+                        .flex_none()
+                        .icon(IconName::Shuffle)
+                        .accessibility_label(language.text(Text::BrowserShuffle))
+                        .tooltip(language.text(Text::BrowserShuffle))
+                        .on_click(cx.listener(|this, _, _, cx| {
+                            this.browser.model.shuffle();
+                            this.rebuild_browser(cx);
+                        })),
+                )
+            })
+            .child(
+                Button::new("browser-refresh")
+                    .small()
+                    .ghost()
+                    .w(px(28.))
+                    .h(px(28.))
+                    .flex_none()
+                    .icon(IconName::RefreshCw)
+                    .accessibility_label(language.text(Text::BrowserRefresh))
+                    .tooltip(language.text(Text::BrowserRefresh))
+                    .on_click(cx.listener(|this, _, window, cx| this.browser_refresh(window, cx))),
+            )
+            .child(
+                Button::new("browser-open")
+                    .small()
+                    .primary()
+                    .h(px(28.))
+                    .flex_none()
+                    .icon(IconName::FolderOpen)
+                    .accessibility_label(language.text(Text::BrowserOpen))
+                    .tooltip(language.text(Text::BrowserOpen))
+                    .when(wide, |button| {
+                        button.w(px(124.)).label(language.text(Text::BrowserOpen))
+                    })
+                    .when(!wide, |button| button.w(px(28.)))
+                    .disabled(self.browser.model.selected.is_none())
+                    .on_click(cx.listener(|this, _, window, cx| this.browser_open(window, cx))),
+            );
+        let mut toolbar = div()
+            .id("browser-header")
+            .test_support()
+            .bg(cx.theme().background)
+            .text_color(cx.theme().foreground)
+            .flex()
+            .gap_2()
+            .p_2()
+            .flex_none()
+            .when(wide, |toolbar| toolbar.items_center())
+            .when(!wide, |toolbar| toolbar.flex_col());
+        if wide {
+            toolbar = toolbar.child(location).child(search).child(controls);
+        } else {
+            toolbar = toolbar
+                .child(
+                    div()
+                        .flex()
+                        .items_center()
+                        .gap_2()
+                        .min_w_0()
+                        .child(location)
+                        .child(search),
+                )
+                .child(controls);
+        }
         let view = owner.clone();
         let mut body = div()
             .relative()
@@ -962,8 +1347,13 @@ impl ReaderView {
                                 if this.content_mode != ContentMode::Browsing {
                                     return;
                                 }
+                                let was_wide =
+                                    f32::from(this.viewer_size.width) >= WIDE_HEADER_WIDTH;
                                 this.viewer_bounds = bounds;
                                 this.viewer_size = bounds.size;
+                                if was_wide != (f32::from(bounds.size.width) >= WIDE_HEADER_WIDTH) {
+                                    cx.notify();
+                                }
                                 let new_columns = columns(
                                     (f32::from(bounds.size.width) - 24.).max(1.),
                                     this.browser.tile_width + TILE_GAP,
