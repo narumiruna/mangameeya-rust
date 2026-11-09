@@ -908,7 +908,13 @@ impl FileTree {
             .is_some_and(|root| loaded.path.starts_with(root))
             && self.node(&loaded.path).is_some_and(|node| {
                 node.entry.is_directory && !node.cycle && node.entry.path == loaded.target
-            });
+            })
+            // A filtered ancestor must not hide an explicitly accepted destination.
+            && (self.show_hidden()
+                || !loaded
+                    .path
+                    .ancestors()
+                    .any(|path| self.node(path).is_some_and(|node| node.hidden)));
         if !inside {
             self.invalidate();
             self.state.nodes.clear();
@@ -951,6 +957,7 @@ impl FileTree {
             }
         }
         self.install(loaded);
+        self.resume_visible_expansions();
         self.error = None;
     }
 
@@ -1462,6 +1469,130 @@ mod tests {
         assert_ne!(old.token, new.token);
         assert!(!tree.complete(old.token, Err("obsolete".into())));
         assert!(tree.complete(new.token, Ok(listing(&new.path, vec![]))));
+    }
+
+    #[test]
+    fn review_navigation_resumes_canceled_descendants_with_worker_bound() {
+        let mut tree = initialize(&[("a", true), ("unrelated", true)]);
+        load_branch(&mut tree, "root/a", &[("b", true), ("collapsed", true)]);
+        let ancestor = Path::new("root/a");
+        let child = Path::new("root/a/b");
+        tree.expand(child);
+        let old = tree.take_requests().pop().unwrap();
+        tree.collapse(ancestor);
+        assert!(tree.node(child).unwrap().expanded);
+        assert!(!tree.is_loading(child));
+        tree.request_navigation(ancestor.into());
+        let navigation = tree.take_requests().pop().unwrap();
+        assert!(tree.complete(
+            navigation.token,
+            Ok(listing(
+                ancestor,
+                vec![item(ancestor, "b", true), item(ancestor, "collapsed", true)]
+            ))
+        ));
+        assert!(
+            tree.is_loading(child),
+            "navigation must resume the visible child"
+        );
+        let resumed = tree.take_requests().pop().unwrap();
+        assert_eq!(resumed.path, child);
+        assert_ne!(resumed.token, old.token);
+        tree.expand(Path::new("root/unrelated"));
+        assert!(
+            tree.take_requests().is_empty(),
+            "obsolete work keeps its slot"
+        );
+        assert!(!tree.complete(
+            old.token,
+            Ok(listing(child, vec![item(child, "obsolete.png", false)]))
+        ));
+        let unrelated = tree.take_requests().pop().unwrap();
+        assert_eq!(unrelated.path, Path::new("root/unrelated"));
+        assert!(tree.complete(
+            resumed.token,
+            Ok(listing(child, vec![item(child, "fresh.png", false)]))
+        ));
+        assert!(tree.complete(unrelated.token, Ok(listing(&unrelated.path, vec![]))));
+        assert!(tree.take_requests().is_empty());
+        assert!(names(&tree).contains(&"fresh.png"));
+        assert!(!names(&tree).contains(&"obsolete.png"));
+        assert!(!tree.is_loading(Path::new("root/a/collapsed")));
+    }
+
+    #[test]
+    fn review_navigation_reroots_hidden_destinations_and_restores_history() {
+        for hidden_name in [".hidden", "protected"] {
+            for nested in [false, true] {
+                let mut tree = initialize(&[(hidden_name, true), ("other.png", false)]);
+                let hidden = Path::new("root").join(hidden_name);
+                tree.state.nodes.get_mut(&hidden).unwrap().hidden = true;
+                load_branch(&mut tree, hidden.to_str().unwrap(), &[("visible", true)]);
+                let destination = if nested {
+                    hidden.join("visible")
+                } else {
+                    hidden.clone()
+                };
+                tree.select(Path::new("root/other.png"));
+                let anchor = ScrollAnchor {
+                    path: tree.selected().map(Path::to_path_buf),
+                    offset: 4.0,
+                };
+                tree.set_scroll_anchor(anchor.clone());
+                tree.request_navigation(destination.clone());
+                let failed = tree.take_requests().pop().unwrap();
+                assert!(tree.complete(failed.token, Err("unreadable".into())));
+                assert_eq!(tree.root(), Some(Path::new("root")));
+                assert!(!tree.can_back());
+                assert_eq!(tree.selected(), Some(Path::new("root/other.png")));
+                tree.request_navigation(destination.clone());
+                let request = tree.take_requests().pop().unwrap();
+                assert!(tree.complete(
+                    request.token,
+                    Ok(listing(
+                        &destination,
+                        vec![
+                            item(&destination, "page.png", false),
+                            item(&destination, ".private.png", false),
+                        ]
+                    ))
+                ));
+                assert_eq!(tree.root(), Some(destination.as_path()));
+                assert_eq!(tree.location(), Some(destination.as_path()));
+                assert!(
+                    !tree.show_hidden(),
+                    "explicit paths must not change the hidden toggle"
+                );
+                assert_eq!(names(&tree), ["page.png"]);
+                assert!(tree.back());
+                assert_eq!(tree.root(), Some(Path::new("root")));
+                assert_eq!(tree.location(), Some(Path::new("root")));
+                assert_eq!(tree.selected(), Some(Path::new("root/other.png")));
+                assert_eq!(tree.scroll_anchor(), &anchor);
+                assert!(!tree.show_hidden());
+                assert_eq!(names(&tree), ["other.png"]);
+            }
+        }
+    }
+
+    #[test]
+    fn review_navigation_with_hidden_items_visible_keeps_the_tree_root() {
+        let mut tree = initialize(&[(".hidden", true), ("other", true)]);
+        tree.set_show_hidden(true);
+        load_branch(&mut tree, "root/other", &[("retained.png", false)]);
+        let hidden = Path::new("root/.hidden");
+        tree.request_navigation(hidden.into());
+        let request = tree.take_requests().pop().unwrap();
+        assert!(tree.complete(
+            request.token,
+            Ok(listing(hidden, vec![item(hidden, "page.png", false)]))
+        ));
+        assert_eq!(tree.root(), Some(Path::new("root")));
+        assert_eq!(tree.location(), Some(hidden));
+        assert!(tree.show_hidden());
+        assert!(names(&tree).contains(&"page.png"));
+        assert!(names(&tree).contains(&"retained.png"));
+        assert!(tree.node(Path::new("root/other")).unwrap().expanded);
     }
 
     #[test]

@@ -656,6 +656,9 @@ This section retains its results, external handoff, and recovery instructions.
 
 ### Verification results
 
+This table records source head `bb21149`. The PR review corrections below have
+separate results.
+
 Rust is 1.99.1. Windows commands use native MSVC from PowerShell, invoked through
 WSL. Linux commands use the installed native x86_64 Linux toolchain and separate
 `target/linux-browser/` outputs. The existing ignored linker-name links under
@@ -769,6 +772,38 @@ The downloaded log is `target/files-tree/ci-source.log`.
 The complete change was reviewed for correctness, security, lifecycle safety,
 compatibility, regressions, and scope. The Windows baseline failure remains disclosed;
 no assertion or required CI gate was removed to hide it.
+
+### PR #28 review corrections
+
+The review of `d6cbd93` had two P2 findings. Both are valid and in scope. They
+concern lazy folder navigation and access to an accepted sidebar path.
+
+| Feedback | Outcome | Evidence |
+| --- | --- | --- |
+| [Resume canceled descendant reads](https://github.com/narumiruna/mangameeya-rust/pull/28#discussion_r4508034068) | Fixed. Accepted navigation resumes visible explicit expansions. Obsolete reads still keep their worker slots. | A deterministic model test rejects the old completion, loads the replacement, and checks the two-slot bound. A native folder-name click exposes the child page. |
+| [Keep hidden destinations accessible](https://github.com/narumiruna/mangameeya-rust/pull/28#discussion_r4508034070) | Fixed. A destination below a filtered hidden ancestor becomes the tree root. The hidden toggle does not change. | Model tests cover direct and nested destinations, dot and attribute-style hidden flags, failed reads, Back history, and hidden visibility already on. Native path input keeps the reader, source bytes, settings bytes, and central-browser state. |
+
+The five new regression tests passed on native Windows and Linux. Four failed
+before the fixes; the existing hidden-visibility behavior passed before and after.
+Windows model tests passed 54 tests. Windows Files event tests passed 28 tests.
+The Linux full suite passed 340 tests with no failures or ignored tests. Windows
+and Linux formatting, all-target Clippy with `-D warnings`, and production rendering
+passed. Pinned changenote validation passed; the existing minor feature note covers
+these corrections to the unmerged feature.
+
+The local Windows full run had **336 passing tests and two pre-existing IPC
+failures**, with none ignored: `queue_is_bounded_and_rejects_overflow` at
+`src/instance.rs:539` and `forwards_paths_and_empty_focus_requests` at
+`src/instance.rs:468`. Both exact failures are present in the original baseline
+log. The IPC source and tests are unchanged. This run is not a pass. A separate
+IPC test investigation is recommended; no issue was created and no CI gate was
+waived.
+
+Logs and the detailed review ledger are under ignored
+`target/files-tree/review-28/`: `regressions-before.log`,
+`regressions-after.log`, `model.log`, `files.log`, `windows-tests.log`,
+`linux-tests.log`, `windows-clippy.log`, `linux-clippy.log`,
+`windows-rendering.log`, `linux-rendering.log`, and `ledger.md`.
 
 ### Native capture review
 

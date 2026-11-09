@@ -664,6 +664,136 @@ fn rapid_disclosures_do_not_reopen_collapsed_branch_or_drop_queued_siblings(
 }
 
 #[gpui_kit::test]
+fn review_folder_name_navigation_resumes_a_canceled_child_read(cx: &mut TestAppContext) {
+    let fixture = files_fixture(cx);
+    let root = book(&fixture, "resume-navigation", 1)
+        .canonicalize()
+        .unwrap();
+    let ancestor = root.join("series");
+    let child = ancestor.join("volume");
+    std::fs::create_dir_all(&child).unwrap();
+    let page = child.join("page.png");
+    std::fs::copy(root.join("1.png"), &page).unwrap();
+    browse(&fixture, &root, cx);
+    let old = fixture.view.update(cx, |view, cx| {
+        assert!(view.files_ui.model.expand(&ancestor));
+        let request = view.files_ui.model.take_requests().pop().unwrap();
+        assert!(
+            view.files_ui
+                .model
+                .complete(request.token, load_directory(&ancestor))
+        );
+        assert!(view.files_ui.model.expand(&child));
+        // Hold a started read so collapse and navigation have a fixed event order.
+        let old = view.files_ui.model.take_requests().pop().unwrap();
+        assert!(view.files_ui.model.collapse(&ancestor));
+        view.files_rebuild(cx);
+        old
+    });
+    render_windows(&fixture, cx);
+    click(&fixture, entry_id(&ancestor), cx);
+    assert!(visible(&fixture, cx).contains(&page));
+    fixture.view.update(cx, |view, _| {
+        assert_eq!(view.files_ui.model.location(), Some(ancestor.as_path()));
+        assert!(view.files_ui.model.node(&child).unwrap().expanded);
+        assert!(view.files_ui.model.node(&child).unwrap().loaded);
+        assert!(
+            !view
+                .files_ui
+                .model
+                .complete(old.token, Err("obsolete".into()))
+        );
+    });
+    cx.update_window(fixture.window, |_, window, _| {
+        assert!(window.find(entry_id(&page)).visible());
+    })
+    .unwrap();
+}
+
+#[gpui_kit::test]
+fn review_hidden_path_input_exposes_contents_without_changing_reader_or_settings(
+    cx: &mut TestAppContext,
+) {
+    let fixture = files_fixture(cx);
+    let reading = book(&fixture, "hidden-navigation-reading", 3);
+    fixture.sender.send(vec![reading.join("2.png")]).unwrap();
+    pump(&fixture, cx);
+    let canonical = book(&fixture, "hidden-navigation-library", 1)
+        .canonicalize()
+        .unwrap();
+    let root = PathBuf::from(crate::file_tree::display_path(&canonical));
+    let hidden = root.join(".hidden");
+    let nested = hidden.join("visible");
+    std::fs::create_dir_all(&nested).unwrap();
+    for folder in [&hidden, &nested] {
+        for name in ["page.png", ".private.png"] {
+            std::fs::copy(root.join("1.png"), folder.join(name)).unwrap();
+        }
+    }
+    browse(&fixture, &root, cx);
+    click(&fixture, "files-hidden", cx);
+    click(&fixture, disclosure_id(&hidden), cx);
+    click(&fixture, "files-hidden", cx);
+    click(&fixture, entry_id(&root.join("1.png")), cx);
+    let before = fixture.view.update(cx, |view, _| {
+        view.flush_settings().unwrap();
+        (
+            view.reader.book.as_ref().unwrap().clone(),
+            view.reader.current,
+            view.files_ui.source.clone(),
+            view.listing_revision,
+            view.content_mode,
+            view.save_epoch.load(Ordering::SeqCst),
+        )
+    });
+    let settings_path = fixture.directory.path().join("settings.json");
+    let settings_bytes = std::fs::read(&settings_path).unwrap();
+    let source_bytes = std::fs::read(reading.join("2.png")).unwrap();
+    for destination in [&hidden, &nested] {
+        let path = crate::file_tree::display_path(destination);
+        replace_input(&fixture, "path-input", &path, cx);
+        press(&fixture, "enter", cx);
+        fixture.view.read_with(cx, |view, _| {
+            assert_eq!(view.files_ui.model.root(), Some(destination.as_path()));
+            assert_eq!(view.files_ui.model.location(), Some(destination.as_path()));
+            assert!(!view.files_ui.model.show_hidden());
+            assert!(Arc::ptr_eq(view.reader.book.as_ref().unwrap(), &before.0));
+            assert_eq!(view.reader.current, before.1);
+            assert_eq!(view.files_ui.source, before.2);
+            assert_eq!(view.listing_revision, before.3);
+            assert_eq!(view.content_mode, before.4);
+            assert_eq!(view.save_epoch.load(Ordering::SeqCst), before.5);
+        });
+        let rows = visible(&fixture, cx);
+        assert!(rows.contains(&destination.join("page.png")));
+        assert!(!rows.contains(&destination.join(".private.png")));
+        cx.update_window(fixture.window, |_, window, _| {
+            assert_eq!(window.find("path-input").value(), Some(path.as_str()));
+            assert_ne!(window.find("files-hidden").checked(), Some(true));
+            assert!(
+                window
+                    .find(entry_id(&destination.join("page.png")))
+                    .visible()
+            );
+        })
+        .unwrap();
+        click(&fixture, "files-back", cx);
+        fixture.view.read_with(cx, |view, _| {
+            assert_eq!(view.files_ui.model.root(), Some(root.as_path()));
+            assert_eq!(view.files_ui.model.location(), Some(root.as_path()));
+            assert_eq!(
+                view.files_ui.model.selected(),
+                Some(root.join("1.png").as_path())
+            );
+            assert!(!view.files_ui.model.show_hidden());
+        });
+        assert!(!visible(&fixture, cx).contains(&hidden));
+        assert_eq!(std::fs::read(&settings_path).unwrap(), settings_bytes);
+        assert_eq!(std::fs::read(reading.join("2.png")).unwrap(), source_bytes);
+    }
+}
+
+#[gpui_kit::test]
 fn rapid_navigation_and_close_reject_stale_directory_and_book_results(cx: &mut TestAppContext) {
     let fixture = files_fixture(cx);
     let first = book(&fixture, "rapid-first", 3).canonicalize().unwrap();
