@@ -1,3 +1,9 @@
+## 0.8.1
+
+### Patch Changes
+
+- Show ordinary Windows drive and UNC paths in Recent tooltips, opening messages, and settings-reset messages. Keep native paths unchanged for file access and saved history.
+
 ## 0.8.0
 
 ### Minor Changes
