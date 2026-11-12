@@ -1018,7 +1018,7 @@ impl ReaderView {
         self.reader.slideshow = false;
         self.set_localized_message(
             Text::BookOpening,
-            vec![("path", path.display().to_string())],
+            vec![("path", crate::file_tree::display_path(&path))],
             false,
             cx,
         );
@@ -2893,24 +2893,17 @@ impl ReaderView {
                 }
                 for path in &self.reader.settings.recent {
                     let target = path.clone();
+                    let display = crate::file_tree::display_path(path);
+                    let name = path
+                        .file_name()
+                        .map(|name| name.to_string_lossy().into_owned())
+                        .unwrap_or_else(|| display.clone());
                     recent = recent.child(
                         Button::new(SharedString::from(format!("recent:{}", path.display())))
                             .ghost()
-                            .accessibility_label(
-                                path.file_name()
-                                    .unwrap_or(path.as_os_str())
-                                    .to_string_lossy()
-                                    .into_owned(),
-                            )
-                            .child(
-                                div().w_full().min_w_0().text_left().truncate().child(
-                                    path.file_name()
-                                        .unwrap_or(path.as_os_str())
-                                        .to_string_lossy()
-                                        .into_owned(),
-                                ),
-                            )
-                            .tooltip(path.to_string_lossy().into_owned())
+                            .accessibility_label(name.clone())
+                            .child(div().w_full().min_w_0().text_left().truncate().child(name))
+                            .tooltip(display)
                             .w_full()
                             .h(px(CONTROL_HEIGHT))
                             .on_click(cx.listener(move |this, _, window, cx| {
@@ -3389,7 +3382,7 @@ impl ReaderView {
                 self.sync_controls(window, cx);
                 self.set_localized_message(
                     Text::SettingsReset,
-                    vec![("path", backup.display().to_string())],
+                    vec![("path", crate::file_tree::display_path(&backup))],
                     false,
                     cx,
                 );

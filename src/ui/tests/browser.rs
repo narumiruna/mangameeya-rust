@@ -217,6 +217,47 @@ fn assert_browser_geometry(window: &Window) {
 }
 
 #[gpui_kit::test]
+fn browser_locations_and_tooltips_hide_verbatim_prefixes_without_changing_paths(
+    cx: &mut TestAppContext,
+) {
+    let fixture = fixture(cx);
+    pump(&fixture, cx);
+    for (native, readable) in [
+        (r"\\?\C:\Users", r"C:\Users"),
+        (r"\\?\UNC\server\share", r"\\server\share"),
+    ] {
+        let path = Path::new(native).join("漫画");
+        let display = Path::new(readable).join("漫画");
+        let mut listing = synthetic_listing(path.clone(), 1);
+        // Cover jobs must not read a synthetic UNC share.
+        listing.entries[0].path = fixture.directory.path().join("missing.cbz");
+        let entry_path = listing.entries[0].entry_path.clone();
+        install_listing(&fixture, listing, cx);
+        cx.update_window(fixture.window, |_, window, _| {
+            let display = display.to_string_lossy();
+            assert_eq!(
+                window.find("browser-location").label(),
+                Some(display.as_ref())
+            );
+            assert_eq!(
+                window.find("browser-parent").description(),
+                Some(display.as_ref())
+            );
+            let entry = window.find(entry_id(&entry_path));
+            let tooltip = entry.description().unwrap();
+            assert!(!tooltip.contains(r"\\?\"));
+            assert!(tooltip.contains(display.as_ref()));
+        })
+        .unwrap();
+        fixture.view.read_with(cx, |view, _| {
+            let listing = view.listing.as_ref().unwrap();
+            assert_eq!(listing.path, path);
+            assert_eq!(listing.entries[0].entry_path, entry_path);
+        });
+    }
+}
+
+#[gpui_kit::test]
 fn initial_browser_cannot_resume_without_a_book(cx: &mut TestAppContext) {
     let fixture = fixture(cx);
     pump(&fixture, cx);

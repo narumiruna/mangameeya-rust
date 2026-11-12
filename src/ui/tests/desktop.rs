@@ -1070,6 +1070,50 @@ fn desktop_unknown_information_does_not_fabricate_dimensions_or_decode_more_page
 }
 
 #[gpui_kit::test]
+fn verbatim_paths_are_display_only_in_recent_and_opening_status(cx: &mut TestAppContext) {
+    let fixture = fixture(cx);
+    pump(&fixture, cx);
+    for (native, readable) in [
+        (r"\\?\C:\漫画", r"C:\漫画"),
+        (r"\\?\UNC\server\share\漫画", r"\\server\share\漫画"),
+    ] {
+        let path = Path::new(native).join("book.cbz");
+        let display = Path::new(readable)
+            .join("book.cbz")
+            .to_string_lossy()
+            .into_owned();
+        fixture.view.update(cx, |view, cx| {
+            view.reader.settings.recent = vec![path.clone()];
+            view.reader.settings.preferences.sidebar_mode = SidebarMode::Recent;
+            cx.notify();
+        });
+        render_windows(&fixture, cx);
+        cx.update_window(fixture.window, |_, window, cx| {
+            let recent = window.find(SharedString::from(format!("recent:{}", path.display())));
+            assert_eq!(recent.label(), Some("book.cbz"));
+            assert_eq!(recent.description(), Some(display.as_str()));
+            fixture.view.update(cx, |view, cx| {
+                assert_eq!(
+                    view.reader.settings.recent.as_slice(),
+                    std::slice::from_ref(&path)
+                );
+                // Do not open a synthetic UNC path or contact a network share.
+                if !native.starts_with(r"\\?\UNC\") {
+                    view.open_path(path.clone(), window, cx);
+                    assert_eq!(
+                        view.message,
+                        view.language()
+                            .format(Text::BookOpening, &[("path", display.clone())])
+                    );
+                    assert_eq!(view.message_translation.1, [("path", display.clone())]);
+                }
+            });
+        })
+        .unwrap();
+    }
+}
+
+#[gpui_kit::test]
 fn desktop_thumbnail_frames_names_selection_and_virtualization_survive_navigation(
     cx: &mut TestAppContext,
 ) {
