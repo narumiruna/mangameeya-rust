@@ -288,8 +288,8 @@ pub(super) fn capture(cx: &mut HeadlessAppContext, temporary: &Path) {
         assert!(window.try_find("browser-shuffle").is_none());
         let header = window.find("browser-header").bounds();
         assert!(
-            header.size.height <= px(64.),
-            "wide header must stay compact: {header:?}"
+            header.size.height <= px(72.),
+            "two-row header must stay compact: {header:?}"
         );
     })
     .unwrap();

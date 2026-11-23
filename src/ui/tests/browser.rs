@@ -5,12 +5,10 @@ use crate::{book::DirectoryEntry, browser::SortKey};
 use gpui_kit::{Modifiers, PlatformInput, ScrollDelta, ScrollEvent, test::TestQueryExt};
 
 const SIZES: [(f32, f32); 3] = [(1280., 800.), (960., 640.), (800., 540.)];
-const BROWSER_CONTROLS: [&str; 7] = [
+const BROWSER_CONTROLS: [&str; 5] = [
     "browser-search",
     "browser-parent",
     "browser-sort",
-    "browser-reverse",
-    "browser-folders-first",
     "browser-refresh",
     "browser-open",
 ];
@@ -43,6 +41,21 @@ fn replace_search(fixture: &Fixture, value: &str, cx: &mut TestAppContext) {
             cx,
         );
         window.input(value, cx);
+    })
+    .unwrap();
+    pump(fixture, cx);
+}
+
+fn click_menu_item(window: &mut Window, label: &str, cx: &mut App) {
+    let item = window.find_by_label(label);
+    let menu = window.find("popup-menu").bounds();
+    window.click_at("popup-menu", item.bounds().center() - menu.origin, cx);
+}
+
+fn choose_sort_option(fixture: &Fixture, option: Text, cx: &mut TestAppContext) {
+    cx.update_window(fixture.window, |_, window, cx| {
+        window.click("browser-sort", cx);
+        click_menu_item(window, fixture.view.read(cx).language().text(option), cx);
     })
     .unwrap();
     pump(fixture, cx);
@@ -170,25 +183,20 @@ fn assert_browser_geometry(window: &Window) {
     );
     let header = window.find("browser-header").bounds();
     inside(header, viewer);
-    assert!(header.size.height <= px(80.), "compact header: {header:?}");
-    let search = window.find("browser-search").bounds();
-    assert!(
-        search.size.width <= px(160.),
-        "search width must be bounded"
-    );
+    assert!(header.size.height <= px(72.), "compact header: {header:?}");
+    let location = window.find("browser-location").bounds();
     let actions = window.find("browser-actions").bounds();
-    if viewer.size.width >= px(900.) {
-        assert!((search.center().y - actions.center().y).abs() < px(1.));
-    } else {
-        assert!(
-            search.bottom() <= actions.top(),
-            "narrow header must have two rows"
-        );
+    let search = window.find("browser-search").bounds();
+    let open = window.find("browser-open").bounds();
+    assert!(location.bottom() <= actions.top());
+    assert!((search.center().y - actions.center().y).abs() < px(1.));
+    assert!((open.right() - actions.right()).abs() < px(1.));
+    assert!(search.size.width >= px(76.) && search.size.width <= px(280.));
+    for id in ["browser-parent", "browser-breadcrumbs", "browser-results"] {
+        inside(window.find(id).bounds(), location);
     }
-    assert_eq!(
-        window.find("browser-folders-first").role(),
-        Some(gpui_kit::Role::CheckBox)
-    );
+    assert!(window.try_find("browser-reverse").is_none());
+    assert!(window.try_find("browser-folders-first").is_none());
     let toolbar = window.find("reader-toolbar").bounds();
     let toggle = window.find("browser-toggle");
     inside(toggle.bounds(), toolbar);
@@ -255,6 +263,114 @@ fn browser_locations_and_tooltips_hide_verbatim_prefixes_without_changing_paths(
             assert_eq!(listing.entries[0].entry_path, entry_path);
         });
     }
+}
+
+#[gpui_kit::test]
+fn breadcrumbs_jump_to_visible_and_collapsed_ancestors(cx: &mut TestAppContext) {
+    let fixture = fixture(cx);
+    let library = fixture.directory.path().join("library");
+    let shelf = library.join("a-long-shelf-name-".repeat(5));
+    let volume = shelf.join("volume").join("chapter");
+    std::fs::create_dir_all(&volume).unwrap();
+    browse(&fixture, &volume, cx);
+    cx.update_window(fixture.window, |_, window, cx| {
+        let bounds = window.find("browser-breadcrumbs").bounds();
+        for id in [0usize, 1] {
+            inside(window.find(("browser-ancestor", id)).bounds(), bounds);
+        }
+        assert_eq!(
+            window.find("browser-current-folder").label(),
+            Some("chapter")
+        );
+        window.click("browser-search", cx);
+        window.press("shift-tab", cx);
+        window.press("shift-tab", cx);
+        assert_eq!(
+            window.find(("browser-ancestor", 0usize)).focused(),
+            Some(true)
+        );
+        window.press("enter", cx);
+    })
+    .unwrap();
+    pump(&fixture, cx);
+    fixture.view.read_with(cx, |view, _| {
+        assert_eq!(
+            view.listing.as_ref().unwrap().path,
+            shelf.canonicalize().unwrap()
+        );
+    });
+
+    browse(&fixture, &volume, cx);
+    cx.update_window(fixture.window, |_, window, cx| {
+        window.resize(size(px(800.), px(540.)));
+        window.bounds_changed(cx);
+    })
+    .unwrap();
+    pump(&fixture, cx);
+    cx.update_window(fixture.window, |_, window, cx| {
+        assert_browser_geometry(window);
+        assert!(window.try_find(("browser-ancestor", 0usize)).is_none());
+        assert!(window.find("browser-ancestors").visible());
+        inside(
+            window.find("browser-current-folder").bounds(),
+            window.find("browser-breadcrumbs").bounds(),
+        );
+        window.click("browser-ancestors", cx);
+        click_menu_item(
+            window,
+            &crate::file_tree::display_path(&library.canonicalize().unwrap()),
+            cx,
+        );
+    })
+    .unwrap();
+    pump(&fixture, cx);
+    fixture.view.read_with(cx, |view, _| {
+        assert_eq!(
+            view.listing.as_ref().unwrap().path,
+            library.canonicalize().unwrap()
+        );
+    });
+}
+
+#[gpui_kit::test]
+fn sort_menu_exposes_check_states_and_accepts_keyboard_input(cx: &mut TestAppContext) {
+    let fixture = fixture(cx);
+    let folder = book(&fixture, "sort-menu", 2);
+    browse(&fixture, &folder, cx);
+    choose_sort_option(&fixture, Text::BrowserSortSize, cx);
+    choose_sort_option(&fixture, Text::BrowserReverse, cx);
+    choose_sort_option(&fixture, Text::BrowserFoldersFirst, cx);
+    cx.update_window(fixture.window, |_, window, cx| {
+        let language = fixture.view.read(cx).language();
+        window.click("browser-search", cx);
+        window.press("tab", cx);
+        assert_eq!(window.find("browser-sort").focused(), Some(true));
+        window.press("enter", cx);
+        assert!(window.find("popup-menu").visible());
+        for (option, checked) in [
+            (Text::BrowserAscending, false),
+            (Text::BrowserReverse, true),
+            (Text::BrowserFoldersFirst, false),
+        ] {
+            assert_eq!(
+                window.find_by_label(language.text(option)).checked(),
+                Some(checked)
+            );
+        }
+        window.press("down", cx);
+        window.press("enter", cx);
+    })
+    .unwrap();
+    pump(&fixture, cx);
+    fixture.view.read_with(cx, |view, _| {
+        assert_eq!(view.browser.model.sort, SortKey::Natural);
+        assert!(view.browser.model.descending);
+        assert!(!view.browser.model.folders_first);
+    });
+    choose_sort_option(&fixture, Text::BrowserAscending, cx);
+    fixture
+        .view
+        .read_with(cx, |view, _| assert!(!view.browser.model.descending));
 }
 
 #[gpui_kit::test]
@@ -940,27 +1056,17 @@ fn query_sort_and_grid_preferences_remain_window_local_without_settings_writes(
         .view
         .read_with(cx, |view, _| view.save_epoch.load(Ordering::SeqCst));
     replace_search(&fixture, "2", cx);
+    choose_sort_option(&fixture, Text::BrowserReverse, cx);
+    choose_sort_option(&fixture, Text::BrowserFoldersFirst, cx);
     cx.update_window(fixture.window, |_, window, cx| {
-        window.click("browser-reverse", cx);
-        window.click("browser-folders-first", cx);
         window.click("inspector-browser", cx);
         window.click("browser-show-names", cx);
         window.click(("browser-name-lines", 3usize), cx);
         window.click("browser-metadata", cx);
         assert!(window.try_find("browser-shuffle").is_none());
-        window.click("browser-sort", cx);
-        let item = window.find_by_label(
-            fixture
-                .view
-                .read(cx)
-                .language()
-                .text(Text::BrowserSortRandom),
-        );
-        let menu = window.find("popup-menu").bounds();
-        window.click_at("popup-menu", item.bounds().center() - menu.origin, cx);
     })
     .unwrap();
-    pump(&fixture, cx);
+    choose_sort_option(&fixture, Text::BrowserSortRandom, cx);
     cx.update_window(fixture.window, |_, window, cx| {
         window.click("browser-shuffle", cx)
     })
@@ -994,7 +1100,7 @@ fn ten_thousand_entries_use_virtual_rows_and_retain_native_selection_after_sort(
         .view
         .read_with(cx, |view, _| view.browser.grid.logical_scroll_top());
     assert!(top.item_ix > 100, "End must reveal a distant virtual row");
-    cx.update_window(fixture.window, |_, window, cx| {
+    cx.update_window(fixture.window, |_, window, _| {
         assert!(
             window
                 .find(entry_id(&path.join("comic-09999.cbz")))
@@ -1008,10 +1114,9 @@ fn ten_thousand_entries_use_virtual_rows_and_retain_native_selection_after_sort(
                     .is_none()
             );
         }
-        window.click("browser-reverse", cx);
     })
     .unwrap();
-    pump(&fixture, cx);
+    choose_sort_option(&fixture, Text::BrowserReverse, cx);
     fixture.view.read_with(cx, |view, _| {
         assert_eq!(view.browser.model.order.len(), 10_000);
         assert_eq!(
@@ -1043,18 +1148,15 @@ fn grid_book_round_trip_restores_query_sort_selection_and_exact_scroll(cx: &mut 
     let folder = book(&fixture, "round-trip", 120);
     browse(&fixture, &folder, cx);
     replace_search(&fixture, ".png", cx);
-    cx.update_window(fixture.window, |_, window, cx| {
-        window.click("browser-reverse", cx);
-        window.click("browser-folders-first", cx);
-        fixture.view.update(cx, |view, cx| {
-            view.browser.grid.scroll_to(ListOffset {
-                item_ix: 10,
-                offset_in_item: px(27.),
-            });
-            cx.notify();
+    choose_sort_option(&fixture, Text::BrowserReverse, cx);
+    choose_sort_option(&fixture, Text::BrowserFoldersFirst, cx);
+    fixture.view.update(cx, |view, cx| {
+        view.browser.grid.scroll_to(ListOffset {
+            item_ix: 10,
+            offset_in_item: px(27.),
         });
-    })
-    .unwrap();
+        cx.notify();
+    });
     pump(&fixture, cx);
     let target = fixture.view.read_with(cx, |view, _| {
         let top = view.browser.grid.logical_scroll_top();
@@ -1684,8 +1786,8 @@ fn random_header_controls_and_result_count_stay_reachable_in_every_language(
             (1280., 800.),
             (960., 640.),
             (800., 540.),
-            (900., 640.),
-            (899., 640.),
+            (980., 640.),
+            (979., 640.),
         ] {
             cx.update_window(fixture.window, |_, window, cx| {
                 window.resize(size(px(width), px(height)));
