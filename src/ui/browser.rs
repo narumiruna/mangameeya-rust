@@ -2,13 +2,13 @@
 
 use super::*;
 use crate::browser::{BrowserModel, BrowserSnapshot, SortKey, columns, row_count};
-use gpui_kit::component::{checkbox::Checkbox, menu::PopupMenuItem};
+use gpui_kit::component::menu::PopupMenuItem;
 use std::time::SystemTime;
 
 const COVER_CACHE_BYTES: usize = 32 * 1024 * 1024;
 const MAX_COVER_JOBS: usize = 2;
 const MAX_COVER_FAILURES: usize = 2048;
-const WIDE_HEADER_WIDTH: f32 = 900.;
+const COMPACT_HEADER_WIDTH: f32 = 500.;
 const TILE_GAP: f32 = 12.;
 
 pub(super) fn browser_entry_id(path: &Path) -> SharedString {
@@ -32,6 +32,12 @@ fn native_entry_ids_do_not_merge_equal_lossy_display_names() {
     };
     assert_eq!(paths[0].to_string_lossy(), paths[1].to_string_lossy());
     assert_ne!(browser_entry_id(&paths[0]), browser_entry_id(&paths[1]));
+}
+
+fn browser_folder_name(path: &Path) -> String {
+    path.file_name()
+        .map(|name| name.to_string_lossy().into_owned())
+        .unwrap_or_else(|| crate::file_tree::display_path(path))
 }
 
 fn cover_dimensions(tile_width: f32, scale: f32, capacity: usize) -> (u32, u32) {
@@ -887,7 +893,23 @@ impl ReaderView {
                     }),
             );
         }
-        menu
+        menu.separator()
+            .menu_with_check(
+                language.text(Text::BrowserAscending),
+                !self.browser.model.descending,
+                Box::new(Command::BrowserAscending),
+            )
+            .menu_with_check(
+                language.text(Text::BrowserReverse),
+                self.browser.model.descending,
+                Box::new(Command::BrowserDescending),
+            )
+            .separator()
+            .menu_with_check(
+                language.text(Text::BrowserFoldersFirst),
+                self.browser.model.folders_first,
+                Box::new(Command::BrowserToggleFoldersFirst),
+            )
     }
 
     fn browser_tile(&self, position: usize, cx: &mut Context<Self>) -> gpui_kit::AnyElement {
@@ -1041,83 +1063,137 @@ impl ReaderView {
         content.into_any_element()
     }
 
-    pub(super) fn render_browser(
-        &self,
-        window: &Window,
-        cx: &mut Context<Self>,
-    ) -> gpui_kit::AnyElement {
+    fn browser_toolbar(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let language = self.language();
-        self.browser.visible_rows.borrow_mut().clear();
         let owner = cx.entity().downgrade();
-        let sort_owner = owner.clone();
-        let parent = self
-            .listing
-            .as_ref()
-            .and_then(|listing| listing.parent.clone());
-        let path = self
-            .listing
-            .as_ref()
+        let compact = f32::from(self.viewer_size.width) < COMPACT_HEADER_WIDTH;
+        let listing = self.listing.as_ref();
+        let path = listing
             .map(|listing| crate::file_tree::display_path(&listing.path))
             .unwrap_or_default();
-        let wide = f32::from(self.viewer_size.width) >= WIDE_HEADER_WIDTH;
-        let current_name = self
-            .listing
-            .as_ref()
-            .map(|listing| {
-                listing
-                    .path
-                    .file_name()
-                    .map(|name| name.to_string_lossy().into_owned())
-                    .unwrap_or_else(|| path.clone())
-            })
-            .unwrap_or_default();
+        let parent = listing.and_then(|listing| listing.parent.as_deref());
+        let mut ancestors: Vec<_> = parent
+            .into_iter()
+            .flat_map(Path::ancestors)
+            .filter(|ancestor| !ancestor.as_os_str().is_empty())
+            .collect();
+        ancestors.reverse();
+        let shown = if compact {
+            usize::from(ancestors.len() == 1)
+        } else {
+            2
+        };
+        let (hidden, visible) = ancestors.split_at(ancestors.len().saturating_sub(shown));
+
+        let chevron = || {
+            Icon::new(IconName::ChevronRight)
+                .xsmall()
+                .text_color(cx.theme().muted_foreground)
+                .flex_none()
+        };
+        let mut breadcrumbs = div()
+            .id("browser-breadcrumbs")
+            .test_support()
+            .flex()
+            .flex_1()
+            .min_w_0()
+            .items_center()
+            .gap_1();
+        if !hidden.is_empty() {
+            let hidden: Vec<PathBuf> = hidden.iter().map(|p| p.to_path_buf()).collect();
+            let crumb_owner = owner.clone();
+            let label = language.text(Text::BrowserAncestors);
+            breadcrumbs = breadcrumbs
+                .child(
+                    Button::new("browser-ancestors")
+                        .small()
+                        .ghost()
+                        .w(px(28.))
+                        .h(px(28.))
+                        .icon(IconName::Ellipsis)
+                        .accessibility_label(label)
+                        .tooltip(label)
+                        .dropdown_menu(move |mut menu, _, _| {
+                            for ancestor in &hidden {
+                                let label = crate::file_tree::display_path(ancestor);
+                                let ancestor = ancestor.clone();
+                                let crumb_owner = crumb_owner.clone();
+                                menu = menu.item(PopupMenuItem::new(label).on_click(
+                                    move |_, window, cx| {
+                                        _ = crumb_owner.update(cx, |this, cx| {
+                                            this.browse(ancestor.clone(), window, cx);
+                                        });
+                                    },
+                                ));
+                            }
+                            menu
+                        }),
+                )
+                .child(chevron());
+        }
+        for (index, ancestor) in visible.iter().enumerate() {
+            let ancestor = ancestor.to_path_buf();
+            breadcrumbs = breadcrumbs
+                .child(
+                    Button::new(("browser-ancestor", index))
+                        .small()
+                        .compact()
+                        .ghost()
+                        .h(px(28.))
+                        .min_w_0()
+                        .max_w(px(if compact { 64. } else { 136. }))
+                        .flex_shrink(1.)
+                        .label(browser_folder_name(&ancestor))
+                        .tooltip(crate::file_tree::display_path(&ancestor))
+                        .on_click(cx.listener(move |this, _, window, cx| {
+                            this.browse(ancestor.clone(), window, cx);
+                        })),
+                )
+                .child(chevron());
+        }
+        let current = listing.map(|listing| browser_folder_name(&listing.path));
         let location = div()
             .id("browser-location")
             .test_support()
             .aria_label(path.clone())
             .flex()
-            .flex_1()
             .min_w_0()
             .items_center()
-            .gap_1()
+            .gap_2()
             .child(
                 Button::new("browser-parent")
                     .small()
                     .ghost()
-                    .w(px(28.))
                     .h(px(28.))
                     .icon(IconName::ArrowUp)
+                    .when(compact, |button| button.w(px(28.)))
+                    .when(!compact, |button| {
+                        button.label(language.text(Text::ParentFolder))
+                    })
                     .accessibility_label(language.text(Text::ParentFolder))
                     .tooltip(path.clone())
                     .disabled(parent.is_none())
                     .on_click(cx.listener(move |this, _, window, cx| {
-                        if let Some(parent) = &parent {
-                            this.remember_browser_location();
-                            this.browse(parent.clone(), window, cx);
-                        }
+                        this.perform(Command::BrowserBack, window, cx);
                     })),
             )
-            .when(wide, |location| {
-                location
-                    .child(
-                        div().min_w_0().flex_1().text_xs().truncate().child(
-                            self.listing
-                                .as_ref()
-                                .and_then(|listing| listing.parent.as_ref())
-                                .map(|path| crate::file_tree::display_path(path))
-                                .unwrap_or_default(),
-                        ),
-                    )
-                    .child(Icon::new(IconName::ChevronRight).small())
-            })
-            .child(
-                div()
-                    .min_w_0()
-                    .flex_1()
-                    .text_xs()
-                    .truncate()
-                    .child(current_name.clone().test_text(current_name)),
-            )
+            .child(breadcrumbs.when_some(current, |breadcrumbs, current| {
+                breadcrumbs.child(
+                    div()
+                        .id("browser-current-folder")
+                        .test_support()
+                        .aria_label(current.clone())
+                        .tooltip(move |window, cx| {
+                            gpui_kit::component::tooltip::Tooltip::new(path.clone())
+                                .build(window, cx)
+                        })
+                        .min_w_0()
+                        .text_sm()
+                        .font_weight(gpui_kit::FontWeight::SEMIBOLD)
+                        .truncate()
+                        .child(current.clone().test_text(current)),
+                )
+            }))
             .child(
                 div()
                     .id("browser-results")
@@ -1134,92 +1210,78 @@ impl ReaderView {
                         &[("count", self.browser.model.order.len().to_string())],
                     )),
             );
-        let search = Input::new(&self.browser.search)
-            .id("browser-search")
-            .aria_label(language.text(Text::BrowserSearch))
-            .small()
-            .prefix(Icon::new(IconName::Search).small())
-            .w(px(if wide { 136. } else { 112. }))
-            .flex_none();
-        let controls = div()
+
+        let sort = language.text(sort_text(self.browser.model.sort));
+        let descending = self.browser.model.descending;
+        let sort_summary = language.format(
+            Text::BrowserSortSummary,
+            &[
+                ("sort", sort.into()),
+                (
+                    "direction",
+                    language
+                        .text(if descending {
+                            Text::BrowserReverse
+                        } else {
+                            Text::BrowserAscending
+                        })
+                        .into(),
+                ),
+            ],
+        );
+        let actions = div()
             .id("browser-actions")
             .test_support()
             .flex()
             .items_center()
             .gap_1()
             .min_w_0()
-            .when(wide, |controls| controls.flex_none())
-            .when(!wide, |controls| controls.w_full())
             .child(
-                Button::new("browser-sort")
-                    .small()
-                    .ghost()
-                    .accessibility_label(language.text(Text::BrowserSort))
-                    .tooltip(language.text(Text::BrowserSort))
-                    .label(language.text(sort_text(self.browser.model.sort)))
-                    .when(wide, |button| button.w(px(112.)).flex_none())
-                    .when(!wide, |button| button.flex_1().min_w_0().max_w(px(160.)))
-                    .dropdown_menu(move |menu, _, cx| {
-                        if let Some(view) = sort_owner.upgrade() {
-                            view.read(cx).browser_sort_menu(menu, sort_owner.clone())
-                        } else {
-                            menu
-                        }
-                    }),
+                div().flex_1().min_w(px(76.)).max_w(px(280.)).child(
+                    Input::new(&self.browser.search)
+                        .id("browser-search")
+                        .aria_label(language.text(Text::BrowserSearch))
+                        .small()
+                        .prefix(Icon::new(IconName::Search).small())
+                        .w_full(),
+                ),
             )
             .child(
-                Button::new("browser-reverse")
-                    .small()
-                    .ghost()
-                    .w(px(28.))
-                    .h(px(28.))
-                    .flex_none()
-                    .icon(if self.browser.model.descending {
-                        IconName::ArrowDown
-                    } else {
-                        IconName::ArrowUp
-                    })
-                    .accessibility_label(language.text(if self.browser.model.descending {
-                        Text::BrowserReverse
-                    } else {
-                        Text::BrowserAscending
-                    }))
-                    .tooltip(language.text(if self.browser.model.descending {
-                        Text::BrowserReverse
-                    } else {
-                        Text::BrowserAscending
-                    }))
-                    .selected(self.browser.model.descending)
-                    .toggled(self.browser.model.descending)
-                    .on_click(cx.listener(|this, _, _, cx| {
-                        this.browser.model.descending = !this.browser.model.descending;
-                        this.rebuild_browser(cx);
-                    })),
+                div()
+                    .min_w(px(64.))
+                    .w(px(if compact { 128. } else { 156. }))
+                    .flex_shrink(1.)
+                    .child(
+                        Button::new("browser-sort")
+                            .small()
+                            .h(px(28.))
+                            .w_full()
+                            .when(compact, |button| button.compact())
+                            .dropdown_caret(true)
+                            .accessibility_label(sort_summary.clone())
+                            .tooltip(sort_summary)
+                            .icon(if descending {
+                                IconName::ArrowDown
+                            } else {
+                                IconName::ArrowUp
+                            })
+                            .label(sort)
+                            .dropdown_menu(move |menu, _, cx| {
+                                if let Some(view) = owner.upgrade() {
+                                    view.read(cx).browser_sort_menu(menu, owner.clone())
+                                } else {
+                                    menu
+                                }
+                            }),
+                    ),
             )
-            .child(
-                Checkbox::new("browser-folders-first")
-                    .small()
-                    .accessibility_label(language.text(Text::BrowserFoldersFirst))
-                    .tooltip(language.text(Text::BrowserFoldersFirst))
-                    .checked(self.browser.model.folders_first)
-                    .flex_none()
-                    .when(wide, |checkbox| {
-                        checkbox.label(language.text(Text::BrowserFoldersFirst))
-                    })
-                    .when(!wide, |checkbox| checkbox.w(px(24.)).h(px(28.)).p_1())
-                    .on_change(cx.listener(|this, checked: &bool, _, cx| {
-                        this.browser.model.folders_first = *checked;
-                        this.rebuild_browser(cx);
-                    })),
-            )
-            .when(self.browser.model.sort == SortKey::Random, |controls| {
-                controls.child(
+            .when(self.browser.model.sort == SortKey::Random, |actions| {
+                actions.child(
                     Button::new("browser-shuffle")
                         .small()
                         .ghost()
                         .w(px(28.))
                         .h(px(28.))
-                        .flex_none()
                         .icon(IconName::Shuffle)
                         .accessibility_label(language.text(Text::BrowserShuffle))
                         .tooltip(language.text(Text::BrowserShuffle))
@@ -1233,10 +1295,12 @@ impl ReaderView {
                 Button::new("browser-refresh")
                     .small()
                     .ghost()
-                    .w(px(28.))
                     .h(px(28.))
-                    .flex_none()
                     .icon(IconName::RefreshCw)
+                    .when(compact, |button| button.w(px(28.)))
+                    .when(!compact, |button| {
+                        button.label(language.text(Text::BrowserRefresh))
+                    })
                     .accessibility_label(language.text(Text::BrowserRefresh))
                     .tooltip(language.text(Text::BrowserRefresh))
                     .on_click(cx.listener(|this, _, window, cx| this.browser_refresh(window, cx))),
@@ -1245,44 +1309,40 @@ impl ReaderView {
                 Button::new("browser-open")
                     .small()
                     .primary()
+                    .ml_auto()
                     .h(px(28.))
-                    .flex_none()
-                    .icon(IconName::FolderOpen)
+                    .when(!compact, |button| button.icon(IconName::FolderOpen))
+                    .label(language.text(Text::BrowserOpenAction))
                     .accessibility_label(language.text(Text::BrowserOpen))
                     .tooltip(language.text(Text::BrowserOpen))
-                    .when(wide, |button| {
-                        button.w(px(124.)).label(language.text(Text::BrowserOpen))
-                    })
-                    .when(!wide, |button| button.w(px(28.)))
                     .disabled(self.browser.model.selected.is_none())
                     .on_click(cx.listener(|this, _, window, cx| this.browser_open(window, cx))),
             );
-        let mut toolbar = div()
+        div()
             .id("browser-header")
             .test_support()
+            .key_context("BrowserToolbar")
             .bg(cx.theme().background)
             .text_color(cx.theme().foreground)
             .flex()
-            .gap_2()
-            .p_2()
+            .flex_col()
+            .gap_1()
+            .px_2()
+            .py_1()
             .flex_none()
-            .when(wide, |toolbar| toolbar.items_center())
-            .when(!wide, |toolbar| toolbar.flex_col());
-        if wide {
-            toolbar = toolbar.child(location).child(search).child(controls);
-        } else {
-            toolbar = toolbar
-                .child(
-                    div()
-                        .flex()
-                        .items_center()
-                        .gap_2()
-                        .min_w_0()
-                        .child(location)
-                        .child(search),
-                )
-                .child(controls);
-        }
+            .child(location)
+            .child(actions)
+    }
+
+    pub(super) fn render_browser(
+        &self,
+        window: &Window,
+        cx: &mut Context<Self>,
+    ) -> gpui_kit::AnyElement {
+        let language = self.language();
+        self.browser.visible_rows.borrow_mut().clear();
+        let owner = cx.entity().downgrade();
+        let toolbar = self.browser_toolbar(cx);
         let view = owner.clone();
         let mut body = div()
             .relative()
@@ -1347,11 +1407,13 @@ impl ReaderView {
                                 if this.content_mode != ContentMode::Browsing {
                                     return;
                                 }
-                                let was_wide =
-                                    f32::from(this.viewer_size.width) >= WIDE_HEADER_WIDTH;
+                                let was_compact =
+                                    f32::from(this.viewer_size.width) < COMPACT_HEADER_WIDTH;
                                 this.viewer_bounds = bounds;
                                 this.viewer_size = bounds.size;
-                                if was_wide != (f32::from(bounds.size.width) >= WIDE_HEADER_WIDTH) {
+                                if was_compact
+                                    != (f32::from(bounds.size.width) < COMPACT_HEADER_WIDTH)
+                                {
                                     cx.notify();
                                 }
                                 let new_columns = columns(

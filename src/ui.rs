@@ -101,6 +101,9 @@ enum Command {
     BrowserBack,
     BrowserOpen,
     BrowserRefresh,
+    BrowserAscending,
+    BrowserDescending,
+    BrowserToggleFoldersFirst,
 }
 
 impl Command {
@@ -1449,6 +1452,16 @@ impl ReaderView {
             BrowserRefresh => {
                 if self.content_mode == ContentMode::Browsing {
                     self.browser_refresh(window, cx);
+                }
+            }
+            BrowserAscending | BrowserDescending | BrowserToggleFoldersFirst => {
+                if self.content_mode == ContentMode::Browsing {
+                    if command == BrowserToggleFoldersFirst {
+                        self.browser.model.folders_first = !self.browser.model.folders_first;
+                    } else {
+                        self.browser.model.descending = command == BrowserDescending;
+                    }
+                    self.rebuild_browser(cx);
                 }
             }
             OpenFile => self.request_dialog(false, window, cx),
@@ -3988,6 +4001,7 @@ pub fn init(cx: &mut App) {
 fn bind_commands(cx: &mut App) {
     use Command::*;
     let navigation = "Reader && !Input && !PopoverContent && !PopupMenu && !Dialog && !FilesTree";
+    let outside_browser_toolbar = "Reader && !Input && !PopoverContent && !PopupMenu && !Dialog && !FilesTree && !BrowserToolbar";
     let reader = "Reader";
     for (key, command) in [
         ("space", Next),
@@ -4010,10 +4024,12 @@ fn bind_commands(cx: &mut App) {
         ("t", Thumbnails),
         ("tab", Sidebar),
     ] {
-        let context = if key == "tab" {
-            "Reader && !Input && !PopoverContent && !PopupMenu && !Dialog && !FileBrowser && !FilesTree"
-        } else {
-            navigation
+        let context = match key {
+            "tab" => {
+                "Reader && !Input && !PopoverContent && !PopupMenu && !Dialog && !FileBrowser && !FilesTree"
+            }
+            "space" => outside_browser_toolbar,
+            _ => navigation,
         };
         cx.bind_keys([KeyBinding::new(key, command, Some(context))]);
     }
@@ -4023,11 +4039,12 @@ fn bind_commands(cx: &mut App) {
         ("f5", BrowserRefresh),
         ("escape", Escape),
     ] {
-        cx.bind_keys([KeyBinding::new(
-            key,
-            command,
-            Some("Reader && !Input && !PopoverContent && !PopupMenu && !Dialog && !FilesTree"),
-        )]);
+        let context = if key == "enter" {
+            outside_browser_toolbar
+        } else {
+            navigation
+        };
+        cx.bind_keys([KeyBinding::new(key, command, Some(context))]);
     }
     for (key, command) in [
         ("f", FitWindow),

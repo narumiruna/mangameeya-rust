@@ -1089,8 +1089,6 @@ fn browser_controls_in_bounds(window: &Window, language: Language) {
         "browser-search",
         "browser-parent",
         "browser-sort",
-        "browser-reverse",
-        "browser-folders-first",
         "browser-refresh",
         "browser-open",
     ];
@@ -1103,7 +1101,8 @@ fn browser_controls_in_bounds(window: &Window, language: Language) {
         );
         assert!(
             contains_bounds(central, control.bounds()),
-            "{id} must stay in the central slot"
+            "{language:?}: {id} {:?} must stay in the central slot {central:?}",
+            control.bounds(),
         );
         disjoint(control.bounds(), grid);
         for other in &ids[index + 1..] {
@@ -1215,6 +1214,13 @@ fn capture_browser_states(cx: &mut HeadlessAppContext, temporary: &Path, folder:
                 // Text editing must not run the browser Backspace or Enter commands.
                 cx.update_window(reader, |_, window, cx| {
                     window.click("browser-search", cx);
+                    let search = window.find("browser-search");
+                    assert_eq!(
+                        search.focused(),
+                        Some(true),
+                        "search center must focus the field: {language:?} {suffix} {panels}, {:?}",
+                        search.bounds(),
+                    );
                     window.input("2.pngx", cx);
                     window.press("backspace", cx);
                     window.press("enter", cx);
