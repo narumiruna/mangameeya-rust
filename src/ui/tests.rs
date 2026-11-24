@@ -9,6 +9,7 @@ mod browser_lifecycle;
 mod desktop;
 mod developer;
 mod developer_browser;
+mod developer_pairing;
 mod files;
 mod i18n;
 mod preferences;

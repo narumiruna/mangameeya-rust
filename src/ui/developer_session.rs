@@ -14,6 +14,7 @@ pub(super) struct DeveloperUi {
     pub reader_picker: Option<Picker>,
     pub preferences_picker: Option<Picker>,
     draft: Option<Rc<RefCell<Draft>>>,
+    pairing_prompt: Option<String>,
     pub status: Option<Text>,
 }
 #[derive(Clone, Debug)]
@@ -44,6 +45,7 @@ impl DeveloperUi {
             reader_picker: None,
             preferences_picker: None,
             draft: None,
+            pairing_prompt: None,
             status: None,
         };
         if this.enabled {
@@ -76,6 +78,7 @@ impl DeveloperUi {
     }
     pub fn busy(&self) -> bool {
         self.draft.is_some()
+            || self.pairing_prompt.is_some()
             || self.reader_picker.as_ref().is_some_and(Picker::active)
             || self.preferences_picker.as_ref().is_some_and(Picker::active)
     }
@@ -560,7 +563,11 @@ impl ReaderView {
             let preferences_window = self.preferences_window;
             let reader_picker = self.developer.reader_picker.clone();
             let preferences_picker = self.developer.preferences_picker.clone();
+            let pairing_prompt = self.developer.pairing_prompt.take().is_some();
             cx.defer(move |cx| {
+                if pairing_prompt {
+                    _ = reader_window.update(cx, |_, window, cx| window.close_dialog(cx));
+                }
                 if let Some(picker) = reader_picker {
                     _ = reader_window.update(cx, |_, window, cx| picker.cancel(window, cx));
                 }
@@ -619,7 +626,108 @@ impl ReaderView {
         }
         cx.notify();
     }
+    fn sync_developer_pairing_prompt(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let pending = self
+            .developer
+            .service
+            .as_ref()
+            .and_then(dev::DeveloperService::pending_pairing);
+        if self
+            .developer
+            .pairing_prompt
+            .as_ref()
+            .is_some_and(|id| pending.as_ref().is_none_or(|request| &request.id != id))
+        {
+            self.developer.pairing_prompt = None;
+            window.close_dialog(cx);
+            cx.notify();
+        }
+        let Some(request) = pending else {
+            return;
+        };
+        if self.closing || self.developer.busy() || window.has_active_dialog(cx) {
+            return;
+        }
+        self.developer.pairing_prompt = Some(request.id.clone());
+        let reader = cx.entity().downgrade();
+        let language = self.language();
+        window.open_alert_dialog(cx, move |dialog, _, _| {
+            let allow_reader = reader.clone();
+            let deny_reader = reader.clone();
+            let allow_id = request.id.clone();
+            let deny_id = request.id.clone();
+            let workspace = language.format(
+                Text::DeveloperPairWorkspace,
+                &[("workspace", request.workspace.clone())],
+            );
+            let session = language.format(
+                Text::DeveloperPairSession,
+                &[("session", request.session_id.clone())],
+            );
+            dialog
+                .confirm()
+                .title(language.text(Text::DeveloperPairTitle))
+                .description(language.text(Text::DeveloperPairDescription))
+                .ok_text(language.text(Text::DeveloperPairAllow))
+                .cancel_text(language.text(Text::DeveloperPairDeny))
+                .child(
+                    div()
+                        .id("developer-pairing-request")
+                        .test_support()
+                        .flex()
+                        .flex_col()
+                        .gap_2()
+                        .max_h(px(160.))
+                        .overflow_y_scroll()
+                        .child(
+                            div()
+                                .id("developer-pairing-workspace")
+                                .test_support()
+                                .aria_label(workspace.clone())
+                                .whitespace_normal()
+                                .child(workspace),
+                        )
+                        .child(
+                            div()
+                                .id("developer-pairing-session")
+                                .test_support()
+                                .aria_label(session.clone())
+                                .whitespace_normal()
+                                .child(session),
+                        ),
+                )
+                .on_ok(move |_, _, cx| {
+                    if let Some(entity) = allow_reader.upgrade() {
+                        entity.update(cx, |view, cx| {
+                            if view.developer.pairing_prompt.as_ref() == Some(&allow_id) {
+                                if let Some(service) = &view.developer.service {
+                                    service.respond_pairing(&allow_id, true);
+                                }
+                                view.developer.pairing_prompt = None;
+                                cx.notify();
+                            }
+                        });
+                    }
+                    true
+                })
+                .on_close(move |_, _, cx| {
+                    if let Some(entity) = deny_reader.upgrade() {
+                        entity.update(cx, |view, cx| {
+                            if view.developer.pairing_prompt.as_ref() == Some(&deny_id) {
+                                if let Some(service) = &view.developer.service {
+                                    service.respond_pairing(&deny_id, false);
+                                }
+                                view.developer.pairing_prompt = None;
+                                cx.notify();
+                            }
+                        });
+                    }
+                })
+        });
+        cx.notify();
+    }
     pub(super) fn developer_tick(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.sync_developer_pairing_prompt(window, cx);
         if self.developer.busy() {
             self.next_slide =
                 Instant::now() + Duration::from_secs(self.reader.settings.preferences.interval);
@@ -668,7 +776,6 @@ impl ReaderView {
             }
             cx.notify();
         }
-        let _ = window;
     }
     pub(super) fn developer_log(&self, target: dev::Target, code: dev::EventCode, success: bool) {
         self.developer_log_duration(target, code, success, 0);

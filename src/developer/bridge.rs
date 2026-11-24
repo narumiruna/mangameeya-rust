@@ -9,6 +9,35 @@ use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
 const IO_DEADLINE: Duration = Duration::from_secs(2);
+const APPROVAL_DEADLINE: Duration = Duration::from_secs(60);
+
+#[cfg(any(not(test), windows))]
+fn discovery_home() -> Option<std::path::PathBuf> {
+    #[cfg(windows)]
+    {
+        std::env::home_dir()
+    }
+    #[cfg(not(windows))]
+    {
+        directories::BaseDirs::new().map(|dirs| dirs.home_dir().to_path_buf())
+    }
+}
+
+struct Approval {
+    request: PairingRequest,
+    generation: u64,
+    started: Instant,
+    decision: Option<bool>,
+    socket: TcpStream,
+}
+impl Approval {
+    fn live(&self, generation: u64) -> bool {
+        let mut byte = [0];
+        self.generation == generation
+            && self.started.elapsed() < APPROVAL_DEADLINE
+            && matches!(self.socket.peek(&mut byte), Err(e) if e.kind() == io::ErrorKind::WouldBlock)
+    }
+}
 struct Shared {
     status: ServiceStatus,
     token: Option<(String, Instant)>,
@@ -16,6 +45,8 @@ struct Shared {
     ui_mode: UiMode,
     completions: VecDeque<ServiceEvent>,
     outstanding: usize,
+    pending: Option<Approval>,
+    pair_ids: VecDeque<String>,
 }
 pub struct DeveloperService {
     shared: Arc<Mutex<Shared>>,
@@ -25,9 +56,17 @@ pub struct DeveloperService {
     events: Receiver<ServiceEvent>,
     worker: Option<JoinHandle<()>>,
     port: u16,
+    _publication: Option<super::discovery::Publication>,
 }
 impl DeveloperService {
     pub fn start() -> Result<Self, String> {
+        #[cfg(not(test))]
+        let home = discovery_home();
+        #[cfg(test)]
+        let home: Option<std::path::PathBuf> = None;
+        Self::start_with_home(home.as_deref())
+    }
+    fn start_with_home(home: Option<&Path>) -> Result<Self, String> {
         let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0))
             .map_err(|_| "Cannot start developer listener")?;
         listener
@@ -38,6 +77,8 @@ impl DeveloperService {
             .map_err(|_| "Cannot read developer port")?
             .port();
         let capture_id = random_id()?;
+        let publication = home
+            .and_then(|home| super::discovery::Publication::publish(home, &capture_id, port).ok());
         let logs = LogStore::new(capture_id.clone());
         let shared = Arc::new(Mutex::new(Shared {
             status: ServiceStatus {
@@ -52,6 +93,8 @@ impl DeveloperService {
             ui_mode: UiMode::Reading,
             completions: VecDeque::new(),
             outstanding: 0,
+            pending: None,
+            pair_ids: Default::default(),
         }));
         let stop = Arc::new(AtomicBool::new(false));
         let (outbound, rx) = mpsc::sync_channel(32);
@@ -69,7 +112,28 @@ impl DeveloperService {
             events,
             worker: Some(worker),
             port,
+            _publication: publication,
         })
+    }
+    pub fn pending_pairing(&self) -> Option<PairingRequest> {
+        let s = self.shared.lock().unwrap();
+        s.pending
+            .as_ref()
+            .filter(|p| p.decision.is_none() && p.live(s.generation))
+            .map(|p| p.request.clone())
+    }
+    pub fn respond_pairing(&self, id: &str, allow: bool) -> bool {
+        let mut s = self.shared.lock().unwrap();
+        let generation = s.generation;
+        if let Some(p) = s.pending.as_mut()
+            && p.request.id == id
+            && p.decision.is_none()
+            && p.live(generation)
+        {
+            p.decision = Some(allow);
+            return true;
+        }
+        false
     }
     pub fn status(&self) -> ServiceStatus {
         let shared = self.shared.lock().unwrap();
@@ -139,6 +203,7 @@ impl Drop for DeveloperService {
     }
 }
 fn rotate(s: &mut Shared) {
+    s.pending = None;
     s.status.session_id = None;
     s.status.workspace = None;
     s.token = random_id().ok().map(|t| (t, Instant::now()));
@@ -151,6 +216,19 @@ fn rotate(s: &mut Shared) {
 #[derive(Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 enum Request {
+    Discover {
+        v: u8,
+        id: String,
+        instance_id: String,
+    },
+    #[serde(rename = "pair_request")]
+    Pair {
+        v: u8,
+        id: String,
+        instance_id: String,
+        session_id: String,
+        workspace: String,
+    },
     Hello {
         v: u8,
         id: String,
@@ -187,7 +265,9 @@ enum Outcome {
 impl Request {
     fn identity(&self) -> (u8, &str) {
         match self {
-            Self::Hello { v, id, .. }
+            Self::Discover { v, id, .. }
+            | Self::Pair { v, id, .. }
+            | Self::Hello { v, id, .. }
             | Self::Status { v, id }
             | Self::Logs { v, id, .. }
             | Self::Ack { v, id, .. } => (*v, id),
@@ -211,6 +291,10 @@ struct Peer {
     generation: u64,
     writes: VecDeque<PendingWrite>,
     acks: BTreeMap<String, Instant>,
+    approval: Option<(String, String, u64)>,
+    request_ids: std::collections::BTreeSet<String>,
+    closing: bool,
+    closing_at: Option<Instant>,
 }
 impl Peer {
     fn new(socket: TcpStream) -> io::Result<Self> {
@@ -227,6 +311,10 @@ impl Peer {
             generation: 0,
             writes: VecDeque::new(),
             acks: BTreeMap::new(),
+            approval: None,
+            request_ids: Default::default(),
+            closing: false,
+            closing_at: None,
         })
     }
     fn enqueue(&mut self, value: Value) -> bool {
@@ -319,7 +407,13 @@ impl Peer {
 }
 impl Drop for Peer {
     fn drop(&mut self) {
-        let _ = self.socket.shutdown(Shutdown::Both);
+        // A denial frame must remain readable after the peer is retired.
+        // SD_BOTH can discard queued data on Windows before the client reads it.
+        let _ = self.socket.shutdown(if self.closing {
+            Shutdown::Write
+        } else {
+            Shutdown::Both
+        });
     }
 }
 fn error(peer: &mut Peer, id: &str, code: BridgeError) -> bool {
@@ -346,6 +440,73 @@ fn handle(
         return false;
     }
     if !peer.paired {
+        if peer.request_ids.len() >= 128 || !peer.request_ids.insert(id.to_owned()) {
+            return false;
+        }
+        match &request {
+            Request::Discover {
+                id, instance_id, ..
+            } => {
+                let s = shared.lock().unwrap();
+                if !valid_hex_id(instance_id) || *instance_id != s.status.capture_id {
+                    return false;
+                }
+                return peer.enqueue(json!({"v":1,"id":id,"type":"discovery_result",
+                    "instance_id":instance_id,"app_version":env!("CARGO_PKG_VERSION"),
+                    "available":s.status.state == ConnectionState::WaitingForPi && s.pending.is_none()}));
+            }
+            Request::Pair {
+                id,
+                instance_id,
+                session_id,
+                workspace,
+                ..
+            } => {
+                let mut s = shared.lock().unwrap();
+                if !valid_hex_id(instance_id)
+                    || *instance_id != s.status.capture_id
+                    || session_id.is_empty()
+                    || session_id.len() > 512
+                    || session_id.chars().any(char::is_control)
+                    || workspace.trim().is_empty()
+                    || workspace.len() > 2048
+                    || workspace.chars().any(char::is_control)
+                    || s.pair_ids.contains(id)
+                {
+                    return false;
+                }
+                if s.status.state != ConnectionState::WaitingForPi
+                    || s.pending.is_some()
+                    || peer.approval.is_some()
+                {
+                    return error(peer, id, BridgeError::Busy);
+                }
+                if s.pair_ids.len() == 4096 {
+                    s.pair_ids.pop_front();
+                }
+                s.pair_ids.push_back(id.clone());
+                let Ok(approval_id) = random_id() else {
+                    return false;
+                };
+                let Ok(socket) = peer.socket.try_clone() else {
+                    return false;
+                };
+                s.pending = Some(Approval {
+                    request: PairingRequest {
+                        id: approval_id.clone(),
+                        session_id: session_id.clone(),
+                        workspace: workspace.clone(),
+                    },
+                    generation: s.generation,
+                    started: Instant::now(),
+                    decision: None,
+                    socket,
+                });
+                peer.approval = Some((approval_id, id.clone(), s.generation));
+                return true;
+            }
+            _ => {}
+        }
         let Request::Hello {
             id,
             token,
@@ -373,6 +534,8 @@ fn handle(
         {
             return false;
         }
+        s.pending = None;
+        peer.approval = None;
         s.token = None;
         s.status.state = ConnectionState::Connected;
         s.status.session_id = Some(session_id);
@@ -437,6 +600,62 @@ fn handle(
         _ => false,
     }
 }
+// Apply a decision only to the socket that created the immutable request.
+fn apply_approval(peer: &mut Peer, shared: &Mutex<Shared>, events: &SyncSender<ServiceEvent>) {
+    let Some((approval_id, wire_id, generation)) = peer.approval.clone() else {
+        return;
+    };
+    let mut s = shared.lock().unwrap();
+    let current = s
+        .pending
+        .as_ref()
+        .filter(|p| p.request.id == approval_id && p.generation == generation);
+    let result = match current {
+        None => Some(Err(BridgeError::Canceled)),
+        Some(p) if p.started.elapsed() >= APPROVAL_DEADLINE => Some(Err(BridgeError::Timeout)),
+        Some(p) => p.decision.map(|allow| {
+            if allow {
+                Ok(())
+            } else {
+                Err(BridgeError::Canceled)
+            }
+        }),
+    };
+    let Some(result) = result else {
+        return;
+    };
+    peer.approval = None;
+    if result.is_ok()
+        && s.generation == generation
+        && s.status.state == ConnectionState::WaitingForPi
+    {
+        let p = s.pending.take().unwrap();
+        s.status.session_id = Some(p.request.session_id);
+        s.status.workspace = Some(p.request.workspace);
+        s.token = None;
+        s.status.state = ConnectionState::Connected;
+        peer.paired = true;
+        peer.generation = generation;
+        peer.enqueue(
+            json!({"v":1,"id":wire_id,"type":"hello_ok","capture_id":s.status.capture_id}),
+        );
+        let _ = events.try_send(ServiceEvent::Connected);
+    } else {
+        if s.pending
+            .as_ref()
+            .is_some_and(|p| p.request.id == approval_id)
+        {
+            s.pending = None;
+        }
+        error(
+            peer,
+            &wire_id,
+            result.err().unwrap_or(BridgeError::Canceled),
+        );
+        peer.closing = true;
+        peer.closing_at = Some(Instant::now());
+    }
+}
 fn status_response(id: &str, s: &Shared, started: u64) -> Value {
     json!({"v":1,"id":id,"type":"status_result","status":{"app_version":env!("CARGO_PKG_VERSION"),"protocol_version":PROTOCOL_VERSION,"instance_id":s.status.capture_id,"capture_id":s.status.capture_id,"session_id":s.status.session_id,"capture_started_ms":started,"ui_mode":s.ui_mode}})
 }
@@ -479,7 +698,7 @@ fn serve(
                 .as_ref()
                 .is_some_and(|(_, t)| t.elapsed() >= Duration::from_secs(300))
             {
-                rotate(&mut s);
+                s.token = random_id().ok().map(|token| (token, Instant::now()));
             }
         }
         for _ in 0..32 {
@@ -511,9 +730,9 @@ fn serve(
             let mut alive = if peer.paired {
                 peer.generation == generation
             } else {
-                peer.accepted.elapsed() < IO_DEADLINE
+                peer.approval.is_some() || peer.closing || peer.accepted.elapsed() < IO_DEADLINE
             };
-            if alive {
+            if alive && !peer.closing {
                 match peer.read_frame() {
                     Ok(Some(bytes)) => {
                         alive = handle(peer, &bytes, &shared, &logs, &events, started)
@@ -523,7 +742,22 @@ fn serve(
                 }
             }
             if alive {
+                apply_approval(peer, &shared, &events);
                 alive = peer.flush_current(&shared).is_ok();
+                if peer.closing && peer.writes.is_empty() {
+                    // Half-close after the error, then drain until EOF. Closing
+                    // both directions immediately can reset unread data on Windows.
+                    let _ = peer.socket.shutdown(Shutdown::Write);
+                    let mut drain = [0; 256];
+                    match peer.socket.read(&mut drain) {
+                        Ok(0) => alive = false,
+                        Err(e) if e.kind() != io::ErrorKind::WouldBlock => alive = false,
+                        _ => {}
+                    }
+                    if peer.closing_at.is_some_and(|t| t.elapsed() >= IO_DEADLINE) {
+                        alive = false;
+                    }
+                }
             }
             let expired: Vec<_> = peer
                 .acks
@@ -537,6 +771,12 @@ fn serve(
             }
             if !alive {
                 let peer = peers.swap_remove(i);
+                if let Some((id, _, _)) = &peer.approval {
+                    let mut s = shared.lock().unwrap();
+                    if s.pending.as_ref().is_some_and(|p| p.request.id == *id) {
+                        s.pending = None;
+                    }
+                }
                 if peer.paired {
                     let mut s = shared.lock().unwrap();
                     if s.generation == peer.generation {
@@ -555,11 +795,50 @@ fn serve(
         }
         thread::sleep(Duration::from_millis(5));
     }
+    shared.lock().unwrap().pending = None;
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(windows)]
+    #[test]
+    fn discovery_uses_overridden_userprofile_without_appdata() {
+        const CHILD_HOME: &str = "MANGAMEEYA_TEST_DISCOVERY_HOME";
+        if let Some(expected) = std::env::var_os(CHILD_HOME) {
+            let home = discovery_home().unwrap();
+            assert_eq!(home, std::path::PathBuf::from(expected));
+            assert!(!home.join("AppData").exists());
+            let service = DeveloperService::start_with_home(Some(&home)).unwrap();
+            assert!(service._publication.is_some());
+            assert_eq!(
+                fs::read_dir(home.join(".mangameeya/developer"))
+                    .unwrap()
+                    .count(),
+                1
+            );
+            return;
+        }
+        let home = tempfile::tempdir().unwrap();
+        let output = std::process::Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "developer::bridge::tests::discovery_uses_overridden_userprofile_without_appdata",
+                "--nocapture",
+            ])
+            .env("USERPROFILE", home.path())
+            .env(CHILD_HOME, home.path())
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "child failed: {}{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+
     fn send(socket: &mut TcpStream, value: Value) {
         let b = serde_json::to_vec(&value).unwrap();
         socket.write_all(&(b.len() as u32).to_be_bytes()).unwrap();
@@ -645,6 +924,301 @@ mod tests {
             assert!(Instant::now() < deadline);
             thread::sleep(Duration::from_millis(5));
         }
+    }
+    fn raw_peer() -> (Peer, TcpStream) {
+        let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
+        let client = TcpStream::connect(listener.local_addr().unwrap()).unwrap();
+        let (socket, _) = listener.accept().unwrap();
+        (Peer::new(socket).unwrap(), client)
+    }
+    fn pair(service: &DeveloperService, id: &str) -> Value {
+        json!({"v":1,"id":id,"type":"pair_request","instance_id":service.status().capture_id,
+            "session_id":"test","workspace":"fixture"})
+    }
+    fn dispatch(service: &DeveloperService, peer: &mut Peer, value: Value) -> bool {
+        let (tx, _) = mpsc::sync_channel(32);
+        handle(
+            peer,
+            &serde_json::to_vec(&value).unwrap(),
+            &service.shared,
+            &service.logs,
+            &tx,
+            0,
+        )
+    }
+    fn queued(peer: &Peer) -> Value {
+        serde_json::from_slice(&peer.writes.back().unwrap().bytes[4..]).unwrap()
+    }
+    #[test]
+    fn approval_allow_deny_busy_and_replay() {
+        for allow in [false, true] {
+            let service = DeveloperService::start().unwrap();
+            let (mut peer, _client) = raw_peer();
+            assert!(dispatch(&service, &mut peer, pair(&service, "p")));
+            let request = service.pending_pairing().unwrap();
+            assert_eq!(request.session_id, "test");
+            assert_eq!(request.workspace, "fixture");
+            let (mut rival, _rival_client) = raw_peer();
+            assert!(dispatch(&service, &mut rival, pair(&service, "rival")));
+            assert_eq!(queued(&rival)["code"], "busy");
+            assert!(!dispatch(&service, &mut rival, pair(&service, "p")));
+            assert!(!service.respond_pairing("wrong", true));
+            assert!(service.respond_pairing(&request.id, allow));
+            assert!(service.pending_pairing().is_none());
+            assert!(!service.respond_pairing(&request.id, allow));
+            let (tx, _) = mpsc::sync_channel(32);
+            apply_approval(&mut peer, &service.shared, &tx);
+            assert_eq!(peer.paired, allow);
+            assert!(!rival.paired);
+            assert_eq!(queued(&peer)["id"], "p");
+            if allow {
+                assert_eq!(queued(&peer)["type"], "hello_ok");
+                assert!(service.shared.lock().unwrap().token.is_none());
+                assert_eq!(service.status().session_id.as_deref(), Some("test"));
+            } else {
+                assert_eq!(queued(&peer)["code"], "canceled");
+                assert!(service.shared.lock().unwrap().token.is_some());
+            }
+        }
+    }
+    #[test]
+    fn approval_timeout_revocation_and_manual_race() {
+        for mode in 0..3 {
+            let service = DeveloperService::start().unwrap();
+            let (mut peer, _client) = raw_peer();
+            assert!(dispatch(&service, &mut peer, pair(&service, "p")));
+            let id = service.pending_pairing().unwrap().id;
+            match mode {
+                0 => {
+                    service
+                        .shared
+                        .lock()
+                        .unwrap()
+                        .pending
+                        .as_mut()
+                        .unwrap()
+                        .started = Instant::now() - APPROVAL_DEADLINE
+                }
+                1 => {
+                    assert!(service.respond_pairing(&id, true));
+                    service.disconnect();
+                }
+                _ => {
+                    assert!(service.respond_pairing(&id, true));
+                    let token = service
+                        .connection_command()
+                        .unwrap()
+                        .split_whitespace()
+                        .last()
+                        .unwrap()
+                        .to_owned();
+                    let (mut manual, _manual_client) = raw_peer();
+                    assert!(dispatch(
+                        &service,
+                        &mut manual,
+                        json!({"v":1,"id":"h","type":"hello","token":token,"session_id":"manual","workspace":"manual"})
+                    ));
+                    assert!(manual.paired);
+                }
+            }
+            assert!(!service.respond_pairing(&id, true));
+            let (tx, _) = mpsc::sync_channel(32);
+            apply_approval(&mut peer, &service.shared, &tx);
+            assert!(!peer.paired);
+            assert_eq!(
+                queued(&peer)["code"],
+                if mode == 0 { "timeout" } else { "canceled" }
+            );
+            assert!(service.pending_pairing().is_none());
+        }
+    }
+    #[test]
+    fn approval_replay_history_is_bounded_and_busy_requests_do_not_consume_it() {
+        let service = DeveloperService::start().unwrap();
+        service.shared.lock().unwrap().pair_ids =
+            (0..4096).map(|index| format!("old-{index}")).collect();
+        let (mut peer, _client) = raw_peer();
+        assert!(dispatch(&service, &mut peer, pair(&service, "new")));
+        let request = service.pending_pairing().unwrap();
+        {
+            let shared = service.shared.lock().unwrap();
+            assert_eq!(shared.pair_ids.len(), 4096);
+            assert!(!shared.pair_ids.contains(&"old-0".to_owned()));
+            assert!(shared.pair_ids.contains(&"new".to_owned()));
+        }
+        let (mut rival, _rival_client) = raw_peer();
+        assert!(dispatch(&service, &mut rival, pair(&service, "busy")));
+        assert_eq!(queued(&rival)["code"], "busy");
+        assert!(
+            !service
+                .shared
+                .lock()
+                .unwrap()
+                .pair_ids
+                .contains(&"busy".to_owned())
+        );
+        assert!(service.respond_pairing(&request.id, false));
+        let (tx, _) = mpsc::sync_channel(32);
+        apply_approval(&mut peer, &service.shared, &tx);
+        let (mut replacement, _replacement_client) = raw_peer();
+        assert!(dispatch(
+            &service,
+            &mut replacement,
+            pair(&service, "old-0")
+        ));
+        assert!(service.pending_pairing().is_some());
+    }
+    #[test]
+    fn manual_token_expiry_does_not_cancel_pending_approval() {
+        let service = DeveloperService::start().unwrap();
+        let (mut peer, _client) = raw_peer();
+        assert!(dispatch(&service, &mut peer, pair(&service, "pending")));
+        let request = service.pending_pairing().unwrap();
+        service.shared.lock().unwrap().token =
+            Some(("expired".into(), Instant::now() - Duration::from_secs(301)));
+        let deadline = Instant::now() + Duration::from_secs(3);
+        loop {
+            let refreshed = service
+                .shared
+                .lock()
+                .unwrap()
+                .token
+                .as_ref()
+                .is_some_and(|(token, _)| token != "expired");
+            if refreshed {
+                break;
+            }
+            assert!(Instant::now() < deadline);
+            thread::sleep(Duration::from_millis(5));
+        }
+        assert_eq!(service.pending_pairing().unwrap().id, request.id);
+        assert!(service.respond_pairing(&request.id, true));
+    }
+    #[test]
+    fn preapproval_validation_and_diagnostics() {
+        let service = DeveloperService::start().unwrap();
+        for field in ["instance_id", "session_id", "workspace", "extra"] {
+            let (mut peer, _client) = raw_peer();
+            let mut value = pair(&service, field);
+            value[field] = json!(if field == "instance_id" { "wrong" } else { "" });
+            assert!(!dispatch(&service, &mut peer, value));
+            assert!(service.pending_pairing().is_none());
+        }
+        for kind in ["status", "logs"] {
+            let (mut peer, _client) = raw_peer();
+            assert!(!dispatch(
+                &service,
+                &mut peer,
+                json!({"v":1,"id":"s","type":kind})
+            ));
+            assert!(dispatch(&service, &mut peer, pair(&service, kind)));
+            assert!(!dispatch(
+                &service,
+                &mut peer,
+                json!({"v":1,"id":"s2","type":kind})
+            ));
+            assert!(peer.writes.is_empty());
+            service.disconnect();
+        }
+    }
+    #[test]
+    fn socket_cancellation_and_discovery_wire() {
+        let service = DeveloperService::start().unwrap();
+        let mut socket = TcpStream::connect((Ipv4Addr::LOCALHOST, service.port)).unwrap();
+        send(
+            &mut socket,
+            json!({"v":1,"id":"d","type":"discover","instance_id":service.status().capture_id}),
+        );
+        let result = receive(&mut socket);
+        assert_eq!(result["type"], "discovery_result");
+        assert_eq!(result["available"], true);
+        assert_eq!(result.as_object().unwrap().len(), 6);
+        send(&mut socket, pair(&service, "p"));
+        let deadline = Instant::now() + Duration::from_secs(3);
+        let id = loop {
+            if let Some(p) = service.pending_pairing() {
+                break p.id;
+            }
+            assert!(Instant::now() < deadline);
+            thread::sleep(Duration::from_millis(5));
+        };
+        // Approval waits longer than the ordinary idle handshake deadline.
+        thread::sleep(Duration::from_millis(2100));
+        assert!(service.pending_pairing().is_some());
+        drop(socket);
+        loop {
+            if service.shared.lock().unwrap().pending.is_none() {
+                break;
+            }
+            assert!(Instant::now() < deadline + Duration::from_secs(3));
+            thread::sleep(Duration::from_millis(5));
+        }
+        assert!(!service.respond_pairing(&id, true));
+    }
+    #[test]
+    fn live_socket_allow_deny_and_connected_session_not_replaced() {
+        for allow in [false, true] {
+            let service = DeveloperService::start().unwrap();
+            let old_token = service
+                .connection_command()
+                .unwrap()
+                .split_whitespace()
+                .last()
+                .unwrap()
+                .to_owned();
+            let mut socket = TcpStream::connect((Ipv4Addr::LOCALHOST, service.port)).unwrap();
+            send(&mut socket, pair(&service, "p"));
+            let deadline = Instant::now() + Duration::from_secs(3);
+            let request = loop {
+                if let Some(p) = service.pending_pairing() {
+                    break p;
+                }
+                assert!(Instant::now() < deadline);
+                thread::sleep(Duration::from_millis(5));
+            };
+            assert!(service.respond_pairing(&request.id, allow));
+            // UI polling can delay the client read until after peer retirement.
+            thread::sleep(Duration::from_millis(150));
+            let reply = receive(&mut socket);
+            if allow {
+                assert_eq!(reply["type"], "hello_ok");
+                send(&mut socket, json!({"v":1,"id":"s","type":"status"}));
+                assert_eq!(receive(&mut socket)["status"]["session_id"], "test");
+                let mut rival = TcpStream::connect((Ipv4Addr::LOCALHOST, service.port)).unwrap();
+                send(&mut rival, pair(&service, "rival"));
+                assert_eq!(receive(&mut rival)["code"], "busy");
+                drop(rival);
+                let mut manual = TcpStream::connect((Ipv4Addr::LOCALHOST, service.port)).unwrap();
+                send(
+                    &mut manual,
+                    json!({"v":1,"id":"h","type":"hello","token":old_token,"session_id":"rival","workspace":"rival"}),
+                );
+                manual
+                    .set_read_timeout(Some(Duration::from_secs(3)))
+                    .unwrap();
+                assert_closed(&mut manual);
+                assert_eq!(service.status().session_id.as_deref(), Some("test"));
+            } else {
+                assert_eq!(reply["code"], "canceled");
+                assert_closed(&mut socket);
+                let _manual = connect(&service);
+            }
+        }
+    }
+    #[test]
+    fn isolated_service_publication_and_nonfatal_failure() {
+        let home = tempfile::tempdir().unwrap();
+        let service = DeveloperService::start_with_home(Some(home.path())).unwrap();
+        let path = home
+            .path()
+            .join(".mangameeya/developer")
+            .join(format!("{}.json", service.status().capture_id));
+        assert!(path.exists());
+        drop(service);
+        assert!(!path.exists());
+        let invalid = home.path().join("missing/home");
+        let service = DeveloperService::start_with_home(Some(&invalid)).unwrap();
+        let _socket = connect(&service);
     }
     #[test]
     fn native_wire_contract_fixture() {

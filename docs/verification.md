@@ -19,7 +19,7 @@ RAR, a corrupt CBZ, and a corrupt first folder image. No comic assets are commit
 | Retained shell | Existing native toolbar, panels, and status | Same bounds when switching central content |
 | Titles | Inherited button nowrap; reserved two-line space | Explicit normal wrapping, clamp and ellipsis; two/three lines |
 | Default information | Metadata on, including `— · —` | Cover and filename only; optional metadata has meaningful unknown text |
-| Header | Path, full-width search, wrapping text actions | Breadcrumbs/results, bounded search, sort/direction, folder checkbox, primary Open; one row at 900 central logical px, explicit compact rows below |
+| Header | Path, full-width search, wrapping text actions | Breadcrumbs/results, bounded search, sort menu and refresh; one row at 760 central logical px, two compact rows below |
 | Return to reading | Duplicate central and top controls | Existing top button or Escape; shuffle only for Random |
 | Missing cover | Shared Unicode glyph | Queued/loading/unsupported/failed SVG and text, full name/path/reason tooltip |
 | Large classic ZIP | Total source capped at 64 MiB | Bounded index and selected-member reads; total size alone does not reject it |
@@ -1145,10 +1145,54 @@ checks events and geometry; this work does not claim new macOS Metal pixels.
 ## Developer mode verification and limits
 
 Developer mode uses a separate `developer-mode.json` flag. It does not migrate
-reader settings. The application owns a bounded, authenticated loopback service;
-`.pi/extensions/mangameeya-dev/` connects only to an explicitly paired Pi session.
+reader settings. The application owns a bounded loopback service. Diagnostics and
+feedback require manual token authentication or explicit App approval;
+`.pi/extensions/mangameeya-dev/` connects only to a paired Pi session.
 Diagnostics and target metadata exclude file names, full paths, input values,
 and comic content. Explicitly submitted feedback text is shared with Pi.
+
+### Local App discovery and approval
+
+`/mangameeya-connect` without arguments reads bounded endpoint records from
+`~/.mangameeya/developer/`, probes only `127.0.0.1`, and validates the live instance
+ID. Records contain exactly the discovery/protocol versions, instance ID, port,
+and App version; no capability, workspace, session, or feedback is published.
+Invalid, incompatible, unsafe, and stale records are ignored. Each attempt reads
+at most 256 directory entries and probes at most 32 candidates. A per-extension
+directory cursor resumes across failed attempts, including after the probe deadline.
+Records are read only when a probe can start. The cursor closes at EOF, errors,
+unsafe or replaced directories, and session shutdown. The next attempt after EOF
+starts a new scan. Records are never deleted by Pi.
+Within one bounded attempt, one available App is selected directly; multiple
+Apps found by that attempt require a Pi chooser. An attempt can omit other live
+Apps when it reaches an entry, candidate, or time limit. Retrying advances the
+cursor. Canceling the chooser does not send an approval request.
+
+Windows discovery uses `std::env::home_dir()` to match Pi's `USERPROFILE` lookup,
+without changing the settings directory. Tests use a child process with an
+overridden profile that has no AppData directories. Pairing replies must match
+the selected instance ID before feedback can be dispatched. A trust check runs
+every 100 ms while a connection attempt is pending and cancels it on revocation;
+this is not an atomic notification from the trust system.
+
+The App allows one pending request for 60 seconds. Its confirmation displays the
+requester's workspace and session as client-supplied values. Allow authorizes only
+that socket and immutable request, then invalidates the manual token. Deny,
+Escape, client closure, expiration, disable, or disconnect cannot authorize a
+connection. Stale decisions do nothing. Existing dialogs and feedback drafts are
+not replaced by incoming approval requests. The manual token command remains an
+explicit fallback with its existing expiry and replay rules.
+
+Rust service tests cover approval decisions, concurrency, socket cancellation,
+expiry, generation changes, preapproval isolation, publication, and cleanup.
+Native UI tests cover translated Allow/Deny controls, dismissal, stale prompt
+removal, and existing-dialog isolation. Pi tests cover bounded discovery parsing,
+probes, instance matching, selection, approval, and session/trust revocation.
+The rendering workflow exercises the manual fallback, then the discovery request
+and native approval path with Preferences open. Reader ticks target the owning
+window explicitly, so its approval must not appear in Preferences. Windows results
+do not establish Unix filesystem-mode
+or macOS rendering coverage; run those platform checks in CI before release.
 
 ### Native and Pi discovery evidence
 

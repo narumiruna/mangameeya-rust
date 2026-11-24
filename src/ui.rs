@@ -630,11 +630,17 @@ impl ReaderView {
         let home = initial_directory();
         view.browse(home.clone(), window, cx);
         view.files_browse(home, false, window, cx);
+        let reader_window = window.window_handle();
         cx.spawn_in(window, async move |view, cx| {
             loop {
                 cx.background_executor().timer(TICK).await;
-                if view
-                    .update_in(cx, |view, window, cx| view.tick(window, cx))
+                let Some(view) = view.upgrade() else {
+                    break;
+                };
+                if reader_window
+                    .update(cx, |_, window, cx| {
+                        view.update(cx, |view, cx| view.tick(window, cx));
+                    })
                     .is_err()
                 {
                     break;

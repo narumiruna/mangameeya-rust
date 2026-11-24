@@ -182,12 +182,21 @@ fn assert_browser_geometry(window: &Window) {
     );
     let header = window.find("browser-header").bounds();
     inside(header, viewer);
-    assert!(header.size.height <= px(72.), "compact header: {header:?}");
     let location = window.find("browser-location").bounds();
     let actions = window.find("browser-actions").bounds();
+    if viewer.size.width >= px(760.) {
+        assert!(
+            header.size.height <= px(36.),
+            "single-row header: {header:?}"
+        );
+        assert!((location.center().y - actions.center().y).abs() < px(1.));
+        assert!(location.right() <= actions.left());
+    } else {
+        assert!(header.size.height <= px(72.), "compact header: {header:?}");
+        assert!(location.bottom() <= actions.top());
+    }
     let search = window.find("browser-search").bounds();
     assert!(window.try_find("browser-open").is_none());
-    assert!(location.bottom() <= actions.top());
     assert!((search.center().y - actions.center().y).abs() < px(1.));
     assert!(search.size.width >= px(76.) && search.size.width <= px(280.));
     for id in ["browser-parent", "browser-breadcrumbs", "browser-results"] {
@@ -1786,6 +1795,8 @@ fn random_header_controls_and_result_count_stay_reachable_in_every_language(
             (800., 540.),
             (980., 640.),
             (979., 640.),
+            (1240., 640.),
+            (1239., 640.),
         ] {
             cx.update_window(fixture.window, |_, window, cx| {
                 window.resize(size(px(width), px(height)));

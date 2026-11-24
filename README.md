@@ -105,7 +105,7 @@ The browser keeps the query, sort, selection, and scroll position when you retur
 
 Sort by natural or literal name, modified or created time, size, type, known page count, known reading progress, recent-open order, or a fixed random order. Folder grouping is independent of sort direction; unknown values stay last. Counts come only from opened books or visible cover reads. Sorting does not scan all archives. Recent-open order is not a last-read timestamp.
 
-The default grid shows covers and two-line file names; metadata is off. The top row shows the current folder and clickable ancestors; Use **…** to jump to a parent not shown in the path bar. The second row has search, sorting, refresh, and **Open** at the right. Change the direction or **Folders first** in the sort menu. Shuffle appears only with random sorting. Use the top reading button or `Escape` to return to the retained book.
+The default grid shows covers and two-line file names; metadata is off. The header puts the current folder, clickable ancestors, result count, search, sorting, and refresh on one row when space permits. Narrow views use two rows to keep controls accessible. Use **…** to jump to a parent not shown in the path bar. Change the direction or **Folders first** in the sort menu. Shuffle appears only with random sorting. Use the top reading button or `Escape` to return to the retained book.
 
 Covers distinguish queued, loading, unsupported, and failed sources. Full names, display paths, and failure reasons remain in tooltips. Only visible and nearby rows request covers; visible items take priority, with at most two actual jobs and a 32 MiB retained-pixel cache. This is not a total process-memory limit. Dense high-DPI grids reduce cover resolution to fit that cache. Folder covers use the first image at the top level. Automatic ZIP/CBZ covers support classic single-volume Stored/Deflated archives, including files larger than 64 MiB. Reads use a bounded footer and index, at most 4096 entries and 2 MiB combined metadata, and at most 64 MiB for the selected compressed member. The existing decoded-image and 128 MiB output limits remain. RAR/CBR, ZIP64, unsupported layouts, and over-limit members show a reason instead of a cover. Manual book opening is unchanged. Press `F5` to retry and discard stale covers and counts. Source comics are never changed.
 
@@ -166,10 +166,15 @@ on the next launch.
 
 1. Run Pi from this repository and trust its project-local extension at
    `.pi/extensions/mangameeya-dev/index.ts`. Use `/reload` if Pi was already open.
-2. Select **Copy Pi connection command**, then paste the command into the intended
-   Pi session. Verify the workspace and session shown in Preferences.
-3. Use **Select element** in Preferences, or **Dev** in the reader toolbar. Point
-   to highlight a supported element; click to enter feedback without activating it.
+2. Run `/mangameeya-connect` in the intended Pi session. Pi uses a bounded scan
+   to discover local App instances; select one if the scan finds several.
+   In the App, check the requested workspace and session, then select **Allow**.
+   **Deny** or Escape cancels.
+   If discovery is unavailable, use **Copy Pi connection command** in Preferences
+   and paste the full command into Pi as the manual fallback.
+3. Use **Select element** in Preferences, or the target icon in the reader toolbar
+   after pairing. Point to highlight a supported element; click to enter feedback
+   without activating it.
 4. Review the safe element/context preview. Enter adds a line; Ctrl/Cmd+Enter or
    **Send to Pi** submits. Escape cancels. Text is limited to 8 KiB.
 5. Pi receives the request as a literal user message. Busy agents receive a
@@ -181,10 +186,16 @@ bounded cursor pagination) and `mangameeya_status`. Use
 `/mangameeya-disconnect` or the Preferences button to disconnect. Reconnecting
 requires confirmation before an existing draft can be sent.
 
-Only `127.0.0.1` is supported, with a short-lived, single-use capability token.
-Pi and the app must use the same local network namespace; do not expose the
-listener to work around WSL/container separation. Never share the connection
-command. Pairing does not protect against a hostile process with your OS account.
+Only `127.0.0.1` is supported. Discovery records under
+`~/.mangameeya/developer/` contain endpoint metadata, not tokens or feedback.
+Discovery pairing requires App approval for the requesting connection and expires
+if unanswered after 60 seconds. The displayed workspace and session are supplied
+by the requester; allow only the Pi session you intended. The manual fallback
+uses a short-lived, single-use capability token and does not need a second approval.
+Pi and the App must use the same home directory and local network namespace for
+discovery; do not expose the listener to work around WSL/container separation.
+Never share the manual connection command. Pairing does not protect against a
+hostile process with your OS account. Session changes revoke the Pi connection.
 
 No comic images, file names, full paths, input values, or arbitrary descendant
 text enter captured diagnostics or element metadata. Explicit feedback text and
