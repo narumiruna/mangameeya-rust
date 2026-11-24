@@ -484,6 +484,11 @@ fn developer_applied_preference_with_durability_warning_starts_once(cx: &mut Tes
 
 #[gpui_kit::test]
 fn developer_submitted_text_is_frozen_until_definite_failure(cx: &mut TestAppContext) {
+    let select_all = if cfg!(target_os = "macos") {
+        "cmd-a"
+    } else {
+        "ctrl-a"
+    };
     for outcome in ["failed", "handed_off", "unknown"] {
         let f = fixture(cx);
         enable(&f, cx);
@@ -494,7 +499,7 @@ fn developer_submitted_text_is_frozen_until_definite_failure(cx: &mut TestAppCon
             w.input("Request A", cx);
             w.click("developer-send", cx);
             w.click("developer-feedback-input", cx);
-            w.press("ctrl-a", cx);
+            w.press(select_all, cx);
             w.input("Request B", cx);
             w.press("backspace", cx);
         })
@@ -534,7 +539,7 @@ fn developer_submitted_text_is_frozen_until_definite_failure(cx: &mut TestAppCon
         }
         cx.update_window(f.window, |_, w, cx| {
             w.click("developer-feedback-input", cx);
-            w.press("ctrl-a", cx);
+            w.press(select_all, cx);
             w.input("Request B", cx);
         })
         .unwrap();
