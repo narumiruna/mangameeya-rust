@@ -1163,8 +1163,10 @@ directory cursor resumes across failed attempts, including after the probe deadl
 Records are read only when a probe can start. The cursor closes at EOF, errors,
 unsafe or replaced directories, and session shutdown. The next attempt after EOF
 starts a new scan. Records are never deleted by Pi.
-One available App is selected directly; multiple Apps require a Pi chooser.
-Canceling the chooser does not send an approval request.
+Within one bounded attempt, one available App is selected directly; multiple
+Apps found by that attempt require a Pi chooser. An attempt can omit other live
+Apps when it reaches an entry, candidate, or time limit. Retrying advances the
+cursor. Canceling the chooser does not send an approval request.
 
 Windows discovery uses `std::env::home_dir()` to match Pi's `USERPROFILE` lookup,
 without changing the settings directory. Tests use a child process with an

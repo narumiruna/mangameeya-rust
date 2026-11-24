@@ -166,9 +166,10 @@ on the next launch.
 
 1. Run Pi from this repository and trust its project-local extension at
    `.pi/extensions/mangameeya-dev/index.ts`. Use `/reload` if Pi was already open.
-2. Run `/mangameeya-connect` in the intended Pi session. Pi discovers local App
-   instances; select one if several are available. In the App, check the requested
-   workspace and session, then select **Allow**. **Deny** or Escape cancels.
+2. Run `/mangameeya-connect` in the intended Pi session. Pi uses a bounded scan
+   to discover local App instances; select one if the scan finds several.
+   In the App, check the requested workspace and session, then select **Allow**.
+   **Deny** or Escape cancels.
    If discovery is unavailable, use **Copy Pi connection command** in Preferences
    and paste the full command into Pi as the manual fallback.
 3. Use **Select element** in Preferences, or the target icon in the reader toolbar
