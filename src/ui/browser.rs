@@ -1129,8 +1129,9 @@ impl ReaderView {
             breadcrumbs = breadcrumbs
                 .child(
                     Button::new("browser-ancestors")
-                        .when(self.developer.reader_picker.is_some(), |e| {
-                            e.relative().block_mouse_except_scroll()
+                        .when_some(self.developer.reader_picker.as_ref(), |e, picker| {
+                            e.relative()
+                                .when(picker.active(), |e| e.block_mouse_except_scroll())
                         })
                         .children(self.developer.marker(
                             "browser-ancestors",
@@ -1318,8 +1319,9 @@ impl ReaderView {
                     .flex_shrink(1.)
                     .child(
                         Button::new("browser-sort")
-                            .when(self.developer.reader_picker.is_some(), |e| {
-                                e.relative().block_mouse_except_scroll()
+                            .when_some(self.developer.reader_picker.as_ref(), |e, picker| {
+                                e.relative()
+                                    .when(picker.active(), |e| e.block_mouse_except_scroll())
                             })
                             .children(self.developer.marker(
                                 "browser-sort",

@@ -2332,8 +2332,10 @@ impl ReaderView {
                     }))
                     .trigger(
                         Button::new("zoom-trigger")
-                            .when(self.developer.reader_picker.is_some(), |button| {
-                                button.relative().block_mouse_except_scroll()
+                            .when_some(self.developer.reader_picker.as_ref(), |button, picker| {
+                                button.relative().when(picker.active(), |button| {
+                                    button.block_mouse_except_scroll()
+                                })
                             })
                             .children(self.developer.marker(
                                 "zoom-trigger",
@@ -2679,8 +2681,10 @@ impl ReaderView {
             let view = cx.entity().downgrade();
             menus = menus.child(
                 Button::new(("menu", group))
-                    .when(self.developer.reader_picker.is_some(), |button| {
-                        button.relative().block_mouse_except_scroll()
+                    .when_some(self.developer.reader_picker.as_ref(), |button, picker| {
+                        button
+                            .relative()
+                            .when(picker.active(), |button| button.block_mouse_except_scroll())
                     })
                     .children(self.developer.marker(
                         format!("menu-{group}"),
@@ -3916,8 +3920,10 @@ impl ReaderView {
             }))
             .trigger(
                 Button::new("info-trigger")
-                    .when(self.developer.reader_picker.is_some(), |button| {
-                        button.relative().block_mouse_except_scroll()
+                    .when_some(self.developer.reader_picker.as_ref(), |button, picker| {
+                        button
+                            .relative()
+                            .when(picker.active(), |button| button.block_mouse_except_scroll())
                     })
                     .children(self.developer.marker(
                         "info-trigger",

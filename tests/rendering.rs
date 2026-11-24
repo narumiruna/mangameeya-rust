@@ -1600,6 +1600,33 @@ fn capture_developer_states(cx: &mut HeadlessAppContext, temporary: &Path, folde
         );
         sender.send(vec![folder.to_path_buf()]).unwrap();
         settle(cx, reader);
+        for group in 0..7usize {
+            cx.update_window(reader, |_, w, cx| {
+                w.click(("menu", group), cx);
+                assert!(
+                    w.try_find("popup-menu").is_some_and(|menu| menu.visible()),
+                    "developer mode must not block menu {group}"
+                );
+                w.press("escape", cx);
+            })
+            .unwrap();
+            settle(cx, reader);
+        }
+        for (trigger, panel) in [
+            ("zoom-trigger", "zoom-panel"),
+            ("info-trigger", "info-panel"),
+        ] {
+            cx.update_window(reader, |_, w, cx| {
+                w.click(trigger, cx);
+                assert!(
+                    w.try_find(panel).is_some_and(|panel| panel.visible()),
+                    "developer mode must not block {trigger}"
+                );
+                w.press("escape", cx);
+            })
+            .unwrap();
+            settle(cx, reader);
+        }
         let preferences = open_preferences(cx, reader, &view);
         for (width, height) in [(560., 520.), (440., 360.)] {
             cx.update_window(preferences, |_, w, cx| {

@@ -71,6 +71,113 @@ fn pair(f: &Fixture, cx: &mut TestAppContext) -> TcpStream {
     stream
 }
 #[gpui_kit::test]
+fn developer_mode_keeps_every_menu_bar_dropdown_interactive(cx: &mut TestAppContext) {
+    let f = fixture(cx);
+    for enabled in [false, true, false] {
+        f.view
+            .update(cx, |v, cx| v.apply_developer_enabled(enabled, cx));
+        pump(&f, cx);
+        for group in 0..7usize {
+            cx.update_window(f.window, |_, window, cx| {
+                window.click(("menu", group), cx);
+                assert!(
+                    window
+                        .try_find("popup-menu")
+                        .is_some_and(|menu| menu.visible()),
+                    "menu {group} must open with developer mode {enabled}"
+                );
+                window.press("escape", cx);
+            })
+            .unwrap();
+            pump(&f, cx);
+            cx.update_window(f.window, |_, window, _| {
+                assert!(window.try_find("popup-menu").is_none());
+            })
+            .unwrap();
+        }
+    }
+}
+
+#[gpui_kit::test]
+fn developer_mode_keeps_reader_popovers_interactive(cx: &mut TestAppContext) {
+    let f = fixture(cx);
+    f.sender.send(vec![book(&f, "popovers", 2)]).unwrap();
+    pump(&f, cx);
+    enable(&f, cx);
+    for (trigger, panel) in [
+        ("zoom-trigger", "zoom-panel"),
+        ("info-trigger", "info-panel"),
+    ] {
+        cx.update_window(f.window, |_, window, cx| {
+            window.click(trigger, cx);
+            assert!(
+                window.try_find(panel).is_some_and(|panel| panel.visible()),
+                "{trigger} must open"
+            );
+            window.press("escape", cx);
+        })
+        .unwrap();
+        pump(&f, cx);
+        cx.update_window(f.window, |_, window, _| {
+            assert!(window.try_find(panel).is_none());
+        })
+        .unwrap();
+    }
+    cx.update_window(f.window, |_, window, cx| {
+        window.click(("menu", 5usize), cx);
+        let item = window
+            .within("popup-menu")
+            .find_by_label(Language::TraditionalChinese.text(Text::RotateRight));
+        let menu = window.find("popup-menu").bounds();
+        window.click_at("popup-menu", item.bounds().center() - menu.origin, cx);
+    })
+    .unwrap();
+    pump(&f, cx);
+    f.view
+        .read_with(cx, |view, _| assert_eq!(view.reader.rotation, 90));
+}
+
+#[gpui_kit::test]
+fn developer_picker_selects_popup_triggers_without_opening_them(cx: &mut TestAppContext) {
+    let f = fixture(cx);
+    f.sender.send(vec![book(&f, "popup-targets", 2)]).unwrap();
+    pump(&f, cx);
+    enable(&f, cx);
+    let mut targets: Vec<(gpui_kit::ElementId, String)> = (0..7usize)
+        .map(|group| (("menu", group).into(), format!("menu-{group}")))
+        .collect();
+    targets.extend([
+        ("zoom-trigger".into(), "zoom-trigger".into()),
+        ("info-trigger".into(), "info-trigger".into()),
+    ]);
+    for (trigger, target) in targets {
+        cx.update_window(f.window, |_, window, cx| {
+            window.click("developer-picker", cx);
+            window.click(trigger, cx);
+        })
+        .unwrap();
+        pump(&f, cx);
+        f.view.read_with(cx, |view, _| {
+            assert_eq!(
+                view.developer
+                    .selected_target()
+                    .expect("popup trigger selection")
+                    .id,
+                target
+            );
+            assert!(!view.zoom_open);
+            assert!(!view.info_open);
+        });
+        cx.update_window(f.window, |_, window, cx| {
+            assert!(window.try_find("popup-menu").is_none());
+            window.press("escape", cx);
+        })
+        .unwrap();
+        pump(&f, cx);
+    }
+}
+
+#[gpui_kit::test]
 fn developer_held_pointer_rejects_changed_state_identity_and_bounds(cx: &mut TestAppContext) {
     for change in 0..3 {
         let f = fixture(cx);

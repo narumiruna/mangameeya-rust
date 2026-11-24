@@ -248,6 +248,57 @@ fn assert_safe_target(
 }
 
 #[gpui_kit::test]
+fn developer_mode_keeps_browser_dropdowns_interactive_and_selectable(cx: &mut TestAppContext) {
+    let fixture = fixture(cx);
+    let root = book(&fixture, "dropdown-library", 1)
+        .canonicalize()
+        .unwrap();
+    let nested = root.join("one").join("two").join("three");
+    std::fs::create_dir_all(&nested).unwrap();
+    cx.update_window(fixture.window, |_, window, cx| {
+        fixture.view.update(cx, |view, cx| {
+            view.browse(nested.clone(), window, cx);
+            view.apply_developer_enabled(true, cx);
+        });
+    })
+    .unwrap();
+    pump(&fixture, cx);
+    for trigger in ["browser-ancestors", "browser-sort"] {
+        cx.update_window(fixture.window, |_, window, cx| {
+            window.click(trigger, cx);
+            assert!(window.find("popup-menu").visible(), "{trigger} must open");
+            window.press("escape", cx);
+        })
+        .unwrap();
+        pump(&fixture, cx);
+        cx.update_window(fixture.window, |_, window, _| {
+            assert!(window.try_find("popup-menu").is_none());
+        })
+        .unwrap();
+        enable_picker(&fixture, cx);
+        cx.update_window(fixture.window, |_, window, cx| window.click(trigger, cx))
+            .unwrap();
+        pump(&fixture, cx);
+        fixture.view.read_with(cx, |view, _| {
+            assert_eq!(
+                view.developer
+                    .selected_target()
+                    .expect("dropdown selection")
+                    .id,
+                trigger
+            );
+            assert_eq!(view.listing.as_ref().unwrap().path, nested);
+        });
+        cx.update_window(fixture.window, |_, window, cx| {
+            assert!(window.try_find("popup-menu").is_none());
+            window.press("escape", cx);
+        })
+        .unwrap();
+        pump(&fixture, cx);
+    }
+}
+
+#[gpui_kit::test]
 fn browser_picker_uses_anonymous_tile_identity_and_consumes_double_click(cx: &mut TestAppContext) {
     for language in Language::ALL {
         let mut settings = AppSettings::default();
