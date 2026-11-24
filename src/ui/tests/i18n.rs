@@ -412,16 +412,23 @@ fn language_selection_persists_and_is_applied_when_reopening(cx: &mut TestAppCon
     pump(&fixture, cx);
     cx.update_window(window, |_, window, cx| {
         window.render_frame(cx);
-        assert_controls(window, Language::Japanese);
         assert_eq!(
-            window.find("status-message").label(),
-            Some(Language::Japanese.text(Text::Ready))
+            window.find("browser-preview-menu").label(),
+            Some(Language::Japanese.text(Text::BrowserPreview))
+        );
+        assert_eq!(
+            window.find("browser-search").label(),
+            Some(Language::Japanese.text(Text::BrowserSearch))
         );
         assert_native_menus(cx, Language::Japanese);
     })
     .unwrap();
     fixture.sender.send(vec![folder]).unwrap();
     pump(&fixture, cx);
+    cx.update_window(window, |_, window, _| {
+        assert_controls(window, Language::Japanese)
+    })
+    .unwrap();
     fixture.view.read_with(cx, |view, _| {
         assert_eq!(view.reader.current, 2);
         assert_eq!(view.reader.settings, original);

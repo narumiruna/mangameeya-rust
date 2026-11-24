@@ -4228,6 +4228,7 @@ name = "mangameeya-rust"
 version = "0.9.0"
 dependencies = [
  "anyhow",
+ "chrono",
  "directories",
  "fs2",
  "getrandom 0.3.4",
@@ -4242,6 +4243,7 @@ dependencies = [
  "tempfile",
  "ureq",
  "url",
+ "windows-sys 0.61.2",
  "winresource",
  "zip",
 ]

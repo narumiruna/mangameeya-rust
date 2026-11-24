@@ -1,5 +1,8 @@
-//! Central file grid and bounded, static cover cache.
+//! File browser layout, navigation, and bounded static cover cache.
 
+mod details;
+
+use self::details::{BrowserFolders, DETAIL_ROW_HEIGHT};
 use super::*;
 use crate::browser::{BrowserModel, BrowserSnapshot, SortKey, columns, row_count};
 use gpui_kit::component::menu::PopupMenuItem;
@@ -159,6 +162,9 @@ pub(super) struct BrowserUi {
     pub(super) search: Entity<InputState>,
     pub(super) tile_slider: Entity<SliderState>,
     pub(super) snapshots: HashMap<PathBuf, BrowserSnapshot>,
+    pub(super) show_covers: bool,
+    show_preview: bool,
+    folders: BrowserFolders,
     tile_width: f32,
     show_names: bool,
     name_lines: usize,
@@ -222,6 +228,9 @@ impl BrowserUi {
             search,
             tile_slider,
             snapshots: HashMap::new(),
+            show_covers: false,
+            show_preview: true,
+            folders: BrowserFolders::new(),
             tile_width: 140.,
             show_names: true,
             name_lines: 2,
@@ -247,6 +256,9 @@ impl BrowserUi {
     }
 
     fn row_height(&self) -> f32 {
+        if !self.show_covers {
+            return DETAIL_ROW_HEIGHT;
+        }
         self.tile_width * 1.4
             + if self.show_names {
                 self.name_lines as f32 * 18. + 8.
@@ -323,7 +335,11 @@ impl BrowserUi {
             .saturating_mul(self.columns)
             .min(self.model.order.len())
             .max(1);
-        let (width, height) = cover_dimensions(self.tile_width, self.scale, capacity);
+        let (width, height) = if self.show_covers {
+            cover_dimensions(self.tile_width, self.scale, capacity)
+        } else {
+            cover_dimensions(420., self.scale, 1)
+        };
         CoverKey {
             path: entry.path.clone(),
             size: entry.size,
@@ -498,6 +514,36 @@ fn sort_text(sort: SortKey) -> Text {
 }
 
 impl ReaderView {
+    pub(super) fn details_browser(&self) -> bool {
+        self.content_mode == ContentMode::Browsing && !self.browser.show_covers
+    }
+
+    pub(super) fn toggle_browser_layout(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.content_mode != ContentMode::Browsing {
+            return;
+        }
+        let (anchor, _) = self.browser_anchor();
+        self.browser.show_covers = !self.browser.show_covers;
+        self.browser.columns = 1;
+        self.reset_browser_grid((anchor, 0.));
+        self.focus.focus(window, cx);
+        cx.notify();
+    }
+
+    fn browser_entry(&self, position: usize) -> Option<&book::DirectoryEntry> {
+        let index = *self.browser.model.order.get(position)?;
+        self.listing.as_ref()?.entries.get(index)
+    }
+
+    fn browser_selection(&self) -> Option<&book::DirectoryEntry> {
+        let selected = self.browser.model.selected.as_ref()?;
+        self.listing
+            .as_ref()?
+            .entries
+            .iter()
+            .find(|entry| &entry.entry_path == selected)
+    }
+
     fn browser_anchor(&self) -> (Option<PathBuf>, f32) {
         let top = self.browser.grid.logical_scroll_top();
         if let Some((path, requested)) = &self.browser.scroll_anchor
@@ -571,6 +617,7 @@ impl ReaderView {
     pub(super) fn browser_listing_changed(&mut self, cx: &mut Context<Self>) {
         self.clear_browser_covers(cx);
         self.browser.listing_revision = self.listing_revision;
+        self.browser.folders.location_changed(self.listing.as_ref());
         let snapshot = self
             .listing
             .as_ref()
@@ -633,6 +680,7 @@ impl ReaderView {
     pub(super) fn browser_refresh(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.remember_browser_location();
         self.browser.failures.clear();
+        self.browser.folders.refresh();
         self.clear_browser_covers(cx);
         self.browser.model.known_pages.clear();
         self.browser.model.shuffle();
@@ -690,16 +738,7 @@ impl ReaderView {
     }
 
     pub(super) fn browser_open(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let entry =
-            self.listing
-                .as_ref()
-                .and_then(|listing| {
-                    listing.entries.iter().find(|entry| {
-                        Some(&entry.entry_path) == self.browser.model.selected.as_ref()
-                    })
-                })
-                .cloned();
-        if let Some(entry) = entry {
+        if let Some(entry) = self.browser_selection().cloned() {
             self.remember_browser_location();
             if entry.is_directory {
                 self.browse(entry.entry_path, window, cx);
@@ -716,6 +755,9 @@ impl ReaderView {
         {
             return;
         }
+        if !self.browser.show_covers && self.reader.settings.preferences.sidebar {
+            self.browser_folders_tick(cx);
+        }
         let Some(listing) = &self.listing else {
             return;
         };
@@ -728,12 +770,31 @@ impl ReaderView {
         }
         // ListState may repaint rows without rebuilding the parent view.
         // Use its current viewport, not all previously rendered rows.
-        let positions = self.browser.request_positions();
+        let entries: Vec<_> = if self.browser.show_covers {
+            self.browser
+                .request_positions()
+                .into_iter()
+                .map(|position| &listing.entries[self.browser.model.order[position]])
+                .collect()
+        } else if self.browser.show_preview {
+            self.browser
+                .model
+                .selected
+                .iter()
+                .filter_map(|path| {
+                    listing
+                        .entries
+                        .iter()
+                        .find(|entry| &entry.entry_path == path)
+                })
+                .collect()
+        } else {
+            Vec::new()
+        };
         self.browser.clock = self.browser.clock.wrapping_add(1);
         let stamp = self.browser.clock;
         let mut requests = Vec::new();
-        for position in positions {
-            let entry = &listing.entries[self.browser.model.order[position]];
+        for entry in entries {
             let key = self.browser.cover_key(entry);
             if let Some(cover) = self.browser.covers.get_mut(&key) {
                 cover.used = stamp;
@@ -913,13 +974,7 @@ impl ReaderView {
     }
 
     fn browser_tile(&self, position: usize, cx: &mut Context<Self>) -> gpui_kit::AnyElement {
-        let Some(entry) = self.listing.as_ref().and_then(|listing| {
-            self.browser
-                .model
-                .order
-                .get(position)
-                .and_then(|&index| listing.entries.get(index))
-        }) else {
+        let Some(entry) = self.browser_entry(position) else {
             return div().into_any_element();
         };
         let key = self.browser.cover_key(entry);
@@ -1054,6 +1109,9 @@ impl ReaderView {
 
     fn browser_row(&self, row: usize, cx: &mut Context<Self>) -> gpui_kit::AnyElement {
         self.browser.visible_rows.borrow_mut().insert(row);
+        if !self.browser.show_covers {
+            return self.browser_detail_row(row, cx);
+        }
         let mut content = div().flex().gap_0().px_3().h(px(self.browser.row_height()));
         let start = row * self.browser.columns;
         let end = (start + self.browser.columns).min(self.browser.model.order.len());
@@ -1063,7 +1121,7 @@ impl ReaderView {
         content.into_any_element()
     }
 
-    fn browser_toolbar(&self, cx: &mut Context<Self>) -> impl IntoElement {
+    fn browser_toolbar(&self, cx: &mut Context<Self>) -> impl IntoElement + use<> {
         let language = self.language();
         let owner = cx.entity().downgrade();
         let compact = f32::from(self.viewer_size.width) < COMPACT_HEADER_WIDTH;
@@ -1078,7 +1136,9 @@ impl ReaderView {
             .filter(|ancestor| !ancestor.as_os_str().is_empty())
             .collect();
         ancestors.reverse();
-        let shown = if compact {
+        let shown = if self.details_browser() {
+            1
+        } else if compact {
             usize::from(ancestors.len() == 1)
         } else {
             2
@@ -1157,26 +1217,11 @@ impl ReaderView {
             .test_support()
             .aria_label(path.clone())
             .flex()
+            .when(self.details_browser(), |location| {
+                location.max_w(px(280.)).flex_shrink(1.)
+            })
             .min_w_0()
             .items_center()
-            .gap_2()
-            .child(
-                Button::new("browser-parent")
-                    .small()
-                    .ghost()
-                    .h(px(28.))
-                    .icon(IconName::ArrowUp)
-                    .when(compact, |button| button.w(px(28.)))
-                    .when(!compact, |button| {
-                        button.label(language.text(Text::ParentFolder))
-                    })
-                    .accessibility_label(language.text(Text::ParentFolder))
-                    .tooltip(path.clone())
-                    .disabled(parent.is_none())
-                    .on_click(cx.listener(move |this, _, window, cx| {
-                        this.perform(Command::BrowserBack, window, cx);
-                    })),
-            )
             .child(breadcrumbs.when_some(current, |breadcrumbs, current| {
                 breadcrumbs.child(
                     div()
@@ -1188,28 +1233,27 @@ impl ReaderView {
                                 .build(window, cx)
                         })
                         .min_w_0()
+                        .when(self.details_browser(), |crumb| {
+                            crumb.flex_none().max_w(px(110.))
+                        })
                         .text_sm()
                         .font_weight(gpui_kit::FontWeight::SEMIBOLD)
                         .truncate()
                         .child(current.clone().test_text(current)),
                 )
-            }))
-            .child(
-                div()
-                    .id("browser-results")
-                    .test_support()
-                    .aria_label(language.format(
-                        Text::BrowserResults,
-                        &[("count", self.browser.model.order.len().to_string())],
-                    ))
-                    .flex_none()
-                    .text_xs()
-                    .text_color(cx.theme().muted_foreground)
-                    .child(language.format(
-                        Text::BrowserResults,
-                        &[("count", self.browser.model.order.len().to_string())],
-                    )),
-            );
+            }));
+        let result_count = language.format(
+            Text::BrowserResults,
+            &[("count", self.browser.model.order.len().to_string())],
+        );
+        let results = div()
+            .id("browser-results")
+            .test_support()
+            .aria_label(result_count.clone())
+            .flex_none()
+            .text_xs()
+            .text_color(cx.theme().muted_foreground)
+            .child(result_count);
 
         let sort = language.text(sort_text(self.browser.model.sort));
         let descending = self.browser.model.descending;
@@ -1236,6 +1280,7 @@ impl ReaderView {
             .items_center()
             .gap_1()
             .min_w_0()
+            .when(self.details_browser(), |actions| actions.flex_1().gap_2())
             .child(
                 div().flex_1().min_w(px(76.)).max_w(px(280.)).child(
                     Input::new(&self.browser.search)
@@ -1260,11 +1305,6 @@ impl ReaderView {
                             .dropdown_caret(true)
                             .accessibility_label(sort_summary.clone())
                             .tooltip(sort_summary)
-                            .icon(if descending {
-                                IconName::ArrowDown
-                            } else {
-                                IconName::ArrowUp
-                            })
                             .label(sort)
                             .dropdown_menu(move |menu, _, cx| {
                                 if let Some(view) = owner.upgrade() {
@@ -1275,6 +1315,33 @@ impl ReaderView {
                             }),
                     ),
             )
+            .child({
+                let direction = language.text(if descending {
+                    Text::BrowserAscending
+                } else {
+                    Text::BrowserReverse
+                });
+                let label = language.format(
+                    Text::BrowserChangeSortDirection,
+                    &[("direction", direction.into())],
+                );
+                Button::new("browser-reverse")
+                    .small()
+                    .flex_none()
+                    .w(px(30.))
+                    .h(px(28.))
+                    .icon(if descending {
+                        IconName::ArrowDown
+                    } else {
+                        IconName::ArrowUp
+                    })
+                    .accessibility_label(label.clone())
+                    .tooltip(label)
+                    .on_click(cx.listener(|view, _, _, cx| {
+                        view.browser.model.descending = !view.browser.model.descending;
+                        view.rebuild_browser(cx);
+                    }))
+            })
             .when(self.browser.model.sort == SortKey::Random, |actions| {
                 actions.child(
                     Button::new("browser-shuffle")
@@ -1297,41 +1364,66 @@ impl ReaderView {
                     .ghost()
                     .h(px(28.))
                     .icon(IconName::RefreshCw)
-                    .when(compact, |button| button.w(px(28.)))
-                    .when(!compact, |button| {
+                    .when(compact || self.details_browser(), |button| {
+                        button.w(px(28.))
+                    })
+                    .when(!compact && !self.details_browser(), |button| {
                         button.label(language.text(Text::BrowserRefresh))
                     })
                     .accessibility_label(language.text(Text::BrowserRefresh))
                     .tooltip(language.text(Text::BrowserRefresh))
                     .on_click(cx.listener(|this, _, window, cx| this.browser_refresh(window, cx))),
-            )
-            .child(
-                Button::new("browser-open")
-                    .small()
-                    .primary()
-                    .ml_auto()
-                    .h(px(28.))
-                    .when(!compact, |button| button.icon(IconName::FolderOpen))
-                    .label(language.text(Text::BrowserOpenAction))
-                    .accessibility_label(language.text(Text::BrowserOpen))
-                    .tooltip(language.text(Text::BrowserOpen))
-                    .disabled(self.browser.model.selected.is_none())
-                    .on_click(cx.listener(|this, _, window, cx| this.browser_open(window, cx))),
             );
-        div()
+        let header = div()
             .id("browser-header")
             .test_support()
             .key_context("BrowserToolbar")
             .bg(cx.theme().background)
             .text_color(cx.theme().foreground)
             .flex()
-            .flex_col()
-            .gap_1()
             .px_2()
-            .py_1()
-            .flex_none()
-            .child(location)
-            .child(actions)
+            .flex_none();
+        if self.details_browser() {
+            let owner = cx.entity().downgrade();
+            let show_preview = self.browser.show_preview;
+            header
+                .h(px(48.))
+                .items_center()
+                .gap_2()
+                .border_b_1()
+                .border_color(cx.theme().border)
+                .child(location)
+                .child(actions)
+                .child(results)
+                .child(
+                    Button::new("browser-preview-menu")
+                        .small()
+                        .flex_none()
+                        .h(px(28.))
+                        .label(language.text(Text::BrowserPreview))
+                        .dropdown_caret(true)
+                        .dropdown_menu(move |menu, _, _| {
+                            let owner = owner.clone();
+                            menu.item(
+                                PopupMenuItem::new(language.text(Text::BrowserShowPreview))
+                                    .checked(show_preview)
+                                    .on_click(move |_, _, cx| {
+                                        _ = owner.update(cx, |view, cx| {
+                                            view.browser.show_preview = !view.browser.show_preview;
+                                            cx.notify();
+                                        });
+                                    }),
+                            )
+                        }),
+                )
+        } else {
+            header
+                .flex_col()
+                .gap_1()
+                .py_1()
+                .child(location.child(results))
+                .child(actions)
+        }
     }
 
     pub(super) fn render_browser(
@@ -1343,6 +1435,8 @@ impl ReaderView {
         self.browser.visible_rows.borrow_mut().clear();
         let owner = cx.entity().downgrade();
         let toolbar = self.browser_toolbar(cx);
+        let details = self.details_browser();
+        let width = f32::from(window.viewport_size().width);
         let view = owner.clone();
         let mut body = div()
             .relative()
@@ -1369,12 +1463,30 @@ impl ReaderView {
             };
             body = body.child(div().absolute().inset_0().p_4().child(language.text(text)));
         }
+        let mut panes = div().flex().flex_1().min_h_0().min_w_0();
+        if details && self.reader.settings.preferences.sidebar {
+            panes = panes.child(self.render_browser_folders(width, cx));
+        }
+        panes = panes.child(
+            div()
+                .flex()
+                .flex_col()
+                .flex_1()
+                .min_h_0()
+                .min_w_0()
+                .overflow_hidden()
+                .when(details, |table| table.child(self.browser_column_header(cx)))
+                .child(body),
+        );
+        if details && self.browser.show_preview {
+            panes = panes.child(self.render_browser_preview(width, cx));
+        }
         let mut content = div()
             .size_full()
             .flex()
             .flex_col()
             .child(toolbar)
-            .child(body);
+            .child(panes);
         if let Some(error) = &self.listing_error {
             content = content.child(
                 div()
@@ -1394,8 +1506,10 @@ impl ReaderView {
             .min_w_0()
             .min_h_0()
             .h_full()
-            .bg(gpui_kit::rgb(0x000000))
-            .text_color(gpui_kit::rgb(0xe4e4e7))
+            .when(!details, |grid| {
+                grid.bg(gpui_kit::rgb(0x000000))
+                    .text_color(gpui_kit::rgb(0xe4e4e7))
+            })
             .overflow_hidden()
             .child(content)
             .child(
@@ -1416,10 +1530,14 @@ impl ReaderView {
                                 {
                                     cx.notify();
                                 }
-                                let new_columns = columns(
-                                    (f32::from(bounds.size.width) - 24.).max(1.),
-                                    this.browser.tile_width + TILE_GAP,
-                                );
+                                let new_columns = if this.browser.show_covers {
+                                    columns(
+                                        (f32::from(bounds.size.width) - 24.).max(1.),
+                                        this.browser.tile_width + TILE_GAP,
+                                    )
+                                } else {
+                                    1
+                                };
                                 if new_columns != this.browser.columns {
                                     let anchor = this.browser_anchor();
                                     this.browser.columns = new_columns;

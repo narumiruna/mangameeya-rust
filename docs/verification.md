@@ -633,7 +633,19 @@ Its unresolved external checks are retained below before plan removal.
   result: a visual and usability assessment. Automated geometry and pixel tests do not
   establish subjective product acceptance. This review adds no coding or release gate.
 
-## Integrated central file browser
+## Details file browser
+
+The default browser uses a folder tree, details list, and selected-item preview.
+Use **View → Cover grid** to run the older cover-grid checks below. Both layouts
+use a separate sort-direction button and open items with `Enter` or a double-click.
+
+Run `cargo test --locked --lib details_browser` to check the three-pane layout at
+800×540, 960×640, and 1280×800, sort direction, folder navigation, preview toggling,
+and returning from reading. The `browser_capture` example captures the default
+Details layout on Windows and macOS; `cargo test --locked --test rendering` still
+checks the optional cover grid and reading workspace.
+
+## Integrated central file browser (cover grid)
 
 Implementation started from `1534c3e` on `narumi/feat/integrated-file-browser`.
 The execution plan `docs/plans/2026-11-08_integrated-file-browser-plan.md` was completed

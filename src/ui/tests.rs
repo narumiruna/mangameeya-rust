@@ -28,6 +28,14 @@ fn fixture(cx: &mut TestAppContext) -> Fixture {
 }
 
 fn fixture_with_settings(cx: &mut TestAppContext, settings: AppSettings) -> Fixture {
+    fixture_with_browser_layout(cx, settings, true)
+}
+
+fn fixture_with_browser_layout(
+    cx: &mut TestAppContext,
+    settings: AppSettings,
+    show_covers: bool,
+) -> Fixture {
     cx.update(init);
     let directory = tempfile::tempdir().unwrap();
     let path = directory.path().join("settings.json");
@@ -43,7 +51,12 @@ fn fixture_with_settings(cx: &mut TestAppContext, settings: AppSettings) -> Fixt
             },
             cx,
             |window, cx| {
-                cx.new(|cx| ReaderView::new(settings, path, None, None, launches, window, cx))
+                cx.new(|cx| {
+                    let mut view =
+                        ReaderView::new(settings, path, None, None, launches, window, cx);
+                    view.browser.show_covers = show_covers;
+                    view
+                })
             },
         )
         .unwrap()

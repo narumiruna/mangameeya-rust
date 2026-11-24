@@ -5,12 +5,11 @@ use crate::{book::DirectoryEntry, browser::SortKey};
 use gpui_kit::{Modifiers, PlatformInput, ScrollDelta, ScrollEvent, test::TestQueryExt};
 
 const SIZES: [(f32, f32); 3] = [(1280., 800.), (960., 640.), (800., 540.)];
-const BROWSER_CONTROLS: [&str; 5] = [
+const BROWSER_CONTROLS: [&str; 4] = [
     "browser-search",
-    "browser-parent",
     "browser-sort",
     "browser-refresh",
-    "browser-open",
+    "browser-reverse",
 ];
 
 fn press(fixture: &Fixture, key: &str, cx: &mut TestAppContext) {
@@ -187,15 +186,14 @@ fn assert_browser_geometry(window: &Window) {
     let location = window.find("browser-location").bounds();
     let actions = window.find("browser-actions").bounds();
     let search = window.find("browser-search").bounds();
-    let open = window.find("browser-open").bounds();
     assert!(location.bottom() <= actions.top());
     assert!((search.center().y - actions.center().y).abs() < px(1.));
-    assert!((open.right() - actions.right()).abs() < px(1.));
     assert!(search.size.width >= px(76.) && search.size.width <= px(280.));
-    for id in ["browser-parent", "browser-breadcrumbs", "browser-results"] {
+    for id in ["browser-breadcrumbs", "browser-results"] {
         inside(window.find(id).bounds(), location);
     }
-    assert!(window.try_find("browser-reverse").is_none());
+    assert!(window.try_find("browser-parent").is_none());
+    assert!(window.try_find("browser-open").is_none());
     assert!(window.try_find("browser-folders-first").is_none());
     let toolbar = window.find("reader-toolbar").bounds();
     let toggle = window.find("browser-toggle");
@@ -225,6 +223,182 @@ fn assert_browser_geometry(window: &Window) {
 }
 
 #[gpui_kit::test]
+fn details_browser_aligns_toolbar_and_panes_and_sorts_with_a_separate_button(
+    cx: &mut TestAppContext,
+) {
+    let fixture = fixture_with_browser_layout(cx, AppSettings::default(), false);
+    let folder = book(&fixture, "details", 3).canonicalize().unwrap();
+    browse(&fixture, &folder, cx);
+    for (width, height) in SIZES {
+        cx.update_window(fixture.window, |_, window, cx| {
+            window.resize(size(px(width), px(height)));
+            window.bounds_changed(cx);
+            window.render_frame(cx);
+            let viewport = Bounds::new(Default::default(), window.viewport_size());
+            let header = window.find("browser-header").bounds();
+            let table = window.find("browser-grid").bounds();
+            let folders = window.find("browser-folders").bounds();
+            let preview = window.find("browser-preview").bounds();
+            let columns = window.find("browser-columns").bounds();
+            for bounds in [header, table, folders, preview, columns] {
+                inside(bounds, viewport);
+            }
+            assert!(folders.right() <= table.left() && table.right() <= preview.left());
+            assert_eq!(header.bottom(), folders.top());
+            assert_eq!(columns.left(), table.left());
+            assert_eq!(columns.bottom(), table.top());
+            assert!(window.try_find("reader-toolbar").is_none());
+            assert!(window.try_find("browser-open").is_none());
+            assert!(window.try_find("browser-parent").is_none());
+            let controls = [
+                "browser-search",
+                "browser-sort",
+                "browser-reverse",
+                "browser-refresh",
+                "browser-results",
+                "browser-preview-menu",
+            ];
+            for (index, id) in controls.into_iter().enumerate() {
+                let bounds = window.find(id).bounds();
+                inside(bounds, header);
+                for next in &controls[index + 1..] {
+                    disjoint(bounds, window.find(*next).bounds());
+                }
+            }
+        })
+        .unwrap();
+    }
+    choose_sort_option(&fixture, Text::BrowserSortName, cx);
+    let reverse = |cx: &mut TestAppContext| {
+        cx.update_window(fixture.window, |_, window, cx| {
+            window.click("browser-reverse", cx)
+        })
+        .unwrap();
+        pump(&fixture, cx);
+    };
+    reverse(cx);
+    fixture.view.read_with(cx, |view, _| {
+        assert_eq!(view.browser.model.sort, SortKey::Name);
+        assert!(view.browser.model.descending);
+        assert_eq!(ordered_paths(view)[0], folder.join("3.png"));
+    });
+    reverse(cx);
+    fixture.view.read_with(cx, |view, _| {
+        assert!(!view.browser.model.descending);
+        assert_eq!(ordered_paths(view)[0], folder.join("1.png"));
+    });
+}
+
+#[gpui_kit::test]
+fn details_browser_previews_selection_and_navigates_folders_without_open_buttons(
+    cx: &mut TestAppContext,
+) {
+    let fixture = fixture_with_browser_layout(cx, AppSettings::default(), false);
+    let folder = book(&fixture, "preview-source", 2).canonicalize().unwrap();
+    let sibling = book(&fixture, "preview-sibling", 1).canonicalize().unwrap();
+    browse(&fixture, &folder, cx);
+    cx.update_window(fixture.window, |_, window, cx| {
+        window.click(entry_id(&folder.join("2.png")), cx);
+    })
+    .unwrap();
+    pump(&fixture, cx);
+    cx.update_window(fixture.window, |_, window, cx| {
+        assert_eq!(window.find("browser-preview-title").label(), Some("2"));
+        assert_eq!(
+            window.find("browser-preview-cover").label(),
+            Some("Cover ready")
+        );
+        assert!(
+            window
+                .find("status-message")
+                .label()
+                .unwrap()
+                .starts_with("1 item selected (")
+        );
+        assert_eq!(
+            window.find("browser-status-path").label(),
+            Some(crate::file_tree::display_path(&folder).as_str())
+        );
+        window.click("browser-preview-menu", cx);
+        click_menu_item(window, "Show preview pane", cx);
+        assert!(window.try_find("browser-preview").is_none());
+        let id = window
+            .within("browser-folders")
+            .find_by_label("preview-sibling")
+            .path()
+            .last()
+            .unwrap()
+            .clone();
+        window.click(id, cx);
+    })
+    .unwrap();
+    pump(&fixture, cx);
+    fixture.view.read_with(cx, |view, _| {
+        assert_eq!(view.listing.as_ref().unwrap().path, sibling)
+    });
+    cx.update_window(fixture.window, |_, window, cx| {
+        window.click("browser-preview-menu", cx);
+        click_menu_item(window, "Show preview pane", cx);
+        window.double_click(entry_id(&sibling.join("1.png")), cx);
+    })
+    .unwrap();
+    pump(&fixture, cx);
+    fixture.view.read_with(cx, |view, _| {
+        assert_eq!(view.content_mode, ContentMode::Reading)
+    });
+    press(&fixture, "backspace", cx);
+    cx.update_window(fixture.window, |_, window, _| {
+        assert!(window.find("browser-preview").visible());
+        assert_eq!(
+            window.find(entry_id(&sibling.join("1.png"))).checked(),
+            Some(true)
+        );
+    })
+    .unwrap();
+}
+
+#[gpui_kit::test]
+fn details_browser_reads_only_the_selected_cover_and_shows_known_progress(cx: &mut TestAppContext) {
+    use std::io::Write;
+    let fixture = fixture_with_browser_layout(cx, AppSettings::default(), false);
+    let folder = book(&fixture, "covers", 2).canonicalize().unwrap();
+    let archive = folder.join("0.cbz");
+    let mut zip = zip::ZipWriter::new(std::fs::File::create(&archive).unwrap());
+    for name in ["1.png", "2.png"] {
+        zip.start_file(name, zip::write::SimpleFileOptions::default())
+            .unwrap();
+        zip.write_all(&std::fs::read(folder.join(name)).unwrap())
+            .unwrap();
+    }
+    zip.finish().unwrap();
+    fixture.view.update(cx, |view, _| {
+        view.reader.settings.positions.insert(archive.clone(), 0);
+    });
+    browse(&fixture, &folder, cx);
+    fixture
+        .view
+        .read_with(cx, |view, _| assert_eq!(view.browser.cache_count(), 1));
+    cx.update_window(fixture.window, |_, window, cx| {
+        assert_eq!(
+            window.find("browser-preview-metadata").label(),
+            Some("CBZ · Pages: 2")
+        );
+        assert_eq!(
+            window.find("browser-preview-progress").label(),
+            Some("Read 50%")
+        );
+        window.click("browser-preview-menu", cx);
+        click_menu_item(window, "Show preview pane", cx);
+        window.click(entry_id(&folder.join("1.png")), cx);
+    })
+    .unwrap();
+    pump(&fixture, cx);
+    fixture
+        .view
+        .read_with(cx, |view, _| assert_eq!(view.browser.cache_count(), 1));
+}
+
+#[gpui_kit::test]
 fn browser_locations_and_tooltips_hide_verbatim_prefixes_without_changing_paths(
     cx: &mut TestAppContext,
 ) {
@@ -245,10 +419,6 @@ fn browser_locations_and_tooltips_hide_verbatim_prefixes_without_changing_paths(
             let display = display.to_string_lossy();
             assert_eq!(
                 window.find("browser-location").label(),
-                Some(display.as_ref())
-            );
-            assert_eq!(
-                window.find("browser-parent").description(),
                 Some(display.as_ref())
             );
             let entry = window.find(entry_id(&entry_path));
@@ -860,10 +1030,6 @@ fn arrows_home_end_and_enter_follow_grid_order_and_parent_stops_at_filesystem_ro
         assert_eq!(view.listing_revision, revision);
         assert_eq!(view.listing.as_ref().unwrap().path, root);
     });
-    cx.update_window(fixture.window, |_, window, _| {
-        assert_eq!(window.find("browser-parent").disabled(), Some(true))
-    })
-    .unwrap();
 }
 
 #[gpui_kit::test]

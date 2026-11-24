@@ -104,6 +104,7 @@ enum Command {
     BrowserAscending,
     BrowserDescending,
     BrowserToggleFoldersFirst,
+    BrowserToggleLayout,
 }
 
 impl Command {
@@ -1454,6 +1455,7 @@ impl ReaderView {
                     self.browser_refresh(window, cx);
                 }
             }
+            BrowserToggleLayout => self.toggle_browser_layout(window, cx),
             BrowserAscending | BrowserDescending | BrowserToggleFoldersFirst => {
                 if self.content_mode == ContentMode::Browsing {
                     if command == BrowserToggleFoldersFirst {
@@ -2122,6 +2124,15 @@ impl ReaderView {
                     Box::new(ContinueReading),
                     self.reader.book.is_none(),
                 )
+                .menu_with_disabled(
+                    language.text(if self.browser.show_covers {
+                        Text::BrowserDetails
+                    } else {
+                        Text::BrowserCovers
+                    }),
+                    Box::new(BrowserToggleLayout),
+                    self.content_mode != ContentMode::Browsing,
+                )
                 .separator()
                 .menu_with_check(
                     language.text(Text::ShowSidebar),
@@ -2410,6 +2421,18 @@ impl ReaderView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> gpui_kit::AnyElement {
+        if self.details_browser() {
+            return div()
+                .id("reader-workspace")
+                .test_support()
+                .role(gpui_kit::Role::Group)
+                .flex()
+                .flex_1()
+                .min_h_0()
+                .min_w_0()
+                .child(self.render_browser(window, cx))
+                .into_any_element();
+        }
         let width = f32::from(window.viewport_size().width);
         let prefs = &self.reader.settings.preferences;
         let left_visible = prefs.sidebar;
@@ -2587,6 +2610,9 @@ impl ReaderView {
                         }
                     }),
             );
+        }
+        if self.details_browser() {
+            return menus.flex_none().into_any_element();
         }
         let opened = self.reader.book.is_some() && self.content_mode == ContentMode::Reading;
         let mut modes = div()
@@ -3892,7 +3918,11 @@ impl Render for ReaderView {
             .child(self.render_chrome(window.viewport_size().width < px(1200.), cx))
             .child(self.render_release_notice(cx))
             .child(workspace)
-            .child(self.render_status(cx))
+            .child(if self.details_browser() {
+                self.render_browser_status(cx)
+            } else {
+                self.render_status(cx)
+            })
             .when(
                 self.pending_drop.is_some() && cx.has_active_drag(),
                 |root| {

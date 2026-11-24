@@ -7,7 +7,7 @@ mod browser_visual;
 use gpui_kit::{
     AnyWindowHandle, AppContext, Bounds, Entity, HeadlessAppContext, Modifiers, OwnedMenuItem,
     PlatformInput, ScrollDelta, ScrollEvent, Window, WindowBounds, WindowOptions, point, px, size,
-    test::TestWindowExt,
+    test::{TestQueryExt, TestWindowExt},
 };
 use mangameeya_rust::{
     i18n::{Language, Text},
@@ -1085,12 +1085,12 @@ fn browser_controls_in_bounds(window: &Window, language: Language) {
     let central = window.find("viewer").bounds();
     let grid = window.find("browser-grid").bounds();
     assert!(contains_bounds(central, grid));
+    assert!(window.try_find("browser-parent").is_none());
     let ids = [
         "browser-search",
-        "browser-parent",
         "browser-sort",
         "browser-refresh",
-        "browser-open",
+        "browser-reverse",
     ];
     for (index, id) in ids.iter().enumerate() {
         let control = window.find(*id);
@@ -1586,7 +1586,8 @@ fn open_reader_fixture(
     warning: Option<String>,
     launches: mpsc::Receiver<Vec<PathBuf>>,
 ) -> (AnyWindowHandle, Entity<ReaderView>) {
-    cx.update(|cx| {
+    let language = settings.preferences.language;
+    let result = cx.update(|cx| {
         gpui_kit::open_window(
             WindowOptions {
                 window_bounds: Some(WindowBounds::Windowed(Bounds::new(
@@ -1605,7 +1606,20 @@ fn open_reader_fixture(
             },
         )
         .unwrap()
+    });
+    cx.update_window(result.0, |_, window, cx| {
+        window.render_frame(cx);
+        window.click(("menu", 1usize), cx);
+        let item = window
+            .find_by_label(language.text(Text::BrowserCovers))
+            .path()
+            .last()
+            .unwrap()
+            .clone();
+        window.click(item, cx);
     })
+    .unwrap();
+    result
 }
 
 fn main() {

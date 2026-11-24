@@ -419,7 +419,12 @@ fn desktop_panels_resize_independently_persist_and_restore_in_a_new_view(cx: &mu
             },
             cx,
             |window, cx| {
-                cx.new(|cx| ReaderView::new(saved, settings_path, None, None, launches, window, cx))
+                cx.new(|cx| {
+                    let mut view =
+                        ReaderView::new(saved, settings_path, None, None, launches, window, cx);
+                    view.browser.show_covers = true;
+                    view
+                })
             },
         )
         .unwrap()

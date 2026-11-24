@@ -399,7 +399,7 @@ pub(super) fn capture(cx: &mut HeadlessAppContext, temporary: &Path) {
     settle(cx, reader);
     search(cx, reader, "No matching synthetic book exists");
     cx.update_window(reader, |_, window, _| {
-        assert_eq!(window.find("browser-open").disabled(), Some(true))
+        assert!(window.try_find("browser-open").is_none())
     })
     .unwrap();
     snapshot(cx, reader, "browser-parity-empty-disabled");

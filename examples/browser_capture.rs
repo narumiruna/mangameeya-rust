@@ -19,13 +19,12 @@ use anyhow::{Context, Result};
 use browser_fixture::BrowserFixture;
 #[cfg(any(target_os = "macos", target_os = "windows"))]
 use gpui_kit::{
-    AppContext, Bounds, Window, WindowBounds, WindowOptions, px, size,
-    test::{TestQueryExt, TestWindowExt},
+    AppContext, Bounds, Window, WindowBounds, WindowOptions, px, size, test::TestWindowExt,
 };
 #[cfg(any(target_os = "macos", target_os = "windows"))]
 use mangameeya_rust::{
     i18n::Language,
-    settings::{AppSettings, SidebarMode},
+    settings::AppSettings,
     ui::{self, ReaderAssets, ReaderView},
 };
 use serde_json::{Value, json};
@@ -66,7 +65,7 @@ fn main() -> Result<()> {
         })).collect::<Vec<_>>(),
         "notes": [
             "Only synthetic sources and isolated settings are used.",
-            "ReaderView initially lists home internally. No initial-home frame is captured; Recent is prepopulated with only the synthetic source.",
+            "ReaderView initially lists home internally. No initial-home frame is captured.",
             "The baseline rejects the valid >64 MiB classic ZIP; the approved P1 reader is expected to support it.",
             "Unsupported paths include empty and nested-only folders without shallow images.",
             "Fixed settling time is not a cold/warm performance measurement."
@@ -132,12 +131,9 @@ fn save_report(output: &Path, report: &Value) -> Result<()> {
 }
 
 #[cfg(any(target_os = "macos", target_os = "windows"))]
-fn settings(source: &Path) -> AppSettings {
+fn settings() -> AppSettings {
     let mut settings = AppSettings::default();
     settings.preferences.language = Language::TraditionalChinese;
-    // Do not render the Files tree, which the constructor initially points at home.
-    settings.preferences.sidebar_mode = SidebarMode::Recent;
-    settings.recent.push(source.to_path_buf());
     settings
 }
 
@@ -152,15 +148,6 @@ fn options() -> WindowOptions {
         focus: true,
         ..Default::default()
     }
-}
-
-// Use a generic source label, not browser toolbar IDs that changed in the plan.
-#[cfg(any(target_os = "macos", target_os = "windows"))]
-fn launch_source(window: &mut Window, cx: &mut gpui_kit::App, source: &Path) {
-    window.render_frame(cx);
-    let label = source.file_name().unwrap().to_string_lossy();
-    let id = window.find_by_label(&label).path().last().unwrap().clone();
-    window.click(id, cx);
 }
 
 #[cfg(any(target_os = "macos", target_os = "windows"))]
@@ -204,12 +191,13 @@ fn capture(output: &Path, fixture: &BrowserFixture, report: &mut Value) -> Resul
         gpui_kit::platform::current_headless_renderer,
     );
     cx.update(ui::init);
-    let (_sender, launches) = mpsc::channel();
+    let (sender, launches) = mpsc::channel();
+    sender.send(vec![fixture.source.clone()])?;
     let (reader, _view) = cx.update(|cx| {
         gpui_kit::open_window(options(), cx, |window, cx| {
             cx.new(|cx| {
                 ReaderView::new(
-                    settings(&fixture.source),
+                    settings(),
                     output.join("settings.json"),
                     None,
                     None,
@@ -228,12 +216,6 @@ fn capture(output: &Path, fixture: &BrowserFixture, report: &mut Value) -> Resul
         }
         Ok(())
     };
-    // Open the preloaded synthetic Recent item before advancing the clock or
-    // polling background work. Otherwise the initial home listing can dispatch
-    // cover reads even while its Files tree is hidden.
-    cx.update_window(reader, |_, window, cx| {
-        launch_source(window, cx, &fixture.source)
-    })?;
     settle(&mut cx)?;
     cx.update_window(reader, |_, window, cx| enter_browser(window, cx))??;
     settle(&mut cx)?;
@@ -285,11 +267,12 @@ fn capture(output: &Path, fixture: &BrowserFixture, report: &mut Value) -> Resul
         .with_assets(ReaderAssets)
         .run(move |cx| {
             ui::init(cx);
-            let (_sender, launches) = mpsc::channel();
+            let (sender, launches) = mpsc::channel();
+            sender.send(vec![source.clone()]).unwrap();
             let (reader, _view) = gpui_kit::open_window(options(), cx, |window, cx| {
                 cx.new(|cx| {
                     ReaderView::new(
-                        settings(&source),
+                        settings(),
                         output.join("settings.json"),
                         None,
                         None,
@@ -300,8 +283,6 @@ fn capture(output: &Path, fixture: &BrowserFixture, report: &mut Value) -> Resul
                 })
             })
             .expect("Cannot create synthetic capture window");
-            cx.update_window(reader, |_, window, cx| launch_source(window, cx, &source))
-                .unwrap();
             cx.spawn(async move |cx| {
                 cx.background_executor().timer(Duration::from_secs(2)).await;
                 let ready = cx
