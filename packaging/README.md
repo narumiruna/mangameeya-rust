@@ -176,19 +176,24 @@ missing Releases. These assets remain unsigned on Windows and ad-hoc signed, wit
 notarization, on macOS. This workflow does not provide trusted signing credentials
 or bypass platform download warnings.
 
-### Required repository secret
+### Release authentication
 
-In **Settings > Secrets and variables > Actions**, add a repository secret named
-`PAT_TOKEN`. Use a fine-grained personal access token for this repository with
-**Contents: Read and write** and **Pull requests: Read and write**. The token owner
-must have the required repository access, and repository rules must allow the token
-owner to update the managed release branch and create release tags.
+The workflow prefers the `PAT_TOKEN` repository secret for release PR management,
+publication, and package uploads. If the secret is not set, it uses the built-in
+`GITHUB_TOKEN`. An expired token or an authorization error does not trigger fallback.
+Release selection and native checks always use the built-in token with read-only access.
 
-The workflow uses `PAT_TOKEN` to manage the release PR, publish the tag and GitHub
-Release, and upload packages. Release selection and native checks still use the
-built-in `GITHUB_TOKEN` with read-only access. PRs created or updated with `PAT_TOKEN`
-can trigger workflows configured for those events. The release flow still validates
-the exact release commit before publication.
+1. **With `PAT_TOKEN`:** Add a repository secret in **Settings > Secrets and variables
+   > Actions**. Use a fine-grained personal access token for this repository with
+   **Contents: Read and write** and **Pull requests: Read and write**. PR events from
+   this token can trigger workflows configured for those events.
+2. **With `GITHUB_TOKEN`:** In **Settings > Actions > General > Workflow permissions**,
+   enable **Allow GitHub Actions to create and approve pull requests** for PR
+   management. Checks on the generated PR may require manual approval or a manual
+   run of **Native checks and packages** on the managed branch.
+
+In either case, repository rules must allow updates to the managed branch and creation
+of release tags. The release workflow validates the exact release commit before publication.
 
 ### Manual operation and recovery
 

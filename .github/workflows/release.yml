@@ -25,6 +25,9 @@ jobs:
     concurrency:
       group: changenote-release-pr-main
       cancel-in-progress: false
+    permissions:
+      contents: write
+      pull-requests: write
     steps:
       - uses: actions/checkout@v5
         with:
@@ -32,7 +35,7 @@ jobs:
       - uses: narumiruna/changenote/release@f4423760122463bf03a8d161c6f0bc4173afb6e0 # v0.10.0
         with:
           operation: manage-pr
-          github-token: ${{ secrets.PAT_TOKEN }}
+          github-token: ${{ secrets.PAT_TOKEN || github.token }}
           base-branch: main
           rust-toolchain: ${{ env.CHANGENOTE_RUST_TOOLCHAIN }}
           commit-message: 'chore(release): version MangaMeeya Rust'
@@ -73,6 +76,8 @@ jobs:
     concurrency:
       group: changenote-publication-main
       cancel-in-progress: false
+    permissions:
+      contents: write
     outputs:
       release-commit: ${{ steps.publish.outputs.release-commit }}
       releases: ${{ steps.publish.outputs.releases }}
@@ -85,7 +90,7 @@ jobs:
         id: publish
         with:
           operation: publish
-          github-token: ${{ secrets.PAT_TOKEN }}
+          github-token: ${{ secrets.PAT_TOKEN || github.token }}
           base-branch: main
           expected-release-commit: ${{ needs.select.outputs.release-commit }}
           rust-toolchain: ${{ env.CHANGENOTE_RUST_TOOLCHAIN }}
@@ -99,7 +104,7 @@ jobs:
       group: changenote-assets-main
       cancel-in-progress: false
     permissions:
-      contents: read
+      contents: write
       actions: read
     steps:
       - uses: actions/checkout@v5
@@ -114,7 +119,7 @@ jobs:
           path: release-assets
       - name: Upload missing native release packages
         env:
-          GH_TOKEN: ${{ secrets.PAT_TOKEN }}
+          GH_TOKEN: ${{ secrets.PAT_TOKEN || github.token }}
           GH_REPO: ${{ github.repository }}
           RELEASE_COMMIT: ${{ needs.publish.outputs.release-commit }}
           RELEASES: ${{ needs.publish.outputs.releases }}
