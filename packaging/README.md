@@ -156,9 +156,8 @@ Publication waits for all checks and native packages for the selected commit.
 Changenote verifies the generated release tree and receives that exact commit through
 `expected-release-commit`. If a newer batch replaces it before publication, the run
 fails rather than publishing another commit. Release text comes from the validated
-changelog. Tags and existing release text are not replaced. All required publication
-steps stay in this workflow because tags created with `GITHUB_TOKEN` do not trigger
-other workflows.
+changelog. Tags and existing release text are not replaced. The same workflow uploads
+the packages; it does not rely on a separate tag or release trigger.
 
 The asset job downloads only the three native-package artifacts from the same run,
 not the UI captures. It verifies the tag's commit and all five nonempty files before
@@ -177,20 +176,19 @@ missing Releases. These assets remain unsigned on Windows and ad-hoc signed, wit
 notarization, on macOS. This workflow does not provide trusted signing credentials
 or bypass platform download warnings.
 
-### Required repository setting
+### Required repository secret
 
-A repository administrator must enable **Settings > Actions > General > Workflow
-permissions > Allow GitHub Actions to create and approve pull requests**. The setting
-was disabled when this integration was prepared. Branch rules must also allow the
-managed release branch. The workflow gives only PR management `pull-requests: write`;
-selection and native builds use read access, while publication and asset upload need
-`contents: write`. No personal token is required by the configured flow.
+In **Settings > Secrets and variables > Actions**, add a repository secret named
+`PAT_TOKEN`. Use a fine-grained personal access token for this repository with
+**Contents: Read and write** and **Pull requests: Read and write**. The token owner
+must have the required repository access, and repository rules must allow the token
+owner to update the managed release branch and create release tags.
 
-PRs created with the default `GITHUB_TOKEN` do not start PR workflows automatically.
-The release flow still runs exact-commit native checks before publication. If branch
-rules require checks on the managed PR before merge, run **Native checks and packages**
-manually on that PR branch, or have the repository owner configure an appropriate
-GitHub App token. This integration does not change branch rules or create secrets.
+The workflow uses `PAT_TOKEN` to manage the release PR, publish the tag and GitHub
+Release, and upload packages. Release selection and native checks still use the
+built-in `GITHUB_TOKEN` with read-only access. PRs created or updated with `PAT_TOKEN`
+can trigger workflows configured for those events. The release flow still validates
+the exact release commit before publication.
 
 ### Manual operation and recovery
 
