@@ -19,7 +19,11 @@ fn pick_open(f: &Fixture, cx: &mut TestAppContext) {
         .unwrap();
     pump(f, cx);
 }
-fn wait_for(f: &Fixture, cx: &mut TestAppContext, predicate: impl Fn(&ReaderView) -> bool) {
+pub(super) fn wait_for(
+    f: &Fixture,
+    cx: &mut TestAppContext,
+    predicate: impl Fn(&ReaderView) -> bool,
+) {
     let deadline = Instant::now() + Duration::from_secs(3);
     loop {
         pump(f, cx);
@@ -49,7 +53,7 @@ fn read_frame(stream: &mut TcpStream) -> serde_json::Value {
     stream.read_exact(&mut bytes).unwrap();
     serde_json::from_slice(&bytes).unwrap()
 }
-fn pair(f: &Fixture, cx: &mut TestAppContext) -> TcpStream {
+pub(super) fn pair(f: &Fixture, cx: &mut TestAppContext) -> TcpStream {
     let command = f.view.read_with(cx, |v, _| {
         v.developer
             .service
@@ -58,6 +62,9 @@ fn pair(f: &Fixture, cx: &mut TestAppContext) -> TcpStream {
             .connection_command()
             .unwrap()
     });
+    pair_command(&command)
+}
+fn pair_command(command: &str) -> TcpStream {
     let parts: Vec<_> = command.split_whitespace().collect();
     let mut stream = TcpStream::connect(("127.0.0.1", parts[1].parse::<u16>().unwrap())).unwrap();
     stream
@@ -71,9 +78,55 @@ fn pair(f: &Fixture, cx: &mut TestAppContext) -> TcpStream {
     stream
 }
 #[gpui_kit::test]
+fn developer_icon_copies_connection_command_until_paired(cx: &mut TestAppContext) {
+    let f = fixture(cx);
+    enable(&f, cx);
+    let copy_command = |cx: &mut TestAppContext| {
+        cx.update_window(f.window, |_, window, cx| {
+            assert_eq!(
+                window.find("developer-picker").label(),
+                Some(Language::TraditionalChinese.text(Text::DeveloperCopy))
+            );
+            window.click("developer-picker", cx);
+        })
+        .unwrap();
+        pump(&f, cx);
+        f.view.read_with(cx, |view, _| {
+            assert_eq!(view.developer.status, Some(Text::DeveloperCopied));
+            assert!(!view.developer.busy());
+            assert!(view.developer.selected_target().is_none());
+        });
+        let command = cx.update(|cx| cx.read_from_clipboard().unwrap().text().unwrap());
+        assert!(command.starts_with("/mangameeya-connect "));
+        command
+    };
+    let command = copy_command(cx);
+    let connection = pair_command(&command);
+    pump(&f, cx);
+    pick_open(&f, cx);
+    f.view.read_with(cx, |view, _| {
+        assert_eq!(view.developer.selected_target().unwrap().id, "open");
+    });
+    assert_eq!(
+        cx.update(|cx| cx.read_from_clipboard().unwrap().text().unwrap()),
+        command,
+        "paired selection must not replace the clipboard"
+    );
+    cx.update_window(f.window, |_, window, cx| window.press("escape", cx))
+        .unwrap();
+    drop(connection);
+    wait_for(&f, cx, |view| {
+        view.developer.state_text() == Text::DeveloperWaiting
+    });
+    assert_ne!(copy_command(cx), command);
+}
+
+#[gpui_kit::test]
 fn developer_picker_is_icon_only_across_sizes_and_locales(cx: &mut TestAppContext) {
     let f = fixture(cx);
     enable(&f, cx);
+    let _connection = pair(&f, cx);
+    pump(&f, cx);
     for language in Language::ALL {
         for (width, height) in [(1280., 800.), (960., 640.), (800., 540.)] {
             cx.update_window(f.window, |_, window, cx| {
@@ -181,6 +234,8 @@ fn developer_picker_selects_popup_triggers_without_opening_them(cx: &mut TestApp
     f.sender.send(vec![book(&f, "popup-targets", 2)]).unwrap();
     pump(&f, cx);
     enable(&f, cx);
+    let _connection = pair(&f, cx);
+    pump(&f, cx);
     let mut targets: Vec<(gpui_kit::ElementId, String)> = (0..7usize)
         .map(|group| (("menu", group).into(), format!("menu-{group}")))
         .collect();
@@ -220,6 +275,8 @@ fn developer_held_pointer_rejects_changed_state_identity_and_bounds(cx: &mut Tes
     for change in 0..3 {
         let f = fixture(cx);
         enable(&f, cx);
+        let _connection = pair(&f, cx);
+        pump(&f, cx);
         cx.update_window(f.window, |_, w, cx| w.click("developer-picker", cx))
             .unwrap();
         pump(&f, cx);
@@ -386,6 +443,8 @@ fn developer_preferences_close_cancels_picker_without_stopping_service(cx: &mut 
 fn developer_disable_clears_capture_and_restores_focus(cx: &mut TestAppContext) {
     let f = fixture(cx);
     enable(&f, cx);
+    let _connection = pair(&f, cx);
+    pump(&f, cx);
     f.view.read_with(cx, |v, _| {
         v.developer_log(
             crate::developer::Target::Navigation,
@@ -479,6 +538,8 @@ fn developer_preferences_native_close_warns_and_cancel_preserves_draft(cx: &mut 
 fn developer_reader_close_warns_and_cancel_preserves_draft(cx: &mut TestAppContext) {
     let f = fixture(cx);
     enable(&f, cx);
+    let _connection = pair(&f, cx);
+    pump(&f, cx);
     pick_open(&f, cx);
     cx.update_window(f.window, |_, w, cx| {
         w.click("developer-feedback-input", cx);
@@ -705,6 +766,8 @@ fn developer_submitted_text_is_frozen_until_definite_failure(cx: &mut TestAppCon
 fn developer_picker_freezes_safe_target_without_original_action(cx: &mut TestAppContext) {
     let f = fixture(cx);
     enable(&f, cx);
+    let _connection = pair(&f, cx);
+    pump(&f, cx);
     pick_open(&f, cx);
     f.view.read_with(cx, |v, _| {
         let target = v
@@ -806,7 +869,12 @@ fn developer_bridge_feedback_handoff_is_not_reported_as_completion(cx: &mut Test
 fn developer_unpaired_send_keeps_draft_and_enter_adds_line(cx: &mut TestAppContext) {
     let f = fixture(cx);
     enable(&f, cx);
+    let connection = pair(&f, cx);
     pick_open(&f, cx);
+    drop(connection);
+    wait_for(&f, cx, |view| {
+        view.developer.state_text() == Text::DeveloperWaiting
+    });
     cx.update_window(f.window, |_, w, cx| {
         w.click("developer-feedback-input", cx);
         w.input("First", cx);

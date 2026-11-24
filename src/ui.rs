@@ -1507,7 +1507,10 @@ impl ReaderView {
                 cx.notify();
             }
             DeveloperSelect => {
-                if !self.developer.busy()
+                if !self.developer.busy() && self.developer.state_text() != Text::DeveloperConnected
+                {
+                    self.developer_copy(cx);
+                } else if !self.developer.busy()
                     && let Some(picker) = self.developer.reader_picker.clone()
                 {
                     picker.start(window, cx);
@@ -2914,8 +2917,14 @@ impl ReaderView {
                     .when(self.developer.enabled, |group| {
                         group.child(self.icon_button(
                             "developer-picker",
-                            language.text(Text::DeveloperSelect),
-                            IconName::SquareMousePointer,
+                            language.text(
+                                if self.developer.state_text() == Text::DeveloperConnected {
+                                    Text::DeveloperSelect
+                                } else {
+                                    Text::DeveloperCopy
+                                },
+                            ),
+                            IconName::LocateFixed,
                             Command::DeveloperSelect,
                             cx,
                         ))

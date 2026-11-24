@@ -208,11 +208,15 @@ fn preferences_picker_drops_held_capture_on_actual_close(cx: &mut TestAppContext
     });
 }
 
-fn enable_picker(fixture: &Fixture, cx: &mut TestAppContext) {
+fn enable_picker(fixture: &Fixture, cx: &mut TestAppContext) -> std::net::TcpStream {
     fixture.view.update(cx, |view, cx| {
         view.apply_developer_enabled(true, cx);
         assert!(view.developer.reader_picker.is_some());
     });
+    super::developer::wait_for(fixture, cx, |view| {
+        view.developer.state_text() == Text::DeveloperWaiting
+    });
+    let connection = super::developer::pair(fixture, cx);
     render_windows(fixture, cx);
     cx.update_window(fixture.window, |_, window, cx| {
         window.click("developer-picker", cx);
@@ -222,6 +226,7 @@ fn enable_picker(fixture: &Fixture, cx: &mut TestAppContext) {
     fixture.view.read_with(cx, |view, _| {
         assert!(view.developer.reader_picker.as_ref().unwrap().active());
     });
+    connection
 }
 
 fn assert_safe_target(
@@ -275,7 +280,7 @@ fn developer_mode_keeps_browser_dropdowns_interactive_and_selectable(cx: &mut Te
             assert!(window.try_find("popup-menu").is_none());
         })
         .unwrap();
-        enable_picker(&fixture, cx);
+        let _connection = enable_picker(&fixture, cx);
         cx.update_window(fixture.window, |_, window, cx| window.click(trigger, cx))
             .unwrap();
         pump(&fixture, cx);
@@ -317,7 +322,7 @@ fn browser_picker_uses_anonymous_tile_identity_and_consumes_double_click(cx: &mu
         let before = fixture
             .view
             .read_with(cx, |view, _| view.browser.model.selected.clone());
-        enable_picker(&fixture, cx);
+        let _connection = enable_picker(&fixture, cx);
         cx.update_window(fixture.window, |_, window, cx| {
             window.double_click(super::super::browser::browser_entry_id(&child), cx);
         })
@@ -354,7 +359,7 @@ fn files_picker_uses_anonymous_item_identity_without_navigation(cx: &mut TestApp
     })
     .unwrap();
     pump(&fixture, cx);
-    enable_picker(&fixture, cx);
+    let _connection = enable_picker(&fixture, cx);
     cx.update_window(fixture.window, |_, window, cx| {
         window.double_click(super::super::files::entry_id(&child), cx);
     })
@@ -386,7 +391,7 @@ fn browser_search_picker_reports_a_safe_region_not_input_text(cx: &mut TestAppCo
     })
     .unwrap();
     render_windows(&fixture, cx);
-    enable_picker(&fixture, cx);
+    let _connection = enable_picker(&fixture, cx);
     cx.update_window(fixture.window, |_, window, cx| {
         window.click("browser-search", cx);
     })

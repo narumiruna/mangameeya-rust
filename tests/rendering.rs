@@ -15,7 +15,8 @@ use mangameeya_rust::{
     ui::{self, ReaderView},
 };
 use std::{
-    io::Write,
+    io::{Read, Write},
+    net::TcpStream,
     path::{Path, PathBuf},
     sync::{Arc, mpsc},
     time::Duration,
@@ -1580,6 +1581,24 @@ fn capture_files_states(cx: &mut HeadlessAppContext, temporary: &Path, source_fo
     );
 }
 
+fn write_developer_frame(stream: &mut TcpStream, value: serde_json::Value) {
+    let bytes = serde_json::to_vec(&value).unwrap();
+    stream
+        .write_all(&(bytes.len() as u32).to_be_bytes())
+        .unwrap();
+    stream.write_all(&bytes).unwrap();
+}
+
+fn read_developer_frame(stream: &mut TcpStream) -> serde_json::Value {
+    let mut length = [0; 4];
+    stream.read_exact(&mut length).unwrap();
+    let length = u32::from_be_bytes(length) as usize;
+    assert!(length <= 65536);
+    let mut bytes = vec![0; length];
+    stream.read_exact(&mut bytes).unwrap();
+    serde_json::from_slice(&bytes).unwrap()
+}
+
 // Enabled sidecars are isolated from every existing disabled-mode scenario.
 fn capture_developer_states(cx: &mut HeadlessAppContext, temporary: &Path, folder: &Path) {
     for language in Language::ALL {
@@ -1675,6 +1694,25 @@ fn capture_developer_states(cx: &mut HeadlessAppContext, temporary: &Path, folde
             })
             .unwrap();
         }
+        cx.update_window(reader, |_, w, cx| {
+            w.click("developer-picker", cx);
+            assert!(w.try_find("developer-feedback-input").is_none());
+        })
+        .unwrap();
+        let command = cx.update(|cx| cx.read_from_clipboard().unwrap().text().unwrap());
+        let parts: Vec<_> = command.split_whitespace().collect();
+        assert_eq!(parts[0], "/mangameeya-connect");
+        let mut connection =
+            TcpStream::connect(("127.0.0.1", parts[1].parse::<u16>().unwrap())).unwrap();
+        connection
+            .set_read_timeout(Some(Duration::from_secs(3)))
+            .unwrap();
+        write_developer_frame(
+            &mut connection,
+            serde_json::json!({"v":1,"id":"pair","type":"hello","token":parts[2],"session_id":"rendering-test","workspace":"rendering-test"}),
+        );
+        assert_eq!(read_developer_frame(&mut connection)["type"], "hello_ok");
+        settle_windows(cx, &[reader, preferences]);
         for (width, height) in [(1280., 800.), (800., 540.)] {
             cx.update_window(reader, |_, w, cx| {
                 w.resize(size(px(width), px(height)));
@@ -1699,7 +1737,27 @@ fn capture_developer_states(cx: &mut HeadlessAppContext, temporary: &Path, folde
                 w.click("developer-send", cx);
             })
             .unwrap();
-            settle(cx, reader);
+            let feedback = read_developer_frame(&mut connection);
+            assert_eq!(feedback["type"], "feedback");
+            assert_eq!(feedback["feedback"]["text"], "First\nSecond");
+            write_developer_frame(
+                &mut connection,
+                serde_json::json!({"v":1,"id":feedback["id"],"type":"ack","feedback_id":feedback["id"],"outcome":"failed"}),
+            );
+            let deadline = std::time::Instant::now() + Duration::from_secs(3);
+            loop {
+                settle(cx, reader);
+                if cx
+                    .update_window(reader, |_, w, _| {
+                        w.try_find("developer-feedback-status").is_some()
+                    })
+                    .unwrap()
+                {
+                    break;
+                }
+                assert!(std::time::Instant::now() < deadline);
+                std::thread::sleep(Duration::from_millis(5));
+            }
             assert_eq!(
                 page(cx, reader),
                 before,
