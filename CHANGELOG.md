@@ -1,3 +1,13 @@
+## 0.9.0
+
+### Minor Changes
+
+- Use clickable parent folders in the browser path bar. A second row keeps search and Open visible, with sort direction and Folders first in the sort menu.
+
+### Patch Changes
+
+- Show ordinary Windows drive and UNC paths in Recent tooltips, opening messages, and settings-reset messages. Keep native paths unchanged for file access and saved history.
+
 ## 0.8.0
 
 ### Minor Changes
