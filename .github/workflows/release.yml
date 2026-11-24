@@ -35,6 +35,7 @@ jobs:
       - uses: narumiruna/changenote/release@f4423760122463bf03a8d161c6f0bc4173afb6e0 # v0.10.0
         with:
           operation: manage-pr
+          github-token: ${{ secrets.PAT_TOKEN || github.token }}
           base-branch: main
           rust-toolchain: ${{ env.CHANGENOTE_RUST_TOOLCHAIN }}
           commit-message: 'chore(release): version MangaMeeya Rust'
@@ -89,6 +90,7 @@ jobs:
         id: publish
         with:
           operation: publish
+          github-token: ${{ secrets.PAT_TOKEN || github.token }}
           base-branch: main
           expected-release-commit: ${{ needs.select.outputs.release-commit }}
           rust-toolchain: ${{ env.CHANGENOTE_RUST_TOOLCHAIN }}
@@ -117,7 +119,7 @@ jobs:
           path: release-assets
       - name: Upload missing native release packages
         env:
-          GH_TOKEN: ${{ secrets.PAT_TOKEN }}
+          GH_TOKEN: ${{ secrets.PAT_TOKEN || github.token }}
           GH_REPO: ${{ github.repository }}
           RELEASE_COMMIT: ${{ needs.publish.outputs.release-commit }}
           RELEASES: ${{ needs.publish.outputs.releases }}

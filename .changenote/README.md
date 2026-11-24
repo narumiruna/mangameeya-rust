@@ -29,4 +29,4 @@ Cargo lockfile update, changelog, release batch, and note removal. Multiple note
 for one package produce one version bump at the highest requested level.
 
 See [the release workflow guide](../packaging/README.md#release-workflow) for setup,
-publication, retries, package signing limits, and the required repository permission.
+publication, retries, package signing limits, and release authentication.
