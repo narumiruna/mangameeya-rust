@@ -2790,18 +2790,13 @@ impl ReaderView {
                     .flex_none()
                     .items_center()
                     .gap_1()
-                    .child(
-                        self.icon_button(
-                            "open",
-                            language.text(Text::Open),
-                            IconName::FolderOpen,
-                            Command::OpenFile,
-                            cx,
-                        )
-                        .when(!compact, |button| {
-                            button.w_auto().px_3().label(language.text(Text::Open))
-                        }),
-                    )
+                    .child(self.icon_button(
+                        "open",
+                        language.text(Text::Open),
+                        IconName::FolderOpen,
+                        Command::OpenFile,
+                        cx,
+                    ))
                     .child(
                         self.icon_button(
                             "sidebar-toggle",

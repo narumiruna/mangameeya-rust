@@ -43,7 +43,17 @@ fn visual_chrome_dimensions_and_status_center_survive_sizes_and_locales(cx: &mut
                 assert_eq!(status.size.height, px(STATUS_HEIGHT + 1.));
                 assert!((navigation.center().x - px(width / 2.)).abs() < px(1.));
                 assert!(navigation.left() >= status.left() && navigation.right() <= status.right());
+                let open = window.find("open");
+                assert_eq!(open.label(), Some(language.text(Text::Open)));
+                let open_id: gpui_kit::ElementId = "open".into();
+                assert!(
+                    gpui_kit::base::test_support::texts(window)
+                        .iter()
+                        .all(|text| !text.path().contains(&open_id) || !text.visible()),
+                    "Open must be icon-only, with no painted label"
+                );
                 for id in [
+                    "open",
                     "sidebar-toggle",
                     "inspector-toggle",
                     "bookmark",
