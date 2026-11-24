@@ -158,6 +158,7 @@ export default function (pi: ExtensionAPI) {
     try {
       if (
         !bridge ||
+        !bridge.capture ||
         !active ||
         !ctx.isProjectTrusted() ||
         ctx.sessionManager.getSessionId() !==

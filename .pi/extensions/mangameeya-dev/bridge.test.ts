@@ -287,6 +287,43 @@ describe("extension wiring", () => {
       );
     });
   }
+  test("diagnostic tools reject requests until pairing completes", async () => {
+    const h = harness(), ctx = uiContext();
+    let helloRequest: any;
+    let helloPeer: Socket;
+    let arrived!: () => void;
+    const helloArrived = new Promise<void>((resolve) => { arrived = resolve; });
+    const requests: string[] = [];
+    await server(
+      async (port) => {
+        const pairing = h.commands.get("mangameeya-connect")
+          .handler(`${port} ${"c".repeat(64)}`, ctx);
+        await helloArrived;
+        for (const name of ["mangameeya_status", "mangameeya_logs"]) {
+          const result = await h.tools.get(name)
+            .execute("id", {}, undefined, undefined, ctx);
+          expect(result.isError).toBe(true);
+          expect(result.details.code).toBe("disconnected");
+        }
+        expect(requests).toEqual(["hello"]);
+        hello(helloPeer!, helloRequest);
+        await pairing;
+        expect(ctx.notices).toHaveLength(1);
+        expect(ctx.notices[0][1]).toBe("info");
+        await h.commands.get("mangameeya-disconnect").handler();
+      },
+      (socket, request) => {
+        requests.push(request.type);
+        if (request.type === "hello") {
+          helloPeer = socket;
+          helloRequest = request;
+          arrived();
+        } else {
+          socket.write(encode({ v: 1, id: request.id, type: "error", code: "invalid_request" }));
+        }
+      },
+    );
+  });
   test("idle/busy always use literal followUp and tree closes pairing", async () => {
     for (const idle of [true, false]) {
       const h = harness();
