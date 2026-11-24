@@ -1,3 +1,11 @@
+## 0.10.0
+
+### Minor Changes
+
+- Add an opt-in developer mode with native UI feedback and project-local Pi log tools.
+
+- Discover local developer-mode instances from Pi and pair them with explicit approval in the application.
+
 ## 0.9.0
 
 ### Minor Changes
