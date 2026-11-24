@@ -166,10 +166,14 @@ on the next launch.
 
 1. Run Pi from this repository and trust its project-local extension at
    `.pi/extensions/mangameeya-dev/index.ts`. Use `/reload` if Pi was already open.
-2. Select **Copy Pi connection command**, then paste the command into the intended
-   Pi session. Verify the workspace and session shown in Preferences.
-3. Use **Select element** in Preferences, or **Dev** in the reader toolbar. Point
-   to highlight a supported element; click to enter feedback without activating it.
+2. Run `/mangameeya-connect` in the intended Pi session. Pi discovers local App
+   instances; select one if several are available. In the App, check the requested
+   workspace and session, then select **Allow**. **Deny** or Escape cancels.
+   If discovery is unavailable, use **Copy Pi connection command** in Preferences
+   and paste the full command into Pi as the manual fallback.
+3. Use **Select element** in Preferences, or the target icon in the reader toolbar
+   after pairing. Point to highlight a supported element; click to enter feedback
+   without activating it.
 4. Review the safe element/context preview. Enter adds a line; Ctrl/Cmd+Enter or
    **Send to Pi** submits. Escape cancels. Text is limited to 8 KiB.
 5. Pi receives the request as a literal user message. Busy agents receive a
@@ -181,10 +185,16 @@ bounded cursor pagination) and `mangameeya_status`. Use
 `/mangameeya-disconnect` or the Preferences button to disconnect. Reconnecting
 requires confirmation before an existing draft can be sent.
 
-Only `127.0.0.1` is supported, with a short-lived, single-use capability token.
-Pi and the app must use the same local network namespace; do not expose the
-listener to work around WSL/container separation. Never share the connection
-command. Pairing does not protect against a hostile process with your OS account.
+Only `127.0.0.1` is supported. Discovery records under
+`~/.mangameeya/developer/` contain endpoint metadata, not tokens or feedback.
+Discovery pairing requires App approval for the requesting connection and expires
+if unanswered after 60 seconds. The displayed workspace and session are supplied
+by the requester; allow only the Pi session you intended. The manual fallback
+uses a short-lived, single-use capability token and does not need a second approval.
+Pi and the App must use the same home directory and local network namespace for
+discovery; do not expose the listener to work around WSL/container separation.
+Never share the manual connection command. Pairing does not protect against a
+hostile process with your OS account. Session changes revoke the Pi connection.
 
 No comic images, file names, full paths, input values, or arbitrary descendant
 text enter captured diagnostics or element metadata. Explicit feedback text and

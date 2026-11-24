@@ -1,7 +1,15 @@
 //! Bounded, memory-only developer diagnostics and plain-data UI integration.
 mod bridge;
+mod discovery;
 
 pub use bridge::DeveloperService;
+
+#[derive(Clone, Debug)]
+pub struct PairingRequest {
+    pub id: String,
+    pub session_id: String,
+    pub workspace: String,
+}
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, VecDeque};
 use std::fs::{self, File};

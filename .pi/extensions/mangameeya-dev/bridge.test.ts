@@ -1,4 +1,5 @@
-import { describe, test, expect, mock } from "bun:test";
+import { describe, test, expect, mock, spyOn } from "bun:test";
+import * as discovery from "./discovery.ts";
 import { createServer, type Socket } from "node:net";
 import nativeFrames from "./fixtures/native-v1.json";
 import {
@@ -232,6 +233,70 @@ describe("extension wiring", () => {
       },
       ui: { notify: (...args: any[]) => notices.push(args) },
     };
+  }
+  test("no-argument pairing selects once, waits for App approval and handles denial", async () => {
+    for (const denied of [false, true]) {
+      const h = harness(), ctx = uiContext();
+      let approve!: () => void;
+      let arrived!: () => void;
+      const pendingApproval = new Promise<void>(r => { arrived = r; });
+      await server(async port => {
+        const candidate: discovery.Instance = { v: 1, protocol_version: 1, instance_id: "1".repeat(64), app_version: "1", port };
+        const probe = spyOn(discovery, "discover").mockResolvedValue([candidate]);
+        try {
+          const pairing = h.commands.get("mangameeya-connect").handler("", ctx);
+          await pendingApproval;
+          expect(ctx.notices).toEqual([["Waiting for confirmation in the Mangameeya App.", "info"]]);
+          const result = await h.tools.get("mangameeya_status").execute("id", {}, undefined, undefined, ctx);
+          expect(result.isError).toBe(true);
+          approve();
+          await pairing;
+          expect(ctx.notices.at(-1)[1]).toBe(denied ? "error" : "info");
+          expect(ctx.notices.at(-1)[0]).toContain(denied ? "canceled" : "paired");
+          await h.commands.get("mangameeya-disconnect").handler();
+        } finally { probe.mockRestore(); }
+      }, (s, x) => {
+        expect(x.type).toBe("pair_request");
+        approve = () => denied ? s.write(encode({ v: 1, id: x.id, type: "error", code: "canceled" })) : hello(s, x);
+        arrived();
+      });
+    }
+  });
+  for (const stage of ["probe", "select", "approval"]) {
+    test(`no-argument lifecycle revocation aborts ${stage} and prevents obsolete approval`, async () => {
+      const h = harness(), ctx: any = uiContext();
+      let reached!: () => void;
+      const waiting = new Promise<void>(r => { reached = r; });
+      let signal: AbortSignal | undefined;
+      let pairRequests = 0;
+      const candidates = [1, 2].map(n => ({ v: 1 as const, protocol_version: 1 as const, instance_id: n.toString().repeat(64), app_version: "1", port: 1 }));
+      await server(async port => {
+        candidates.forEach(x => x.port = port);
+        const stub = spyOn(discovery, "discover").mockImplementation(async (s, check) => {
+          signal = s;
+          if (stage === "probe") {
+            reached();
+            await new Promise<void>(r => s.addEventListener("abort", () => r(), { once: true }));
+          }
+          check();
+          return stage === "select" ? candidates : [candidates[0]];
+        });
+        ctx.ui.select = async (_: any, labels: string[], options: any) => {
+          signal = options.signal; reached();
+          await new Promise<void>(r => signal!.addEventListener("abort", () => r(), { once: true }));
+          return labels[0];
+        };
+        try {
+          const pending = h.commands.get("mangameeya-connect").handler("", ctx);
+          await waiting;
+          for (const fn of h.events.get("session_shutdown")!) fn();
+          await pending;
+          expect(signal?.aborted).toBe(true);
+          expect(pairRequests).toBe(stage === "approval" ? 1 : 0);
+          expect(ctx.notices.some((x: any[]) => x[0].includes("paired"))).toBe(false);
+        } finally { stub.mockRestore(); }
+      }, () => { pairRequests++; reached(); });
+    });
   }
   test("current pairing reports a refused connection", async () => {
     const h = harness(), ctx = uiContext();

@@ -1145,10 +1145,40 @@ checks events and geometry; this work does not claim new macOS Metal pixels.
 ## Developer mode verification and limits
 
 Developer mode uses a separate `developer-mode.json` flag. It does not migrate
-reader settings. The application owns a bounded, authenticated loopback service;
-`.pi/extensions/mangameeya-dev/` connects only to an explicitly paired Pi session.
+reader settings. The application owns a bounded loopback service. Diagnostics and
+feedback require manual token authentication or explicit App approval;
+`.pi/extensions/mangameeya-dev/` connects only to a paired Pi session.
 Diagnostics and target metadata exclude file names, full paths, input values,
 and comic content. Explicitly submitted feedback text is shared with Pi.
+
+### Local App discovery and approval
+
+`/mangameeya-connect` without arguments reads bounded endpoint records from
+`~/.mangameeya/developer/`, probes only `127.0.0.1`, and validates the live instance
+ID. Records contain exactly the discovery/protocol versions, instance ID, port,
+and App version; no capability, workspace, session, or feedback is published.
+Invalid, incompatible, unsafe, and stale records are ignored. One available App
+is selected directly; multiple Apps require a Pi chooser. Canceling the chooser
+does not send an approval request.
+
+The App allows one pending request for 60 seconds. Its confirmation displays the
+requester's workspace and session as client-supplied values. Allow authorizes only
+that socket and immutable request, then invalidates the manual token. Deny,
+Escape, client closure, expiration, disable, or disconnect cannot authorize a
+connection. Stale decisions do nothing. Existing dialogs and feedback drafts are
+not replaced by incoming approval requests. The manual token command remains an
+explicit fallback with its existing expiry and replay rules.
+
+Rust service tests cover approval decisions, concurrency, socket cancellation,
+expiry, generation changes, preapproval isolation, publication, and cleanup.
+Native UI tests cover translated Allow/Deny controls, dismissal, stale prompt
+removal, and existing-dialog isolation. Pi tests cover bounded discovery parsing,
+probes, instance matching, selection, approval, and session/trust revocation.
+The rendering workflow exercises the manual fallback, then the discovery request
+and native approval path with Preferences open. Reader ticks target the owning
+window explicitly, so its approval must not appear in Preferences. Windows results
+do not establish Unix filesystem-mode
+or macOS rendering coverage; run those platform checks in CI before release.
 
 ### Native and Pi discovery evidence
 

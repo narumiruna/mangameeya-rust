@@ -160,8 +160,10 @@ macOS 同時支援 `Command+O`、`Command+Shift+O`、`Command+S`、`Command+W`�
 
 1. 在本專案目錄啟動 Pi，信任專案內的 `.pi/extensions/mangameeya-dev/index.ts`。
    若 Pi 已啟動，使用 `/reload` 載入 extension。
-2. 點「複製 Pi 連線指令」，貼到預期的 Pi session，確認偏好設定顯示的 workspace 與 session。
-3. 點偏好設定的「選取介面元素」或閱讀視窗工具列的「Dev」，移動游標標示目標，點選後輸入回饋。
+2. 在預期的 Pi session 執行 `/mangameeya-connect`。Pi 會探索本機 App；若找到多個，先選擇目標。
+   在 App 檢查要求端 workspace 與 session，按「允許」才完成配對；「拒絕」或 Escape 取消。
+   若無法探索，可在偏好設定點「複製 Pi 連線指令」，將完整指令貼到 Pi，作為手動備援。
+3. 配對後，點偏好設定的「選取介面元素」或閱讀視窗工具列的準星 icon，移動游標標示目標，點選後輸入回饋。
    選取不會執行原本的控制項動作。
 4. 確認元素與內容預覽後傳送。Enter 換行，Ctrl/Cmd+Enter 或「傳送至 Pi」送出；
    Escape 取消。文字上限為 8 KiB。
@@ -172,8 +174,12 @@ Extension 提供 `mangameeya_logs`（嚴重程度、模組、文字篩選及有�
 與 `mangameeya_status`。可用 `/mangameeya-disconnect` 或偏好設定按鈕中斷連線；
 重連後，既有草稿須重新確認目的地才能傳送。
 
-服務僅綁定 `127.0.0.1`，使用短效、一次性 token。Pi 與 App 必須位於相同本機網路命名空間，
-不要為了 WSL 或 container 改成對外監聽，也不要分享連線指令。配對不能防止同一 OS 帳號下的惡意程式。
+服務僅綁定 `127.0.0.1`。`~/.mangameeya/developer/` 下的探索紀錄只含連線位置與版本等資訊，
+不含 token 或回饋。探索配對僅在 App 允許後授權該連線；60 秒未回應即失效。
+顯示的 workspace 與 session 由要求端提供，僅允許你預期的 Pi session。
+手動備援仍使用短效、一次性 token，不需再次允許。Pi 與 App 必須共用 home directory 與本機網路命名空間才能探索，
+不要為了 WSL 或 container 改成對外監聽，也不要分享手動連線指令。切換 Pi session 會撤銷連線。
+配對不能防止同一 OS 帳號下的惡意程式。
 
 診斷與元素資訊不包含漫畫圖片、檔名、完整路徑、輸入值或任意子元素文字；主動傳送的回饋文字及要求查詢的
 診斷可能送到 Pi 的模型供應商。Log 最多 5,000 筆／8 MiB，傳輸與佇列也有容量限制。

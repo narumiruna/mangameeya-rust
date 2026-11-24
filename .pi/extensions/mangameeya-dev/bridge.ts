@@ -162,12 +162,21 @@ export function validate(x: unknown): Obj {
       "truncated",
       "code",
       "feedback",
+      "instance_id",
+      "app_version",
+      "available",
     ],
   );
   if (x.v !== 1) fail();
   text(x.id, 64, true);
   const base = ["v", "id", "type"];
   switch (x.type) {
+    case "discovery_result":
+      object(x, [...base, "instance_id", "app_version", "available"]);
+      hex(x.instance_id);
+      text(x.app_version, 64);
+      if (typeof x.available !== "boolean") fail();
+      break;
     case "hello_ok":
       object(x, [...base, "capture_id"]);
       hex(x.capture_id);
@@ -345,6 +354,36 @@ export class Bridge {
     session: string,
     workspace: string,
   ) {
+    this.open(port);
+    const result = await this.request(
+      "hello", { token, session_id: session, workspace }, undefined, 2000,
+    );
+    this.capture = result.capture_id;
+  }
+  async probe(port: number, instance: string, signal: AbortSignal) {
+    signal.throwIfAborted();
+    this.open(port);
+    try {
+      const x = await this.request("discover", { instance_id: instance }, signal, 750);
+      if (x.instance_id !== instance) fail();
+      return x;
+    } finally {
+      this.close();
+    }
+  }
+  async pair(port: number, instance: string, session: string, workspace: string, signal: AbortSignal) {
+    signal.throwIfAborted();
+    this.open(port);
+    const abort = () => this.close("canceled");
+    signal.addEventListener("abort", abort, { once: true });
+    try {
+      await this.request("pair_request", { instance_id: instance, session_id: session, workspace }, signal, 65000);
+    } finally {
+      signal.removeEventListener("abort", abort);
+    }
+  }
+  private open(port: number) {
+    if (this.socket || this.closed) throw new BridgeError("disconnected");
     this.socket = createConnection({ host: "127.0.0.1", port });
     this.socket.setNoDelay(true);
     this.socket.on("error", () => this.close());
@@ -381,13 +420,6 @@ export class Bridge {
         this.close("protocol_mismatch");
       }
     });
-    const result = await this.request(
-      "hello",
-      { token, session_id: session, workspace },
-      undefined,
-      2000,
-    );
-    this.capture = result.capture_id;
   }
   send(x: Obj) {
     if (this.closed || !this.socket) throw new BridgeError("disconnected");
@@ -409,7 +441,7 @@ export class Bridge {
     if (signal?.aborted) return Promise.reject(new BridgeError("canceled"));
     if (this.pending.size >= 32) return Promise.reject(new BridgeError("busy"));
     const id = randomUUID();
-    const expected = type === "hello" ? "hello_ok" : type + "_result";
+    const expected = type === "hello" || type === "pair_request" ? "hello_ok" : type === "discover" ? "discovery_result" : type + "_result";
     return new Promise((resolve, reject) => {
       const cleanup = () => {
         clearTimeout(timer);

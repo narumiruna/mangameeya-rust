@@ -581,6 +581,11 @@ impl PreferencesView {
                     .child(language.text(status)),
             )
             .children(enabled.then(|| div().text_xs().child(destination)))
+            .children(enabled.then(|| {
+                div()
+                    .text_xs()
+                    .child(language.text(Text::DeveloperPairHint))
+            }))
             .when(enabled, |section| {
                 section.child(
                     div()

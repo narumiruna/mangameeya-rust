@@ -6,7 +6,7 @@ use std::{
     net::TcpStream,
 };
 
-fn enable(f: &Fixture, cx: &mut TestAppContext) {
+pub(super) fn enable(f: &Fixture, cx: &mut TestAppContext) {
     f.view
         .update(cx, |v, cx| v.apply_developer_enabled(true, cx));
     pump(f, cx);
@@ -38,14 +38,14 @@ pub(super) fn wait_for(
     }
 }
 
-fn write_frame(stream: &mut TcpStream, value: serde_json::Value) {
+pub(super) fn write_frame(stream: &mut TcpStream, value: serde_json::Value) {
     let bytes = serde_json::to_vec(&value).unwrap();
     stream
         .write_all(&(bytes.len() as u32).to_be_bytes())
         .unwrap();
     stream.write_all(&bytes).unwrap();
 }
-fn read_frame(stream: &mut TcpStream) -> serde_json::Value {
+pub(super) fn read_frame(stream: &mut TcpStream) -> serde_json::Value {
     let mut length = [0; 4];
     stream.read_exact(&mut length).unwrap();
     let mut bytes = vec![0; u32::from_be_bytes(length) as usize];

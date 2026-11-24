@@ -4,6 +4,7 @@
 #[path = "support/browser_visual.rs"]
 mod browser_visual;
 
+use gpui_kit::component::WindowExt;
 use gpui_kit::{
     AnyWindowHandle, AppContext, Bounds, Entity, HeadlessAppContext, Modifiers, OwnedMenuItem,
     PlatformInput, ScrollDelta, ScrollEvent, Window, WindowBounds, WindowOptions, point, px, size,
@@ -1711,6 +1712,82 @@ fn capture_developer_states(cx: &mut HeadlessAppContext, temporary: &Path, folde
             &mut connection,
             serde_json::json!({"v":1,"id":"pair","type":"hello","token":parts[2],"session_id":"rendering-test","workspace":"rendering-test"}),
         );
+        let hello = read_developer_frame(&mut connection);
+        assert_eq!(hello["type"], "hello_ok");
+        let instance = hello["capture_id"].as_str().unwrap().to_owned();
+        drop(connection);
+        let mut connection =
+            TcpStream::connect(("127.0.0.1", parts[1].parse::<u16>().unwrap())).unwrap();
+        connection
+            .set_read_timeout(Some(Duration::from_secs(3)))
+            .unwrap();
+        let deadline = std::time::Instant::now() + Duration::from_secs(3);
+        let mut probe = 0;
+        loop {
+            write_developer_frame(
+                &mut connection,
+                serde_json::json!({"v":1,"id":format!("discover-{probe}"),"type":"discover","instance_id":instance}),
+            );
+            let discovered = read_developer_frame(&mut connection);
+            assert_eq!(discovered["type"], "discovery_result");
+            assert_eq!(discovered["instance_id"], instance);
+            if discovered["available"] == true {
+                break;
+            }
+            assert!(std::time::Instant::now() < deadline);
+            std::thread::sleep(Duration::from_millis(5));
+            probe += 1;
+        }
+        write_developer_frame(
+            &mut connection,
+            serde_json::json!({"v":1,"id":"approve","type":"pair_request","instance_id":instance,"session_id":"rendering-test","workspace":"rendering-test"}),
+        );
+        let deadline = std::time::Instant::now() + Duration::from_secs(3);
+        loop {
+            settle_windows(cx, &[reader, preferences]);
+            if cx
+                .update_window(reader, |_, window, _| {
+                    window.try_find("developer-pairing-request").is_some()
+                })
+                .unwrap()
+            {
+                break;
+            }
+            if std::time::Instant::now() >= deadline {
+                let state = cx
+                    .update_window(reader, |_, window, cx| {
+                        (
+                            window.has_active_dialog(cx),
+                            window.find_all("dialog").len(),
+                            window.try_find("developer-feedback-input").is_some(),
+                        )
+                    })
+                    .unwrap();
+                panic!("pairing dialog did not appear: {state:?}");
+            }
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        cx.update_window(preferences, |_, window, _| {
+            assert!(window.try_find("developer-pairing-request").is_none());
+        })
+        .unwrap();
+        snapshot(
+            cx,
+            reader,
+            &format!("developer-pairing-{}", language.code()),
+        );
+        cx.update_window(reader, |_, window, cx| {
+            assert_eq!(
+                window.find("ok").label(),
+                Some(language.text(Text::DeveloperPairAllow))
+            );
+            assert_eq!(
+                window.find("cancel").label(),
+                Some(language.text(Text::DeveloperPairDeny))
+            );
+            window.click("ok", cx);
+        })
+        .unwrap();
         assert_eq!(read_developer_frame(&mut connection)["type"], "hello_ok");
         settle_windows(cx, &[reader, preferences]);
         for (width, height) in [(1280., 800.), (800., 540.)] {
