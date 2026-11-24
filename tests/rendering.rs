@@ -1102,8 +1102,8 @@ fn browser_controls_in_bounds(window: &Window, language: Language) {
         "browser-parent",
         "browser-sort",
         "browser-refresh",
-        "browser-open",
     ];
+    assert!(window.try_find("browser-open").is_none());
     for (index, id) in ids.iter().enumerate() {
         let control = window.find(*id);
         assert!(control.visible(), "browser control: {language:?}, {id}");

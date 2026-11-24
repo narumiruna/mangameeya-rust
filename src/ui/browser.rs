@@ -1395,27 +1395,6 @@ impl ReaderView {
                     .accessibility_label(language.text(Text::BrowserRefresh))
                     .tooltip(language.text(Text::BrowserRefresh))
                     .on_click(cx.listener(|this, _, window, cx| this.browser_refresh(window, cx))),
-            )
-            .child(
-                Button::new("browser-open")
-                    .when(self.developer.reader_picker.is_some(), |e| {
-                        e.relative().block_mouse_except_scroll()
-                    })
-                    .children(self.developer.marker(
-                        "browser-open",
-                        "Open selected item",
-                        "src/ui/browser.rs::browser_toolbar",
-                    ))
-                    .small()
-                    .primary()
-                    .ml_auto()
-                    .h(px(28.))
-                    .when(!compact, |button| button.icon(IconName::FolderOpen))
-                    .label(language.text(Text::BrowserOpenAction))
-                    .accessibility_label(language.text(Text::BrowserOpen))
-                    .tooltip(language.text(Text::BrowserOpen))
-                    .disabled(self.browser.model.selected.is_none())
-                    .on_click(cx.listener(|this, _, window, cx| this.browser_open(window, cx))),
             );
         div()
             .id("browser-header")

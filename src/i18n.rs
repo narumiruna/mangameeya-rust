@@ -132,8 +132,6 @@ translations! {
     CoverFailed => ("Cover failed", "表紙読込失敗", "封面載入失敗"),
     BrowserFoldersFirst => ("Folders first", "フォルダーを先頭に", "資料夾優先"),
     BrowserRefresh => ("Refresh", "更新", "重新整理"),
-    BrowserOpen => ("Open selected", "選択項目を開く", "開啟選取項目"),
-    BrowserOpenAction => ("Open", "開く", "開啟"),
     BrowserShuffle => ("Shuffle", "シャッフル", "重新洗牌"),
     BrowserEmpty => ("No supported files in this folder.", "このフォルダーに対応ファイルはありません。", "此資料夾沒有支援的檔案。"),
     BrowserNoMatches => ("No matching names.", "一致する名前はありません。", "沒有符合的名稱。"),
