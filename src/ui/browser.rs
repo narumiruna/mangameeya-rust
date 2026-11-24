@@ -9,6 +9,7 @@ const COVER_CACHE_BYTES: usize = 32 * 1024 * 1024;
 const MAX_COVER_JOBS: usize = 2;
 const MAX_COVER_FAILURES: usize = 2048;
 const COMPACT_HEADER_WIDTH: f32 = 500.;
+const SINGLE_ROW_HEADER_WIDTH: f32 = 760.;
 const TILE_GAP: f32 = 12.;
 
 pub(super) fn browser_entry_id(path: &Path) -> SharedString {
@@ -1090,6 +1091,7 @@ impl ReaderView {
         let language = self.language();
         let owner = cx.entity().downgrade();
         let compact = f32::from(self.viewer_size.width) < COMPACT_HEADER_WIDTH;
+        let single_row = f32::from(self.viewer_size.width) >= SINGLE_ROW_HEADER_WIDTH;
         let listing = self.listing.as_ref();
         let path = listing
             .map(|listing| crate::file_tree::display_path(&listing.path))
@@ -1200,6 +1202,7 @@ impl ReaderView {
             .test_support()
             .aria_label(path.clone())
             .flex()
+            .when(single_row, |location| location.flex_1())
             .min_w_0()
             .items_center()
             .gap_2()
@@ -1284,6 +1287,7 @@ impl ReaderView {
             .id("browser-actions")
             .test_support()
             .flex()
+            .when(single_row, |actions| actions.flex_1().max_w(px(520.)))
             .items_center()
             .gap_1()
             .min_w_0()
@@ -1405,6 +1409,9 @@ impl ReaderView {
             .flex()
             .flex_col()
             .gap_1()
+            .when(single_row, |header| {
+                header.flex_row().items_center().gap_2()
+            })
             .px_2()
             .py_1()
             .flex_none()

@@ -1098,6 +1098,17 @@ fn browser_controls_in_bounds(window: &Window, language: Language) {
     let central = window.find("viewer").bounds();
     let grid = window.find("browser-grid").bounds();
     assert!(contains_bounds(central, grid));
+    let header = window.find("browser-header").bounds();
+    let location = window.find("browser-location").bounds();
+    let actions = window.find("browser-actions").bounds();
+    if central.size.width >= px(760.) {
+        assert!(header.size.height <= px(36.));
+        assert!((location.center().y - actions.center().y).abs() < px(1.));
+        assert!(location.right() <= actions.left());
+    } else {
+        assert!(header.size.height <= px(72.));
+        assert!(location.bottom() <= actions.top());
+    }
     let ids = [
         "browser-search",
         "browser-parent",

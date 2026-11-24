@@ -19,7 +19,7 @@ RAR, a corrupt CBZ, and a corrupt first folder image. No comic assets are commit
 | Retained shell | Existing native toolbar, panels, and status | Same bounds when switching central content |
 | Titles | Inherited button nowrap; reserved two-line space | Explicit normal wrapping, clamp and ellipsis; two/three lines |
 | Default information | Metadata on, including `— · —` | Cover and filename only; optional metadata has meaningful unknown text |
-| Header | Path, full-width search, wrapping text actions | Breadcrumbs/results, bounded search, sort/direction, folder checkbox, primary Open; one row at 900 central logical px, explicit compact rows below |
+| Header | Path, full-width search, wrapping text actions | Breadcrumbs/results, bounded search, sort menu and refresh; one row at 760 central logical px, two compact rows below |
 | Return to reading | Duplicate central and top controls | Existing top button or Escape; shuffle only for Random |
 | Missing cover | Shared Unicode glyph | Queued/loading/unsupported/failed SVG and text, full name/path/reason tooltip |
 | Large classic ZIP | Total source capped at 64 MiB | Bounded index and selected-member reads; total size alone does not reject it |
