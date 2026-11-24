@@ -813,6 +813,18 @@ impl ReaderView {
                         this.browser_tick(cx);
                         return;
                     }
+                    let success = result
+                        .as_ref()
+                        .is_ok_and(|(page, _)| page.allocation <= COVER_CACHE_BYTES);
+                    this.developer_log(
+                        crate::developer::Target::Decode,
+                        if success {
+                            crate::developer::EventCode::Completed
+                        } else {
+                            crate::developer::EventCode::Failed
+                        },
+                        success,
+                    );
                     match result {
                         Ok((page, count)) => {
                             if let Some(count) = count {
@@ -1038,6 +1050,17 @@ impl ReaderView {
             .when(selected, |button| {
                 button.bg(cx.theme().primary.opacity(0.18))
             })
+            .when(self.developer.reader_picker.is_some(), |e| {
+                e.relative().block_mouse_except_scroll()
+            })
+            .children(self.developer.reader_picker.as_ref().map(|picker| {
+                picker.mark(super::developer_session::metadata(
+                    format!("browser-item-{position}"),
+                    "Browser item",
+                    "src/ui/browser.rs::browser_tile",
+                    crate::developer::TargetKind::Element,
+                ))
+            }))
             .child(content)
             .on_click(
                 cx.listener(move |this, event: &gpui_kit::ClickEvent, window, cx| {
@@ -1106,6 +1129,15 @@ impl ReaderView {
             breadcrumbs = breadcrumbs
                 .child(
                     Button::new("browser-ancestors")
+                        .when_some(self.developer.reader_picker.as_ref(), |e, picker| {
+                            e.relative()
+                                .when(picker.active(), |e| e.block_mouse_except_scroll())
+                        })
+                        .children(self.developer.marker(
+                            "browser-ancestors",
+                            "Ancestor folders",
+                            "src/ui/browser.rs::browser_toolbar",
+                        ))
                         .small()
                         .ghost()
                         .w(px(28.))
@@ -1136,6 +1168,17 @@ impl ReaderView {
             breadcrumbs = breadcrumbs
                 .child(
                     Button::new(("browser-ancestor", index))
+                        .when(self.developer.reader_picker.is_some(), |e| {
+                            e.relative().block_mouse_except_scroll()
+                        })
+                        .children(self.developer.reader_picker.as_ref().map(|picker| {
+                            picker.mark(super::developer_session::metadata(
+                                format!("browser-ancestor-{index}"),
+                                "Ancestor folder",
+                                "src/ui/browser.rs::browser_toolbar",
+                                crate::developer::TargetKind::Element,
+                            ))
+                        }))
                         .small()
                         .compact()
                         .ghost()
@@ -1162,6 +1205,14 @@ impl ReaderView {
             .gap_2()
             .child(
                 Button::new("browser-parent")
+                    .when(self.developer.reader_picker.is_some(), |e| {
+                        e.relative().block_mouse_except_scroll()
+                    })
+                    .children(self.developer.marker(
+                        "browser-parent",
+                        "Parent folder",
+                        "src/ui/browser.rs::browser_toolbar",
+                    ))
                     .small()
                     .ghost()
                     .h(px(28.))
@@ -1237,14 +1288,29 @@ impl ReaderView {
             .gap_1()
             .min_w_0()
             .child(
-                div().flex_1().min_w(px(76.)).max_w(px(280.)).child(
-                    Input::new(&self.browser.search)
-                        .id("browser-search")
-                        .aria_label(language.text(Text::BrowserSearch))
-                        .small()
-                        .prefix(Icon::new(IconName::Search).small())
-                        .w_full(),
-                ),
+                div()
+                    .flex_1()
+                    .min_w(px(76.))
+                    .max_w(px(280.))
+                    .when(self.developer.reader_picker.is_some(), |e| {
+                        e.relative().block_mouse_except_scroll()
+                    })
+                    .children(self.developer.reader_picker.as_ref().map(|picker| {
+                        picker.mark(super::developer_session::metadata(
+                            "browser-search",
+                            "Search browser",
+                            "src/ui/browser.rs::browser_toolbar",
+                            crate::developer::TargetKind::Region,
+                        ))
+                    }))
+                    .child(
+                        Input::new(&self.browser.search)
+                            .id("browser-search")
+                            .aria_label(language.text(Text::BrowserSearch))
+                            .small()
+                            .prefix(Icon::new(IconName::Search).small())
+                            .w_full(),
+                    ),
             )
             .child(
                 div()
@@ -1253,6 +1319,15 @@ impl ReaderView {
                     .flex_shrink(1.)
                     .child(
                         Button::new("browser-sort")
+                            .when_some(self.developer.reader_picker.as_ref(), |e, picker| {
+                                e.relative()
+                                    .when(picker.active(), |e| e.block_mouse_except_scroll())
+                            })
+                            .children(self.developer.marker(
+                                "browser-sort",
+                                "Sort items",
+                                "src/ui/browser.rs::browser_toolbar",
+                            ))
                             .small()
                             .h(px(28.))
                             .w_full()
@@ -1278,6 +1353,14 @@ impl ReaderView {
             .when(self.browser.model.sort == SortKey::Random, |actions| {
                 actions.child(
                     Button::new("browser-shuffle")
+                        .when(self.developer.reader_picker.is_some(), |e| {
+                            e.relative().block_mouse_except_scroll()
+                        })
+                        .children(self.developer.marker(
+                            "browser-shuffle",
+                            "Shuffle items",
+                            "src/ui/browser.rs::browser_toolbar",
+                        ))
                         .small()
                         .ghost()
                         .w(px(28.))
@@ -1293,6 +1376,14 @@ impl ReaderView {
             })
             .child(
                 Button::new("browser-refresh")
+                    .when(self.developer.reader_picker.is_some(), |e| {
+                        e.relative().block_mouse_except_scroll()
+                    })
+                    .children(self.developer.marker(
+                        "browser-refresh",
+                        "Refresh folder",
+                        "src/ui/browser.rs::browser_toolbar",
+                    ))
                     .small()
                     .ghost()
                     .h(px(28.))
@@ -1304,19 +1395,6 @@ impl ReaderView {
                     .accessibility_label(language.text(Text::BrowserRefresh))
                     .tooltip(language.text(Text::BrowserRefresh))
                     .on_click(cx.listener(|this, _, window, cx| this.browser_refresh(window, cx))),
-            )
-            .child(
-                Button::new("browser-open")
-                    .small()
-                    .primary()
-                    .ml_auto()
-                    .h(px(28.))
-                    .when(!compact, |button| button.icon(IconName::FolderOpen))
-                    .label(language.text(Text::BrowserOpenAction))
-                    .accessibility_label(language.text(Text::BrowserOpen))
-                    .tooltip(language.text(Text::BrowserOpen))
-                    .disabled(self.browser.model.selected.is_none())
-                    .on_click(cx.listener(|this, _, window, cx| this.browser_open(window, cx))),
             );
         div()
             .id("browser-header")
@@ -1330,6 +1408,17 @@ impl ReaderView {
             .px_2()
             .py_1()
             .flex_none()
+            .when(self.developer.reader_picker.is_some(), |e| {
+                e.relative().block_mouse_except_scroll()
+            })
+            .children(self.developer.reader_picker.as_ref().map(|picker| {
+                picker.mark(super::developer_session::metadata(
+                    "browser-header",
+                    "Browser header",
+                    "src/ui/browser.rs::browser_toolbar",
+                    crate::developer::TargetKind::Region,
+                ))
+            }))
             .child(location)
             .child(actions)
     }
@@ -1349,6 +1438,17 @@ impl ReaderView {
             .flex_1()
             .min_h_0()
             .min_w_0()
+            .when(self.developer.reader_picker.is_some(), |e| {
+                e.block_mouse_except_scroll()
+            })
+            .children(self.developer.reader_picker.as_ref().map(|picker| {
+                picker.mark(super::developer_session::metadata(
+                    "browser-grid",
+                    "Browser items",
+                    "src/ui/browser.rs::render_browser",
+                    crate::developer::TargetKind::Region,
+                ))
+            }))
             .child(
                 div().id("browser-grid").test_support().size_full().child(
                     list(self.browser.grid.clone(), move |row, _, cx| {
@@ -1476,13 +1576,35 @@ impl ReaderView {
                 self.browser.tile_width
             )))
             .child(
-                div().id("browser-tile-width").test_support().child(
-                    Slider::new(&self.browser.tile_slider)
-                        .accessibility_label(language.text(Text::BrowserTileWidth)),
-                ),
+                div()
+                    .id("browser-tile-width")
+                    .test_support()
+                    .when(self.developer.reader_picker.is_some(), |e| {
+                        e.relative().block_mouse_except_scroll()
+                    })
+                    .children(self.developer.reader_picker.as_ref().map(|picker| {
+                        picker.mark(super::developer_session::metadata(
+                            "browser-tile-width",
+                            "Item width",
+                            "src/ui/browser.rs::render_browser_tools",
+                            crate::developer::TargetKind::Region,
+                        ))
+                    }))
+                    .child(
+                        Slider::new(&self.browser.tile_slider)
+                            .accessibility_label(language.text(Text::BrowserTileWidth)),
+                    ),
             )
             .child(
                 Button::new("browser-show-names")
+                    .when(self.developer.reader_picker.is_some(), |e| {
+                        e.relative().block_mouse_except_scroll()
+                    })
+                    .children(self.developer.marker(
+                        "browser-show-names",
+                        "Show item names",
+                        "src/ui/browser.rs::render_browser_tools",
+                    ))
                     .small()
                     .ghost()
                     .label(language.text(Text::BrowserShowNames))
@@ -1502,6 +1624,18 @@ impl ReaderView {
                     .gap_2()
                     .children([2, 3].into_iter().map(|lines| {
                         Button::new(("browser-name-lines", lines))
+                            .when(self.developer.reader_picker.is_some(), |e| {
+                                e.relative().block_mouse_except_scroll()
+                            })
+                            .children(self.developer.marker(
+                                if lines == 2 {
+                                    "browser-name-lines-2"
+                                } else {
+                                    "browser-name-lines-3"
+                                },
+                                "Item name lines",
+                                "src/ui/browser.rs::render_browser_tools",
+                            ))
                             .small()
                             .ghost()
                             .label(lines.to_string())
@@ -1521,6 +1655,14 @@ impl ReaderView {
             )
             .child(
                 Button::new("browser-metadata")
+                    .when(self.developer.reader_picker.is_some(), |e| {
+                        e.relative().block_mouse_except_scroll()
+                    })
+                    .children(self.developer.marker(
+                        "browser-metadata",
+                        "Show item information",
+                        "src/ui/browser.rs::render_browser_tools",
+                    ))
                     .small()
                     .ghost()
                     .label(language.text(Text::BrowserMetadata))

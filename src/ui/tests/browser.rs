@@ -5,12 +5,11 @@ use crate::{book::DirectoryEntry, browser::SortKey};
 use gpui_kit::{Modifiers, PlatformInput, ScrollDelta, ScrollEvent, test::TestQueryExt};
 
 const SIZES: [(f32, f32); 3] = [(1280., 800.), (960., 640.), (800., 540.)];
-const BROWSER_CONTROLS: [&str; 5] = [
+const BROWSER_CONTROLS: [&str; 4] = [
     "browser-search",
     "browser-parent",
     "browser-sort",
     "browser-refresh",
-    "browser-open",
 ];
 
 fn press(fixture: &Fixture, key: &str, cx: &mut TestAppContext) {
@@ -187,10 +186,9 @@ fn assert_browser_geometry(window: &Window) {
     let location = window.find("browser-location").bounds();
     let actions = window.find("browser-actions").bounds();
     let search = window.find("browser-search").bounds();
-    let open = window.find("browser-open").bounds();
+    assert!(window.try_find("browser-open").is_none());
     assert!(location.bottom() <= actions.top());
     assert!((search.center().y - actions.center().y).abs() < px(1.));
-    assert!((open.right() - actions.right()).abs() < px(1.));
     assert!(search.size.width >= px(76.) && search.size.width <= px(280.));
     for id in ["browser-parent", "browser-breadcrumbs", "browser-results"] {
         inside(window.find(id).bounds(), location);

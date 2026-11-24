@@ -15,7 +15,8 @@ use mangameeya_rust::{
     ui::{self, ReaderView},
 };
 use std::{
-    io::Write,
+    io::{Read, Write},
+    net::TcpStream,
     path::{Path, PathBuf},
     sync::{Arc, mpsc},
     time::Duration,
@@ -112,6 +113,9 @@ fn scroll_preferences(
             ScrollDelta::Pixels(point(px(0.), px(delta))),
             cx,
         );
+        // Headless windows have no native invalidation callback. Keep observations
+        // current after the real scroll event; do not mutate the scroll handle.
+        window.refresh();
     })
     .unwrap();
     settle_windows(cx, &[reader, preferences]);
@@ -133,7 +137,15 @@ fn reach_preference(
         }
         scroll_preferences(cx, reader, preferences, -64.);
     }
-    panic!("Preferences control must be scroll-reachable: {id}");
+    let bounds = cx
+        .update_window(preferences, |_, w, _| {
+            (
+                w.find(id.to_owned()).bounds(),
+                w.find("preferences-content").bounds(),
+            )
+        })
+        .unwrap();
+    panic!("Preferences control must be scroll-reachable: {id}: {bounds:?}");
 }
 
 fn assert_preferences_hierarchy(window: &mut Window, language: Language, error: bool) {
@@ -1090,8 +1102,8 @@ fn browser_controls_in_bounds(window: &Window, language: Language) {
         "browser-parent",
         "browser-sort",
         "browser-refresh",
-        "browser-open",
     ];
+    assert!(window.try_find("browser-open").is_none());
     for (index, id) in ids.iter().enumerate() {
         let control = window.find(*id);
         assert!(control.visible(), "browser control: {language:?}, {id}");
@@ -1569,6 +1581,231 @@ fn capture_files_states(cx: &mut HeadlessAppContext, temporary: &Path, source_fo
     );
 }
 
+fn write_developer_frame(stream: &mut TcpStream, value: serde_json::Value) {
+    let bytes = serde_json::to_vec(&value).unwrap();
+    stream
+        .write_all(&(bytes.len() as u32).to_be_bytes())
+        .unwrap();
+    stream.write_all(&bytes).unwrap();
+}
+
+fn read_developer_frame(stream: &mut TcpStream) -> serde_json::Value {
+    let mut length = [0; 4];
+    stream.read_exact(&mut length).unwrap();
+    let length = u32::from_be_bytes(length) as usize;
+    assert!(length <= 65536);
+    let mut bytes = vec![0; length];
+    stream.read_exact(&mut bytes).unwrap();
+    serde_json::from_slice(&bytes).unwrap()
+}
+
+// Enabled sidecars are isolated from every existing disabled-mode scenario.
+fn capture_developer_states(cx: &mut HeadlessAppContext, temporary: &Path, folder: &Path) {
+    for language in Language::ALL {
+        let directory = temporary.join(format!("developer-{}", language.code()));
+        std::fs::create_dir(&directory).unwrap();
+        mangameeya_rust::developer::DeveloperPreferences { enabled: true }
+            .save_to(&directory.join("developer-mode.json"))
+            .unwrap();
+        let mut settings = AppSettings::default();
+        settings.preferences.language = language;
+        let (sender, launches) = mpsc::channel();
+        let (reader, view) = open_reader_fixture(
+            cx,
+            directory.join("settings.json"),
+            settings,
+            None,
+            launches,
+        );
+        sender.send(vec![folder.to_path_buf()]).unwrap();
+        settle(cx, reader);
+        for group in 0..7usize {
+            cx.update_window(reader, |_, w, cx| {
+                w.click(("menu", group), cx);
+                assert!(
+                    w.try_find("popup-menu").is_some_and(|menu| menu.visible()),
+                    "developer mode must not block menu {group}"
+                );
+                w.press("escape", cx);
+            })
+            .unwrap();
+            settle(cx, reader);
+        }
+        for (trigger, panel) in [
+            ("zoom-trigger", "zoom-panel"),
+            ("info-trigger", "info-panel"),
+        ] {
+            cx.update_window(reader, |_, w, cx| {
+                w.click(trigger, cx);
+                assert!(
+                    w.try_find(panel).is_some_and(|panel| panel.visible()),
+                    "developer mode must not block {trigger}"
+                );
+                w.press("escape", cx);
+            })
+            .unwrap();
+            settle(cx, reader);
+        }
+        let preferences = open_preferences(cx, reader, &view);
+        for (width, height) in [(560., 520.), (440., 360.)] {
+            cx.update_window(preferences, |_, w, cx| {
+                w.resize(size(px(width), px(height)));
+                w.bounds_changed(cx);
+            })
+            .unwrap();
+            settle_windows(cx, &[reader, preferences]);
+            for (id, text) in [
+                ("developer-mode", Text::DeveloperMode),
+                ("developer-copy", Text::DeveloperCopy),
+                ("developer-select", Text::DeveloperSelect),
+                ("developer-disconnect", Text::DeveloperDisconnect),
+            ] {
+                reach_preference(cx, reader, preferences, id);
+                cx.update_window(preferences, |_, w, _| {
+                    assert!(preference_in_view(w, id));
+                    assert_eq!(w.find(id).label(), Some(language.text(text)));
+                })
+                .unwrap();
+            }
+            snapshot(
+                cx,
+                preferences,
+                &format!("developer-{}-{width}x{height}", language.code()),
+            );
+            reach_preference(cx, reader, preferences, "developer-select");
+            cx.update_window(preferences, |_, w, cx| w.click("developer-select", cx))
+                .unwrap();
+            settle_windows(cx, &[reader, preferences]);
+            reach_preference(cx, reader, preferences, "reading-direction-ltr");
+            cx.update_window(preferences, |_, w, cx| w.click("reading-direction-ltr", cx))
+                .unwrap();
+            settle_windows(cx, &[reader, preferences]);
+            assert_developer_dialog(cx, preferences);
+            snapshot(
+                cx,
+                preferences,
+                &format!("developer-dialog-{}-{width}x{height}", language.code()),
+            );
+            cx.update_window(preferences, |_, w, cx| w.press("escape", cx))
+                .unwrap();
+            settle_windows(cx, &[reader, preferences]);
+            cx.update_window(preferences, |_, w, _| {
+                assert_eq!(w.find("reading-direction-rtl").checked(), Some(true))
+            })
+            .unwrap();
+        }
+        cx.update_window(reader, |_, w, cx| {
+            w.click("developer-picker", cx);
+            assert!(w.try_find("developer-feedback-input").is_none());
+        })
+        .unwrap();
+        let command = cx.update(|cx| cx.read_from_clipboard().unwrap().text().unwrap());
+        let parts: Vec<_> = command.split_whitespace().collect();
+        assert_eq!(parts[0], "/mangameeya-connect");
+        let mut connection =
+            TcpStream::connect(("127.0.0.1", parts[1].parse::<u16>().unwrap())).unwrap();
+        connection
+            .set_read_timeout(Some(Duration::from_secs(3)))
+            .unwrap();
+        write_developer_frame(
+            &mut connection,
+            serde_json::json!({"v":1,"id":"pair","type":"hello","token":parts[2],"session_id":"rendering-test","workspace":"rendering-test"}),
+        );
+        assert_eq!(read_developer_frame(&mut connection)["type"], "hello_ok");
+        settle_windows(cx, &[reader, preferences]);
+        for (width, height) in [(1280., 800.), (800., 540.)] {
+            cx.update_window(reader, |_, w, cx| {
+                w.resize(size(px(width), px(height)));
+                w.bounds_changed(cx);
+            })
+            .unwrap();
+            settle(cx, reader);
+            let before = page(cx, reader);
+            cx.update_window(reader, |_, w, cx| w.click("developer-picker", cx))
+                .unwrap();
+            settle(cx, reader);
+            cx.update_window(reader, |_, w, cx| w.click("next", cx))
+                .unwrap();
+            settle(cx, reader);
+            assert_eq!(page(cx, reader), before, "picker must not turn the page");
+            assert_developer_dialog(cx, reader);
+            cx.update_window(reader, |_, w, cx| {
+                w.click("developer-feedback-input", cx);
+                w.input("First", cx);
+                w.press("enter", cx);
+                w.input("Second", cx);
+                w.click("developer-send", cx);
+            })
+            .unwrap();
+            let feedback = read_developer_frame(&mut connection);
+            assert_eq!(feedback["type"], "feedback");
+            assert_eq!(feedback["feedback"]["text"], "First\nSecond");
+            write_developer_frame(
+                &mut connection,
+                serde_json::json!({"v":1,"id":feedback["id"],"type":"ack","feedback_id":feedback["id"],"outcome":"failed"}),
+            );
+            let deadline = std::time::Instant::now() + Duration::from_secs(3);
+            loop {
+                settle(cx, reader);
+                if cx
+                    .update_window(reader, |_, w, _| {
+                        w.try_find("developer-feedback-status").is_some()
+                    })
+                    .unwrap()
+                {
+                    break;
+                }
+                assert!(std::time::Instant::now() < deadline);
+                std::thread::sleep(Duration::from_millis(5));
+            }
+            assert_eq!(
+                page(cx, reader),
+                before,
+                "multiline feedback must not navigate"
+            );
+            cx.update_window(reader, |_, w, _| {
+                assert!(w.find("developer-feedback-status").visible())
+            })
+            .unwrap();
+            snapshot(
+                cx,
+                reader,
+                &format!("developer-reader-{}-{width}x{height}", language.code()),
+            );
+            cx.update_window(reader, |_, w, cx| w.press("escape", cx))
+                .unwrap();
+            settle(cx, reader);
+        }
+        for handle in [preferences, reader] {
+            cx.update_window(handle, |_, w, _| w.remove_window())
+                .unwrap();
+        }
+        cx.run_until_parked();
+        drop(view);
+    }
+}
+
+fn assert_developer_dialog(cx: &mut HeadlessAppContext, handle: AnyWindowHandle) {
+    cx.update_window(handle, |_, w, _| {
+        let viewport = Bounds::new(Default::default(), w.viewport_size());
+        for id in [
+            "dialog",
+            "developer-feedback-content",
+            "developer-feedback-input",
+            "developer-send",
+        ] {
+            let control = w.find(id);
+            assert!(control.visible(), "developer dialog control: {id}");
+            assert!(
+                contains_bounds(viewport, control.bounds()),
+                "developer dialog bounds: {id}, {:?}, {viewport:?}",
+                control.bounds()
+            );
+        }
+    })
+    .unwrap();
+}
+
 fn open_reader(
     cx: &mut HeadlessAppContext,
     settings_path: PathBuf,
@@ -1648,9 +1885,18 @@ fn main() {
             .save(folder.join(format!("{}.png", index + 1)))
             .unwrap();
     }
+    capture_developer_states(&mut cx, temporary.path(), &folder);
     capture_browser_states(&mut cx, temporary.path(), &folder);
     browser_visual::capture(&mut cx, temporary.path());
     capture_files_states(&mut cx, temporary.path(), &folder);
+    reader_workflow(&mut cx, &temporary, folder);
+}
+
+fn reader_workflow(
+    mut cx: &mut HeadlessAppContext,
+    temporary: &tempfile::TempDir,
+    folder: PathBuf,
+) {
     let settings_path = temporary.path().join("settings.json");
     let (sender, launches) = mpsc::channel();
     let (window, view) = open_reader(&mut cx, settings_path.clone(), launches);

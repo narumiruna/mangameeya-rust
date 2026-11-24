@@ -100,6 +100,15 @@ impl ReaderView {
         if self.closing {
             return;
         }
+        self.developer_log(
+            crate::developer::Target::Release,
+            if result.is_ok() {
+                crate::developer::EventCode::Completed
+            } else {
+                crate::developer::EventCode::Failed
+            },
+            result.is_ok(),
+        );
         self.release_notifications.status = match result {
             Ok(Some(release)) => CheckStatus::Available(release),
             Ok(None) => CheckStatus::Current,

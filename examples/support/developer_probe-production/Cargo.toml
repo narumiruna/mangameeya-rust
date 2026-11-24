@@ -1,0 +1,19 @@
+# Production-only dependency graph. The root example graph enables test-support
+# through the application's dev-dependency, even in --release builds.
+[package]
+name = "developer-probe-production"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[workspace]
+
+[dependencies]
+gpui-kit = "=0.9.0"
+
+[[bin]]
+name = "developer-probe-production"
+path = "../../developer_probe.rs"
+
+[profile.release]
+strip = "symbols"

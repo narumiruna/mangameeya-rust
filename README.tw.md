@@ -152,6 +152,43 @@ macOS 同時支援 `Command+O`、`Command+Shift+O`、`Command+S`、`Command+W`�
 
 程式不會下載或安裝發行檔案。只有使用者按下「開啟下載頁」時，才會在瀏覽器開啟固定的 [GitHub Releases 頁面](https://github.com/narumiruna/mangameeya-rust/releases)。請手動下載並安裝；首次支援這項通知的版本也需要手動安裝。套件簽署維持不變；updater SDK 研究仍暫緩。
 
+### 開發者模式與 Pi
+
+在偏好設定開啟「開發者模式」，預設關閉。旗標另存於 `settings.json` 同層的
+`developer-mode.json`，不改變閱讀設定。Log 僅保留在記憶體，從模式開啟時開始擷取；
+關閉後清除 log 並停止本機服務。已儲存的開啟旗標會在下次啟動建立新的未配對服務。
+
+1. 在本專案目錄啟動 Pi，信任專案內的 `.pi/extensions/mangameeya-dev/index.ts`。
+   若 Pi 已啟動，使用 `/reload` 載入 extension。
+2. 點「複製 Pi 連線指令」，貼到預期的 Pi session，確認偏好設定顯示的 workspace 與 session。
+3. 點偏好設定的「選取介面元素」或閱讀視窗工具列的「Dev」，移動游標標示目標，點選後輸入回饋。
+   選取不會執行原本的控制項動作。
+4. 確認元素與內容預覽後傳送。Enter 換行，Ctrl/Cmd+Enter 或「傳送至 Pi」送出；
+   Escape 取消。文字上限為 8 KiB。
+5. Pi 將其視為一般使用者訊息，先查程式碼與 log、評估要求，再依正常權限修改與驗證。
+   Pi 忙碌時排為 follow-up，不中斷目前工作；結果在 Pi 查看。
+
+Extension 提供 `mangameeya_logs`（嚴重程度、模組、文字篩選及有上限的游標分頁）
+與 `mangameeya_status`。可用 `/mangameeya-disconnect` 或偏好設定按鈕中斷連線；
+重連後，既有草稿須重新確認目的地才能傳送。
+
+服務僅綁定 `127.0.0.1`，使用短效、一次性 token。Pi 與 App 必須位於相同本機網路命名空間，
+不要為了 WSL 或 container 改成對外監聽，也不要分享連線指令。配對不能防止同一 OS 帳號下的惡意程式。
+
+診斷與元素資訊不包含漫畫圖片、檔名、完整路徑、輸入值或任意子元素文字；主動傳送的回饋文字及要求查詢的
+診斷可能送到 Pi 的模型供應商。Log 最多 5,000 筆／8 MiB，傳輸與佇列也有容量限制。
+「已交給 Pi」不代表之後的輸入處理、模型執行或修改成功；傳送結果不明時不自動重送，請先查看 Pi。
+關閉模式不能撤回已交出的要求。
+
+可選取閱讀指令、主要內容區域、browser 項目與控制項、Files 列及偏好設定選項。動態項目使用匿名 ID；
+區域 fallback 會明確標示。未註冊的遮擋式 popup、framework scrollbar 內部元件、
+OS 標題列與原生檔案對話框不提供精確元素選取。
+
+已驗證 Pi 1.6.0 與 Bun 1.3.14。Extension 測試：
+`bun test ./.pi/extensions/mangameeya-dev/`。非互動式 `smoke.ts` 的最後一個參數為本機 Pi package
+目錄，使用本機 stub provider，不呼叫付費模型。原生 API 驗證方式見
+[production probe](examples/support/developer_probe-production/README.md)。
+
 ### 縮放與頁碼
 
 工具列保留唯一的「縮放」控制項，同時顯示目前模式與實際縮放比例。按下控制項可開啟 Popover，切換適合視窗、寬度、高度或原始尺寸，也可輸入百分比或使用 `−`／`+` 調整。

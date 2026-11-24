@@ -2,6 +2,8 @@
 
 mod assets;
 mod browser;
+mod developer;
+mod developer_session;
 mod files;
 mod preferences;
 mod release_notifications;
@@ -92,6 +94,9 @@ enum Command {
     ResetFilters,
     Settings,
     CheckForUpdates,
+    DeveloperCopy,
+    DeveloperDisconnect,
+    DeveloperSelect,
     About,
     ClearHistory,
     Escape,
@@ -350,6 +355,7 @@ pub struct ReaderView {
     pending_browser_selection: Option<PathBuf>,
     settings_path: PathBuf,
     release_notifications: release_notifications::ReleaseNotifications,
+    developer: developer_session::DeveloperUi,
     focus: FocusHandle,
     preferences_window: Option<AnyWindowHandle>,
     closing: bool,
@@ -516,6 +522,7 @@ impl ReaderView {
         }
         subscriptions.push(cx.on_app_quit(|this, cx| {
             this.closing = true;
+            this.developer.service = None;
             this.close_preferences(cx);
             let result = this.flush_settings();
             async move {
@@ -527,13 +534,21 @@ impl ReaderView {
         let weak = cx.entity().downgrade();
         window.on_window_should_close(cx, move |window, cx| {
             if let Some(view) = weak.upgrade() {
-                view.update(cx, |this, cx| {
+                let deferred = view.update(cx, |this, cx| {
+                    if this.confirm_developer_quit(window, cx) {
+                        return true;
+                    }
                     this.closing = true;
+                    this.developer.service = None;
                     this.close_preferences(cx);
                     if let Err(error) = this.flush_settings() {
                         eprintln!("{error}");
                     }
+                    false
                 });
+                if deferred {
+                    return false;
+                }
             }
             window.remove_window();
             cx.quit();
@@ -553,6 +568,7 @@ impl ReaderView {
             sidebar_folder_origin: None,
             pending_browser_selection: None,
             release_notifications: release_notifications::ReleaseNotifications::new(&settings_path),
+            developer: developer_session::DeveloperUi::new(&settings_path, window.window_handle()),
             settings_path,
             focus,
             preferences_window: None,
@@ -701,6 +717,7 @@ impl ReaderView {
             Change::Language(language) => self.set_language(language, window, cx),
             Change::Reset => self.reset_corrupt_settings(window, cx),
             Change::ReleaseStartupCheck(enabled) => self.set_release_startup_check(enabled, cx),
+            Change::DeveloperMode(enabled) => self.set_developer_mode(enabled, window, cx),
             Change::Remember(value)
                 if self.reader.settings.preferences.remember_position != value =>
             {
@@ -733,6 +750,11 @@ impl ReaderView {
     }
 
     fn set_error(&mut self, error: impl Into<String>, cx: &mut Context<Self>) {
+        self.developer_log(
+            crate::developer::Target::App,
+            crate::developer::EventCode::Failed,
+            false,
+        );
         self.set_localized_message(Text::ErrorDetails, vec![("error", error.into())], true, cx);
     }
 
@@ -869,6 +891,7 @@ impl ReaderView {
     }
 
     fn tick(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.developer_tick(window, cx);
         if !cx.has_active_drag() && self.pending_drop.take().is_some() {
             cx.notify();
         }
@@ -906,6 +929,7 @@ impl ReaderView {
             self.relayout(cx);
         }
         if self.content_mode == ContentMode::Reading
+            && !self.developer.busy()
             && self.reader.slideshow
             && Instant::now() >= self.next_slide
         {
@@ -955,6 +979,15 @@ impl ReaderView {
                 let result = save.await;
                 _ = view.update(cx, |view, cx| {
                     view.saving = false;
+                    view.developer_log(
+                        crate::developer::Target::Preferences,
+                        if result.is_ok() {
+                            crate::developer::EventCode::Completed
+                        } else {
+                            crate::developer::EventCode::Failed
+                        },
+                        result.is_ok(),
+                    );
                     if let Err(error) = result {
                         if view.save_error.as_deref() != Some(&error) {
                             view.save_error = Some(error.clone());
@@ -1007,6 +1040,7 @@ impl ReaderView {
         self.pending_browser_selection = None;
         self.browser_resume(cx);
         let revision = self.open_revision;
+        let started = Instant::now();
         let recursive = self.reader.settings.preferences.recursive_folder;
         let explicit_image = path.is_file()
             && book::IMAGE_EXTENSIONS.contains(
@@ -1052,6 +1086,16 @@ impl ReaderView {
                     return;
                 }
                 view.opening = false;
+                view.developer_log_elapsed(
+                    crate::developer::Target::Open,
+                    if result.is_ok() {
+                        crate::developer::EventCode::Completed
+                    } else {
+                        crate::developer::EventCode::Failed
+                    },
+                    result.is_ok(),
+                    started,
+                );
                 match result {
                     Ok((book, origin, folder_book, source_entry)) => {
                         view.content_mode = ContentMode::Reading;
@@ -1133,6 +1177,7 @@ impl ReaderView {
     fn load_browser_listing(&mut self, path: PathBuf, cx: &mut Context<Self>) {
         self.listing_revision += 1;
         let revision = self.listing_revision;
+        let started = Instant::now();
         self.listing_error = None;
         let task = cx.background_spawn(async move { book::browse_directory(&path) });
         cx.spawn(async move |view, cx| {
@@ -1141,6 +1186,16 @@ impl ReaderView {
                 if revision != view.listing_revision || view.closing {
                     return;
                 }
+                view.developer_log_elapsed(
+                    crate::developer::Target::List,
+                    if result.is_ok() {
+                        crate::developer::EventCode::Completed
+                    } else {
+                        crate::developer::EventCode::Failed
+                    },
+                    result.is_ok(),
+                    started,
+                );
                 match result {
                     Ok(listing) => {
                         view.listing = Some(listing);
@@ -1184,6 +1239,11 @@ impl ReaderView {
     }
 
     fn after_navigation(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.developer_log(
+            crate::developer::Target::Navigation,
+            crate::developer::EventCode::Changed,
+            true,
+        );
         if self.reader.settings.preferences.mode == ReadingMode::Continuous {
             self.continuous.scroll_to(ListOffset {
                 item_ix: self.reader.current,
@@ -1368,6 +1428,14 @@ impl ReaderView {
     fn perform(&mut self, command: Command, window: &mut Window, cx: &mut Context<Self>) {
         let language = self.language();
         use Command::*;
+        if self.developer.busy()
+            && !matches!(
+                command,
+                DeveloperCopy | DeveloperDisconnect | DeveloperSelect | Settings | Quit | Escape
+            )
+        {
+            return;
+        }
         if self.info_open
             && matches!(
                 command,
@@ -1431,6 +1499,25 @@ impl ReaderView {
             }
         }
         match command {
+            DeveloperCopy => self.developer_copy(cx),
+            DeveloperDisconnect => {
+                if let Some(service) = &self.developer.service {
+                    service.disconnect();
+                }
+                cx.notify();
+            }
+            DeveloperSelect => {
+                if !self.developer.busy() && self.developer.state_text() != Text::DeveloperConnected
+                {
+                    self.developer_copy(cx);
+                } else if !self.developer.busy()
+                    && let Some(picker) = self.developer.reader_picker.clone()
+                {
+                    picker.start(window, cx);
+                    self.developer.status = Some(Text::DeveloperPickHint);
+                    cx.notify();
+                }
+            }
             Browse => self.show_browser(window, cx),
             ContinueReading => self.resume_reading(window, cx),
             BrowserBack => {
@@ -1468,6 +1555,10 @@ impl ReaderView {
             OpenFolder => self.request_dialog(true, window, cx),
             SavePage => self.save_page(window, cx),
             Quit => {
+                if self.confirm_developer_quit(window, cx) {
+                    return;
+                }
+                self.developer.service = None;
                 self.closing = true;
                 self.close_preferences(cx);
                 cx.quit();
@@ -2077,6 +2168,13 @@ impl ReaderView {
             .small()
             .ghost()
             .accessibility_label(label)
+            .when(self.developer.reader_picker.is_some(), |button| {
+                button.relative().block_mouse_except_scroll()
+            })
+            .children(
+                self.developer
+                    .marker(id, label, "src/ui.rs::ReaderView::command_button"),
+            )
             .disabled(self.reading_command_blocked(command))
             .on_click(cx.listener(move |this, _, window, cx| {
                 this.perform(command, window, cx);
@@ -2237,6 +2335,16 @@ impl ReaderView {
                     }))
                     .trigger(
                         Button::new("zoom-trigger")
+                            .when_some(self.developer.reader_picker.as_ref(), |button, picker| {
+                                button.relative().when(picker.active(), |button| {
+                                    button.block_mouse_except_scroll()
+                                })
+                            })
+                            .children(self.developer.marker(
+                                "zoom-trigger",
+                                language.text(Text::Zoom),
+                                "src/ui.rs::ReaderView::render_zoom_control",
+                            ))
                             .small()
                             .outline()
                             .h(px(CONTROL_HEIGHT))
@@ -2576,6 +2684,16 @@ impl ReaderView {
             let view = cx.entity().downgrade();
             menus = menus.child(
                 Button::new(("menu", group))
+                    .when_some(self.developer.reader_picker.as_ref(), |button, picker| {
+                        button
+                            .relative()
+                            .when(picker.active(), |button| button.block_mouse_except_scroll())
+                    })
+                    .children(self.developer.marker(
+                        format!("menu-{group}"),
+                        language.text(label),
+                        "src/ui.rs::ReaderView::render_chrome",
+                    ))
                     .small()
                     .ghost()
                     .label(language.text(label))
@@ -2675,18 +2793,13 @@ impl ReaderView {
                     .flex_none()
                     .items_center()
                     .gap_1()
-                    .child(
-                        self.icon_button(
-                            "open",
-                            language.text(Text::Open),
-                            IconName::FolderOpen,
-                            Command::OpenFile,
-                            cx,
-                        )
-                        .when(!compact, |button| {
-                            button.w_auto().px_3().label(language.text(Text::Open))
-                        }),
-                    )
+                    .child(self.icon_button(
+                        "open",
+                        language.text(Text::Open),
+                        IconName::FolderOpen,
+                        Command::OpenFile,
+                        cx,
+                    ))
                     .child(
                         self.icon_button(
                             "sidebar-toggle",
@@ -2800,7 +2913,22 @@ impl ReaderView {
                         IconName::Ellipsis,
                         Command::Settings,
                         cx,
-                    )),
+                    ))
+                    .when(self.developer.enabled, |group| {
+                        group.child(self.icon_button(
+                            "developer-picker",
+                            language.text(
+                                if self.developer.state_text() == Text::DeveloperConnected {
+                                    Text::DeveloperSelect
+                                } else {
+                                    Text::DeveloperCopy
+                                },
+                            ),
+                            IconName::LocateFixed,
+                            Command::DeveloperSelect,
+                            cx,
+                        ))
+                    }),
             );
         div()
             .flex()
@@ -2836,6 +2964,18 @@ impl ReaderView {
         ] {
             tabs = tabs.child(
                 Button::new(id)
+                    .when(self.developer.reader_picker.is_some(), |button| {
+                        button.relative().block_mouse_except_scroll()
+                    })
+                    .children(self.developer.marker(
+                        match mode {
+                            SidebarMode::Files => "sidebar-files",
+                            SidebarMode::Thumbnails => "sidebar-thumbnails",
+                            SidebarMode::Recent => "sidebar-recent",
+                        },
+                        label,
+                        "src/ui.rs::ReaderView::render_sidebar",
+                    ))
                     .small()
                     .ghost()
                     .label(if mode == SidebarMode::Recent {
@@ -2904,7 +3044,7 @@ impl ReaderView {
                 if self.reader.settings.recent.is_empty() {
                     recent = recent.child(language.text(Text::NoHistory));
                 }
-                for path in &self.reader.settings.recent {
+                for (index, path) in self.reader.settings.recent.iter().enumerate() {
                     let target = path.clone();
                     let display = crate::file_tree::display_path(path);
                     let name = path
@@ -2913,6 +3053,14 @@ impl ReaderView {
                         .unwrap_or_else(|| display.clone());
                     recent = recent.child(
                         Button::new(SharedString::from(format!("recent:{}", path.display())))
+                            .when(self.developer.reader_picker.is_some(), |button| {
+                                button.relative().block_mouse_except_scroll()
+                            })
+                            .children(self.developer.marker(
+                                format!("recent-{index}"),
+                                language.text(Text::Recent),
+                                "src/ui.rs::ReaderView::render_sidebar",
+                            ))
                             .ghost()
                             .accessibility_label(name.clone())
                             .child(div().w_full().min_w_0().text_left().truncate().child(name))
@@ -2937,6 +3085,17 @@ impl ReaderView {
         };
         div()
             .id("sidebar")
+            .when(self.developer.reader_picker.is_some(), |region| {
+                region.relative().block_mouse_except_scroll()
+            })
+            .children(self.developer.reader_picker.as_ref().map(|picker| {
+                picker.mark(developer_session::metadata(
+                    "sidebar",
+                    language.text(Text::Sidebar),
+                    "src/ui.rs::ReaderView::render_sidebar",
+                    crate::developer::TargetKind::Region,
+                ))
+            }))
             .test_support()
             .role(gpui_kit::Role::Group)
             .aria_label(language.text(Text::Sidebar))
@@ -3047,6 +3206,14 @@ impl ReaderView {
                     book.path.display(),
                     page.name
                 )))
+                .when(self.developer.reader_picker.is_some(), |button| {
+                    button.relative().block_mouse_except_scroll()
+                })
+                .children(self.developer.marker(
+                    format!("thumbnail-{index}"),
+                    language.text(Text::Thumbnails),
+                    "src/ui.rs::ReaderView::thumbnail",
+                ))
                 .ghost()
                 .w_full()
                 .h(px(180.))
@@ -3327,6 +3494,17 @@ impl ReaderView {
             });
         div()
             .id("inspector")
+            .when(self.developer.reader_picker.is_some(), |region| {
+                region.relative().block_mouse_except_scroll()
+            })
+            .children(self.developer.reader_picker.as_ref().map(|picker| {
+                picker.mark(developer_session::metadata(
+                    "inspector",
+                    language.text(Text::Tools),
+                    "src/ui.rs::ReaderView::render_inspector",
+                    crate::developer::TargetKind::Region,
+                ))
+            }))
             .test_support()
             .role(gpui_kit::Role::Group)
             .aria_label(language.text(Text::ReadingTools))
@@ -3556,6 +3734,17 @@ impl ReaderView {
             .h_full()
             .bg(background)
             .overflow_hidden()
+            .when(self.developer.reader_picker.is_some(), |region| {
+                region.block_mouse_except_scroll()
+            })
+            .children(self.developer.reader_picker.as_ref().map(|picker| {
+                picker.mark(developer_session::metadata(
+                    "reading-canvas",
+                    language.text(Text::ReadingArea),
+                    "src/ui.rs::ReaderView::render_viewer",
+                    crate::developer::TargetKind::Region,
+                ))
+            }))
             .child(content)
             .capture_any_mouse_down(cx.listener(|this, _, _, _| {
                 this.continuous_target = None;
@@ -3732,6 +3921,16 @@ impl ReaderView {
             }))
             .trigger(
                 Button::new("info-trigger")
+                    .when_some(self.developer.reader_picker.as_ref(), |button, picker| {
+                        button
+                            .relative()
+                            .when(picker.active(), |button| button.block_mouse_except_scroll())
+                    })
+                    .children(self.developer.marker(
+                        "info-trigger",
+                        language.text(Text::PageInformation),
+                        "src/ui.rs::ReaderView::render_status",
+                    ))
                     .small()
                     .ghost()
                     .icon(IconName::Info)
@@ -3747,11 +3946,21 @@ impl ReaderView {
                     |view| view.read(cx).render_page_information(),
                 )
             });
+        let status_message = if self
+            .developer
+            .reader_picker
+            .as_ref()
+            .is_some_and(developer::Picker::active)
+        {
+            language.text(Text::DeveloperPickHint).to_owned()
+        } else {
+            self.message.clone()
+        };
         let message = div()
             .id("status-message")
             .test_support()
             .role(gpui_kit::Role::Status)
-            .aria_label(self.message.clone())
+            .aria_label(status_message.clone())
             .flex_1()
             .min_w_0()
             .truncate()
@@ -3761,7 +3970,7 @@ impl ReaderView {
             } else {
                 cx.theme().muted_foreground
             })
-            .child(self.message.clone());
+            .child(status_message);
         div()
             .id("reader-status")
             .test_support()
@@ -3889,6 +4098,13 @@ impl Render for ReaderView {
             .bg(cx.theme().background)
             .text_color(cx.theme().foreground)
             .text_size(px(13.))
+            .children(self.developer.reader_picker.as_ref().map(|picker| {
+                developer_session::frame(
+                    picker,
+                    cx.entity().downgrade(),
+                    self.developer_context(false),
+                )
+            }))
             .child(self.render_chrome(window.viewport_size().width < px(1200.), cx))
             .child(self.render_release_notice(cx))
             .child(workspace)

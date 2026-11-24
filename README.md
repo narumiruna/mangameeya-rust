@@ -156,6 +156,55 @@ Checks use only `https://api.github.com/repos/narumiruna/mangameeya-rust/release
 
 The application never downloads or installs release payloads. Only when you select **Open download page** does it open the fixed [GitHub Releases page](https://github.com/narumiruna/mangameeya-rust/releases) in your browser. Download and install the release manually. The first version with these notifications also requires manual installation. Package signing is unchanged; updater SDK research remains deferred.
 
+### Developer mode and Pi
+
+Enable **Developer mode** in Preferences. It is off by default and stores its flag
+in `developer-mode.json` beside `settings.json`, without changing reader settings.
+Logs are memory-only and start when this mode starts; disabling clears them and
+closes the local listener. A saved enabled flag starts a fresh, unpaired service
+on the next launch.
+
+1. Run Pi from this repository and trust its project-local extension at
+   `.pi/extensions/mangameeya-dev/index.ts`. Use `/reload` if Pi was already open.
+2. Select **Copy Pi connection command**, then paste the command into the intended
+   Pi session. Verify the workspace and session shown in Preferences.
+3. Use **Select element** in Preferences, or **Dev** in the reader toolbar. Point
+   to highlight a supported element; click to enter feedback without activating it.
+4. Review the safe element/context preview. Enter adds a line; Ctrl/Cmd+Enter or
+   **Send to Pi** submits. Escape cancels. Text is limited to 8 KiB.
+5. Pi receives the request as a literal user message. Busy agents receive a
+   follow-up, not an interruption. Pi assesses the request before normal in-scope
+   development and checks. Results remain in Pi.
+
+The extension provides `mangameeya_logs` (severity/module/literal-text filters,
+bounded cursor pagination) and `mangameeya_status`. Use
+`/mangameeya-disconnect` or the Preferences button to disconnect. Reconnecting
+requires confirmation before an existing draft can be sent.
+
+Only `127.0.0.1` is supported, with a short-lived, single-use capability token.
+Pi and the app must use the same local network namespace; do not expose the
+listener to work around WSL/container separation. Never share the connection
+command. Pairing does not protect against a hostile process with your OS account.
+
+No comic images, file names, full paths, input values, or arbitrary descendant
+text enter captured diagnostics or element metadata. Explicit feedback text and
+requested diagnostics can reach Pi's configured model provider. Capture is
+limited to 5,000 events/8 MiB; responses and transport queues are bounded.
+A handoff acknowledgment does not prove later Pi input acceptance, model execution,
+or a completed change. Unknown delivery is not retried automatically; check Pi.
+Disabling cannot recall a request already handed to Pi.
+
+Coverage includes reader commands, main content regions, browser tiles and controls,
+Files rows, and Preferences choices. Dynamic item IDs are anonymous. Region
+fallbacks are labeled as regions; unknown occluding popups, framework scrollbar
+internals, OS title bars, and native file dialogs are not exact selectable targets.
+
+Verified integration versions: Pi 1.6.0 and Bun 1.3.14. Run
+`bun test ./.pi/extensions/mangameeya-dev/` for extension tests. The noninteractive
+`smoke.ts` script takes the installed Pi package directory as its final argument
+and uses an in-process stub provider, not a paid model. Native API-gate instructions
+are in [the production probe](examples/support/developer_probe-production/README.md).
+
 ### Zoom and page navigation
 
 The toolbar keeps one **Zoom** control for the current mode and actual percentage. Click it to open a popover.

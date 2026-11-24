@@ -1141,3 +1141,98 @@ checks events and geometry; this work does not claim new macOS Metal pixels.
   and preferences. Numeric bookmarks remain usable without stable-image tracking.
   Do not reset settings or change comic files. No package, tag, or release dispatch
   was made by this work.
+
+## Developer mode verification and limits
+
+Developer mode uses a separate `developer-mode.json` flag. It does not migrate
+reader settings. The application owns a bounded, authenticated loopback service;
+`.pi/extensions/mangameeya-dev/` connects only to an explicitly paired Pi session.
+Diagnostics and target metadata exclude file names, full paths, input values,
+and comic content. Explicitly submitted feedback text is shared with Pi.
+
+### Native and Pi discovery evidence
+
+The Windows release API probe passed at 125% DPI in two native windows. A separate
+production-only dependency graph has no `test-support` feature. It checks real
+GPUI hit testing, clipped bounds, deferred popup occlusion, unknown occluder
+rejection, double-click and held-move suppression, stale target removal, and a
+positive normal-control case. See
+[`examples/support/developer_probe-production/README.md`](../examples/support/developer_probe-production/README.md).
+The local evidence is `target/developer-probe-runtime.log`.
+
+The installed Pi 1.6.0 SDK smoke test passed with Bun 1.3.14 and an in-process stub
+provider. It checks trusted/untrusted project-local discovery, literal slash text,
+idle/busy follow-up delivery, deduplication, the actual read-only log tool, tree
+revocation, and shutdown. It makes no paid model call and writes no user files.
+The SDK's `dispose()` does not emit the shutdown lifecycle event; the fixture
+emits that event before disposal. An acknowledgment proves input-path handoff
+only, not later input acceptance, model execution, test success, or completed edits.
+
+### Regression scope and commands
+
+Rust and TypeScript tests compare the same native-serialized protocol fixture.
+Transport tests cover bounded authentication, partial frames/writes, oversized
+lengths, stalled peers, queue pressure, token expiry, fixed-code errors, delivery
+failure/uncertainty, log cursors, and cleanup. Native application tests cover
+reader/browser/Files/Preferences selection, safe anonymous identities, no original
+click action, stale held-pointer snapshots, reconnect confirmation, multiline
+input, draft preservation, focus, and disable/close behavior.
+
+Target owners use `block_mouse_except_scroll()` rather than `occlude()` inside
+scrollable content. Both preserve native mouse occlusion, but the latter also
+blocks ancestor scroll handlers. The production Preferences checks dispatch real
+scroll input, refresh the headless frame, and then inspect geometry. Cached
+headless observations before refresh are not evidence that native scrolling failed.
+
+Run the existing Cargo formatting, all-feature tests, all-target Clippy, and
+production rendering checks, plus:
+
+```sh
+bun test ./.pi/extensions/mangameeya-dev/
+bun .pi/extensions/mangameeya-dev/smoke.ts /path/to/installed/@earendil-works/pi-coding-agent
+cargo check --locked --release --bin mangameeya-rust
+```
+
+Replace the final smoke argument with the installed Pi package directory. The
+Windows verification uses the existing native Rust tools on PATH, including
+`cargo-fmt.exe` and `cargo-clippy.exe`. Logs are under `target/developer-mode/`.
+Final delivery-commit results belong in the pull request; intermediate local
+results are not proof of that commit or of all platforms. Run production rendering
+separately: the expanded Windows matrix can take about 280 seconds. A combined
+command reached its 300-second tool limit after the 448-test suite and Clippy
+passed. A separate attempt reported a Windows debug stack overflow. The harness
+now separates setup/special-case captures from the retained reader workflow,
+without increasing the stack size or removing assertions; the isolated rerun
+passed. Failure and rerun logs remain in `target/developer-mode/`.
+
+### Launch IPC baseline repair
+
+The unchanged baseline failed the Windows queue test with `ConnectionReset`.
+Instrumented probes observed resets within 5–23 ms despite successful receive and
+ACK write, not at the 500 ms receive deadline. Coalesced framing, TCP_NODELAY, and
+write-half shutdown did not fix the failure. The repair keeps the socket open
+after ACK until peer close, with a separate absolute 500 ms close-phase deadline
+and a byte limit. The existing receive deadline, token, endpoint, wire format,
+and queue capacity remain unchanged. Three added regressions check fragmentation,
+stalled-peer recovery, trailing-frame rejection, and the close deadline. This is
+not a general exactly-once delivery guarantee. Diagnostic probes are ignored
+local artifacts, not production logging.
+
+### Platform handoff and recovery
+
+Native Windows API, event, and geometry evidence does not prove physical input,
+IME behavior, every DPI, or macOS Metal pixels. Maintainers must review those
+native paths on the intended hardware; normal platform CI gates still apply.
+Unknown occluding popups, framework scrollbar internals, OS title bars, and native
+file dialogs are not exact selectable targets. Missing targets fail closed.
+
+Disabling revokes pairing and clears captured state. A saved enabled flag starts
+a fresh unpaired service after restart. Invalid sidecar files remain unchanged;
+a save failure before file replacement can retain the previous startup flag.
+The service stays off after a failed opt-out save. Use **Retry saving developer
+setting** in Preferences after the storage error is corrected. A directory-sync
+failure after replacement applies the saved value and shows a separate durability
+warning; retrying the save does not restart an active capture. Back up an invalid
+sidecar before explicit recovery. Older readers ignore this separate file; do not reset
+reading data to downgrade. Requests already handed to Pi cannot be recalled.
+No package publication, version tag, or release workflow dispatch is part of this work.
