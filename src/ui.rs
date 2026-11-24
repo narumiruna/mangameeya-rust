@@ -2912,16 +2912,13 @@ impl ReaderView {
                         cx,
                     ))
                     .when(self.developer.enabled, |group| {
-                        group.child(
-                            self.command_button(
-                                "developer-picker",
-                                language.text(Text::DeveloperSelect),
-                                Command::DeveloperSelect,
-                                cx,
-                            )
-                            .label("Dev")
-                            .tooltip(language.text(Text::DeveloperSelect)),
-                        )
+                        group.child(self.icon_button(
+                            "developer-picker",
+                            language.text(Text::DeveloperSelect),
+                            IconName::SquareMousePointer,
+                            Command::DeveloperSelect,
+                            cx,
+                        ))
                     }),
             );
         div()

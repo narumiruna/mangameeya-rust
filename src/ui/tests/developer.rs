@@ -71,6 +71,44 @@ fn pair(f: &Fixture, cx: &mut TestAppContext) -> TcpStream {
     stream
 }
 #[gpui_kit::test]
+fn developer_picker_is_icon_only_across_sizes_and_locales(cx: &mut TestAppContext) {
+    let f = fixture(cx);
+    enable(&f, cx);
+    for language in Language::ALL {
+        for (width, height) in [(1280., 800.), (960., 640.), (800., 540.)] {
+            cx.update_window(f.window, |_, window, cx| {
+                f.view
+                    .update(cx, |view, cx| view.set_language(language, window, cx));
+                window.resize(size(px(width), px(height)));
+                window.bounds_changed(cx);
+            })
+            .unwrap();
+            pump(&f, cx);
+            cx.update_window(f.window, |_, window, _| {
+                let picker = window.find("developer-picker");
+                assert_eq!(picker.label(), Some(language.text(Text::DeveloperSelect)));
+                assert_eq!(
+                    picker.bounds().size,
+                    size(px(CONTROL_HEIGHT), px(CONTROL_HEIGHT))
+                );
+                let id: gpui_kit::ElementId = "developer-picker".into();
+                assert!(
+                    gpui_kit::base::test_support::texts(window)
+                        .iter()
+                        .all(|text| !text.path().contains(&id) || !text.visible()),
+                    "Developer picker must be icon-only, with no painted label"
+                );
+            })
+            .unwrap();
+        }
+    }
+    pick_open(&f, cx);
+    f.view.read_with(cx, |view, _| {
+        assert_eq!(view.developer.selected_target().unwrap().id, "open");
+    });
+}
+
+#[gpui_kit::test]
 fn developer_mode_keeps_every_menu_bar_dropdown_interactive(cx: &mut TestAppContext) {
     let f = fixture(cx);
     for enabled in [false, true, false] {
