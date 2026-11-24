@@ -176,8 +176,18 @@ impl ReaderView {
                     let old_location = view.files_ui.model.location().map(Path::to_path_buf);
                     let was_hidden = view.files_ui.model.show_hidden();
                     let was_navigation = view.files_ui.model.is_navigation_request(request.token);
+                    let success = result.is_ok();
                     let accepted = view.files_ui.model.complete(request.token, result);
                     if accepted {
+                        view.developer_log(
+                            crate::developer::Target::List,
+                            if success {
+                                crate::developer::EventCode::Completed
+                            } else {
+                                crate::developer::EventCode::Failed
+                            },
+                            success,
+                        );
                         if view.files_ui.auto_reveal
                             && let Some(target) = view.files_ui.reveal_target.clone()
                             && view.files_ui.model.location() == target.parent()
@@ -562,6 +572,19 @@ impl ReaderView {
     ) -> Button {
         let label = self.language().text(text);
         Button::new(id)
+            .when(self.developer.reader_picker.is_some(), |e| {
+                e.relative().block_mouse_except_scroll()
+            })
+            .children(self.developer.marker(
+                id,
+                match action {
+                    FilesAction::Back => "Back folder",
+                    FilesAction::Parent => "Parent folder",
+                    FilesAction::Locate => "Locate current file",
+                    FilesAction::Hidden => "Show hidden files",
+                },
+                "src/ui/files.rs::files_icon_button",
+            ))
             .small()
             .ghost()
             .icon(icon)
@@ -582,6 +605,25 @@ impl ReaderView {
         let language = self.language();
         self.files_ui.rendered.borrow_mut().clear();
         let view = cx.entity().downgrade();
+        let search = Input::new(&self.files_ui.search)
+            .id("files-search")
+            .aria_label(language.text(Text::FilesSearchLoaded))
+            .small();
+        let search = if let Some(picker) = &self.developer.reader_picker {
+            div()
+                .relative()
+                .block_mouse_except_scroll()
+                .child(picker.mark(super::developer_session::metadata(
+                    "files-search",
+                    "Search loaded files",
+                    "src/ui/files.rs::render_files",
+                    crate::developer::TargetKind::Region,
+                )))
+                .child(search)
+                .into_any_element()
+        } else {
+            search.into_any_element()
+        };
         let mut controls = div()
             .flex_none()
             .p_2()
@@ -632,6 +674,17 @@ impl ReaderView {
                     .role(gpui_kit::Role::Group)
                     .aria_label(language.text(Text::FolderPath))
                     .aria_description(language.text(Text::FilesPathTip))
+                    .when(self.developer.reader_picker.is_some(), |e| {
+                        e.relative().block_mouse_except_scroll()
+                    })
+                    .children(self.developer.reader_picker.as_ref().map(|picker| {
+                        picker.mark(super::developer_session::metadata(
+                            "files-path",
+                            "Folder path input",
+                            "src/ui/files.rs::render_files",
+                            crate::developer::TargetKind::Region,
+                        ))
+                    }))
                     .child(
                         Input::new(&self.path_input)
                             .id("path-input")
@@ -639,12 +692,7 @@ impl ReaderView {
                             .small(),
                     ),
             )
-            .child(
-                Input::new(&self.files_ui.search)
-                    .id("files-search")
-                    .aria_label(language.text(Text::FilesSearchLoaded))
-                    .small(),
-            )
+            .child(search)
             .child(
                 div()
                     .id("files-search-hint")
@@ -680,6 +728,14 @@ impl ReaderView {
                     )
                     .child(
                         Button::new("files-retry-navigation")
+                            .when(self.developer.reader_picker.is_some(), |e| {
+                                e.relative().block_mouse_except_scroll()
+                            })
+                            .children(self.developer.marker(
+                                "files-retry-navigation",
+                                "Retry folder navigation",
+                                "src/ui/files.rs::render_files",
+                            ))
                             .small()
                             .ghost()
                             .label(language.text(Text::Retry))
@@ -704,6 +760,17 @@ impl ReaderView {
             .flex_1()
             .min_h_0()
             .overflow_hidden()
+            .when(self.developer.reader_picker.is_some(), |e| {
+                e.block_mouse_except_scroll()
+            })
+            .children(self.developer.reader_picker.as_ref().map(|picker| {
+                picker.mark(super::developer_session::metadata(
+                    "files-tree",
+                    "File tree",
+                    "src/ui/files.rs::render_files",
+                    crate::developer::TargetKind::Region,
+                ))
+            }))
             .child(
                 list(self.files_ui.list.clone(), move |index, _, cx| {
                     view.update(cx, |view, cx| view.file_tree_row(index, cx))
@@ -753,6 +820,17 @@ impl ReaderView {
             .min_h_0()
             .min_w_0()
             .overflow_hidden()
+            .when(self.developer.reader_picker.is_some(), |e| {
+                e.relative().block_mouse_except_scroll()
+            })
+            .children(self.developer.reader_picker.as_ref().map(|picker| {
+                picker.mark(super::developer_session::metadata(
+                    "files-panel",
+                    "Files sidebar",
+                    "src/ui/files.rs::render_files",
+                    crate::developer::TargetKind::Region,
+                ))
+            }))
             .child(controls)
             .child(tree)
             .child(
@@ -766,6 +844,14 @@ impl ReaderView {
                     .gap_1()
                     .child(
                         Button::new("files-read-selected")
+                            .when(self.developer.reader_picker.is_some(), |e| {
+                                e.relative().block_mouse_except_scroll()
+                            })
+                            .children(self.developer.marker(
+                                "files-read-selected",
+                                "Read selected file",
+                                "src/ui/files.rs::render_files",
+                            ))
                             .small()
                             .primary()
                             .label(language.text(Text::FilesReadSelected))
@@ -787,6 +873,14 @@ impl ReaderView {
                     )
                     .child(
                         Button::new("files-read-folder")
+                            .when(self.developer.reader_picker.is_some(), |e| {
+                                e.relative().block_mouse_except_scroll()
+                            })
+                            .children(self.developer.marker(
+                                "files-read-folder",
+                                "Read current folder",
+                                "src/ui/files.rs::render_files",
+                            ))
                             .small()
                             .ghost()
                             .label(language.text(Text::FilesReadFolder))
@@ -819,7 +913,18 @@ impl ReaderView {
                 .pr_2()
                 .flex()
                 .items_center()
-                .gap_1();
+                .gap_1()
+                .when(self.developer.reader_picker.is_some(), |e| {
+                    e.relative().block_mouse_except_scroll()
+                })
+                .children(self.developer.reader_picker.as_ref().map(|picker| {
+                    picker.mark(super::developer_session::metadata(
+                        format!("files-status-{index}"),
+                        "Folder loading status",
+                        "src/ui/files.rs::file_tree_row",
+                        crate::developer::TargetKind::Region,
+                    ))
+                }));
             if let Some(error) = error {
                 status = status
                     .child(
@@ -843,6 +948,17 @@ impl ReaderView {
                             "files-retry:{:?}",
                             path.as_os_str()
                         )))
+                        .when(self.developer.reader_picker.is_some(), |e| {
+                            e.relative().block_mouse_except_scroll()
+                        })
+                        .children(self.developer.reader_picker.as_ref().map(|picker| {
+                            picker.mark(super::developer_session::metadata(
+                                format!("files-retry-{index}"),
+                                "Retry folder load",
+                                "src/ui/files.rs::file_tree_row",
+                                crate::developer::TargetKind::Element,
+                            ))
+                        }))
                         .small()
                         .ghost()
                         .label(language.text(Text::Retry))
@@ -892,6 +1008,17 @@ impl ReaderView {
             .flex()
             .items_center()
             .pr_1()
+            .when(self.developer.reader_picker.is_some(), |e| {
+                e.relative().block_mouse_except_scroll()
+            })
+            .children(self.developer.reader_picker.as_ref().map(|picker| {
+                picker.mark(super::developer_session::metadata(
+                    format!("files-row-{index}"),
+                    "File tree row",
+                    "src/ui/files.rs::file_tree_row",
+                    crate::developer::TargetKind::Region,
+                ))
+            }))
             .children((0..row.depth.min(5)).map(|_| {
                 div()
                     .w(px(10.))
@@ -903,6 +1030,17 @@ impl ReaderView {
         if directory {
             content = content.child(
                 Button::new(disclosure_id(&path))
+                    .when(self.developer.reader_picker.is_some(), |e| {
+                        e.relative().block_mouse_except_scroll()
+                    })
+                    .children(self.developer.reader_picker.as_ref().map(|picker| {
+                        picker.mark(super::developer_session::metadata(
+                            format!("files-toggle-{index}"),
+                            "Expand or collapse folder",
+                            "src/ui/files.rs::file_tree_row",
+                            crate::developer::TargetKind::Element,
+                        ))
+                    }))
                     .small()
                     .ghost()
                     .icon(if expanded {
@@ -954,6 +1092,17 @@ impl ReaderView {
         content
             .child(
                 Button::new(entry_id(&path))
+                    .when(self.developer.reader_picker.is_some(), |e| {
+                        e.relative().block_mouse_except_scroll()
+                    })
+                    .children(self.developer.reader_picker.as_ref().map(|picker| {
+                        picker.mark(super::developer_session::metadata(
+                            format!("files-entry-{index}"),
+                            "File tree item",
+                            "src/ui/files.rs::file_tree_row",
+                            crate::developer::TargetKind::Element,
+                        ))
+                    }))
                     .small()
                     .ghost()
                     .tab_stop(false)

@@ -24,6 +24,7 @@ pub(super) enum Change {
     Background(Background),
     Language(Language),
     ReleaseStartupCheck(bool),
+    DeveloperMode(bool),
     Reset,
 }
 
@@ -42,11 +43,19 @@ fn init(cx: &mut App) {
     }
     cx.set_global(BindingsInstalled);
     for key in ["escape", "ctrl-w"] {
-        cx.bind_keys([KeyBinding::new(key, Action::Close, Some("Preferences"))]);
+        cx.bind_keys([KeyBinding::new(
+            key,
+            Action::Close,
+            Some("Preferences && !Dialog"),
+        )]);
     }
     #[cfg(target_os = "macos")]
     {
-        cx.bind_keys([KeyBinding::new("cmd-w", Action::Close, Some("Preferences"))]);
+        cx.bind_keys([KeyBinding::new(
+            "cmd-w",
+            Action::Close,
+            Some("Preferences && !Dialog"),
+        )]);
         cx.bind_keys([
             KeyBinding::new("cmd-q", Command::Quit, Some("Preferences")),
             KeyBinding::new("cmd-,", Command::Settings, Some("Preferences")),
@@ -56,7 +65,7 @@ fn init(cx: &mut App) {
     cx.bind_keys([KeyBinding::new(
         "alt-f4",
         Action::Close,
-        Some("Preferences"),
+        Some("Preferences && !Dialog"),
     )]);
 }
 
@@ -91,12 +100,20 @@ pub(super) fn open(
     Ok(window)
 }
 
-fn close(
+pub(super) fn close(
     reader: WeakEntity<ReaderView>,
     reader_window: AnyWindowHandle,
     window: &mut Window,
     cx: &mut App,
 ) {
+    if super::developer_session::confirm_preferences_close(
+        reader.clone(),
+        reader_window,
+        window,
+        cx,
+    ) {
+        return;
+    }
     window.remove_window();
     cx.defer(move |cx| {
         _ = reader_window.update(cx, |_, window, cx| {
@@ -166,6 +183,26 @@ impl PreferencesView {
         });
     }
 
+    fn picker(&self, cx: &App) -> Option<super::developer::Picker> {
+        self.reader
+            .upgrade()
+            .and_then(|reader| reader.read(cx).developer.preferences_picker.clone())
+    }
+    fn marker(
+        &self,
+        id: &'static str,
+        label: &'static str,
+        cx: &App,
+    ) -> Option<gpui_kit::AnyElement> {
+        self.picker(cx).map(|picker| {
+            picker.mark(super::developer_session::metadata(
+                id,
+                label,
+                "src/ui/preferences.rs::PreferencesView",
+                crate::developer::TargetKind::Element,
+            ))
+        })
+    }
     fn label(language: Language, title: Text, description: Text, cx: &App) -> gpui_kit::Div {
         div()
             .flex()
@@ -221,11 +258,14 @@ impl PreferencesView {
             (false, "reading-direction-ltr", Text::DirectionLtr),
         ] {
             directions = directions.child(
-                Self::option(id, language.text(text), rtl == value, cx).on_click(cx.listener(
-                    move |this, _, _, cx| {
+                Self::option(id, language.text(text), rtl == value, cx)
+                    .when(self.picker(cx).is_some(), |button| {
+                        button.relative().block_mouse_except_scroll()
+                    })
+                    .children(self.marker(id, language.text(text), cx))
+                    .on_click(cx.listener(move |this, _, _, cx| {
                         this.change(Change::Direction(value), cx);
-                    },
-                )),
+                    })),
             );
         }
         let mut backgrounds = div().flex().flex_wrap().gap_2();
@@ -237,6 +277,18 @@ impl PreferencesView {
             let selected = background == value;
             backgrounds = backgrounds.child(
                 Button::new(id)
+                    .when(self.picker(cx).is_some(), |button| {
+                        button.relative().block_mouse_except_scroll()
+                    })
+                    .children(self.marker(
+                        match value {
+                            Background::Black => "background-black",
+                            Background::Gray => "background-gray",
+                            Background::Paper => "background-paper",
+                        },
+                        language.text(text),
+                        cx,
+                    ))
                     .small()
                     .outline()
                     .h_auto()
@@ -311,6 +363,14 @@ impl PreferencesView {
                     ))
                     .child(
                         Checkbox::new("remember-position")
+                            .when(self.picker(cx).is_some(), |checkbox| {
+                                checkbox.relative().block_mouse_except_scroll()
+                            })
+                            .children(self.marker(
+                                "remember-position",
+                                language.text(Text::RememberPosition),
+                                cx,
+                            ))
                             .accessibility_label(language.text(Text::RememberPosition))
                             .checked(remember)
                             .on_change(cx.listener(|this, value, _, cx| {
@@ -383,6 +443,14 @@ impl PreferencesView {
             )
             .child(
                 Checkbox::new("release-check-on-startup")
+                    .when(self.picker(cx).is_some(), |checkbox| {
+                        checkbox.relative().block_mouse_except_scroll()
+                    })
+                    .children(self.marker(
+                        "release-check-on-startup",
+                        language.text(Text::ReleaseCheckOnStartup),
+                        cx,
+                    ))
                     .label(language.text(Text::ReleaseCheckOnStartup))
                     .accessibility_label(language.text(Text::ReleaseCheckOnStartup))
                     .checked(state.preferences.check_on_startup)
@@ -443,6 +511,120 @@ impl PreferencesView {
         section
     }
 
+    fn developer(&self, language: Language, cx: &mut Context<Self>) -> gpui_kit::AnyElement {
+        let Some(entity) = self.reader.upgrade() else {
+            return div().into_any_element();
+        };
+        let reader = entity.read(cx);
+        let enabled = reader.developer.enabled;
+        let status = reader.developer.state_text();
+        let message = reader.developer.status;
+        let error = reader.developer.preference_error;
+        let picker = reader.developer.preferences_picker.clone();
+        let service = reader.developer.service.is_some();
+        let destination = reader
+            .developer
+            .service
+            .as_ref()
+            .map(|s| s.status())
+            .map(|s| {
+                format!(
+                    "{}\n{}",
+                    s.workspace.unwrap_or_default(),
+                    s.session_id.unwrap_or_default()
+                )
+            })
+            .unwrap_or_default();
+        let weak = self.reader.clone();
+        div()
+            .id("developer-preferences")
+            .test_support()
+            .flex()
+            .flex_col()
+            .gap_3()
+            .border_t_1()
+            .border_color(cx.theme().border)
+            .pt_5()
+            .child(
+                div()
+                    .font_weight(gpui_kit::FontWeight::SEMIBOLD)
+                    .child(language.text(Text::DeveloperMode)),
+            )
+            .child(
+                div()
+                    .text_xs()
+                    .child(language.text(Text::DeveloperDescription)),
+            )
+            .child(
+                Checkbox::new("developer-mode")
+                    .label(language.text(Text::DeveloperMode))
+                    .accessibility_label(language.text(Text::DeveloperMode))
+                    .checked(enabled)
+                    .on_change(cx.listener(|this, value, _, cx| {
+                        this.change(Change::DeveloperMode(*value), cx)
+                    })),
+            )
+            .child(
+                div()
+                    .id("developer-state")
+                    .test_support()
+                    .child(language.text(status)),
+            )
+            .children(enabled.then(|| div().text_xs().child(destination)))
+            .when(enabled, |section| {
+                section.child(
+                    div()
+                        .flex()
+                        .flex_wrap()
+                        .gap_2()
+                        .child(
+                            Button::new("developer-copy")
+                                .small()
+                                .label(language.text(Text::DeveloperCopy))
+                                .disabled(!service || status == Text::DeveloperConnected)
+                                .on_click(cx.listener(|this, _, _, cx| {
+                                    this.forward(Command::DeveloperCopy, cx)
+                                })),
+                        )
+                        .child(
+                            Button::new("developer-select")
+                                .small()
+                                .label(language.text(Text::DeveloperSelect))
+                                .disabled(picker.is_none())
+                                .on_click(move |_, window, cx| {
+                                    if let Some(picker) = &picker {
+                                        super::developer_session::begin(
+                                            weak.clone(),
+                                            picker.clone(),
+                                            window,
+                                            cx,
+                                        );
+                                    }
+                                }),
+                        )
+                        .child(
+                            Button::new("developer-disconnect")
+                                .small()
+                                .label(language.text(Text::DeveloperDisconnect))
+                                .disabled(!service)
+                                .on_click(cx.listener(|this, _, _, cx| {
+                                    this.forward(Command::DeveloperDisconnect, cx)
+                                })),
+                        ),
+                )
+            })
+            .children(message.map(|m| div().text_xs().child(language.text(m))))
+            .children(error.then(|| {
+                div()
+                    .id("developer-preference-error")
+                    .test_support()
+                    .text_xs()
+                    .text_color(cx.theme().danger)
+                    .child(language.text(Text::DeveloperPreferenceError))
+            }))
+            .into_any_element()
+    }
+
     fn general(&self, language: Language, cx: &mut Context<Self>) -> impl IntoElement {
         let mut languages = div().flex().flex_wrap().gap_2();
         for choice in Language::ALL {
@@ -453,6 +635,17 @@ impl PreferencesView {
                     language == choice,
                     cx,
                 )
+                .when(self.picker(cx).is_some(), |button| {
+                    button.relative().block_mouse_except_scroll()
+                })
+                .children(self.picker(cx).map(|picker| {
+                    picker.mark(super::developer_session::metadata(
+                        format!("language-{}", choice.code()),
+                        choice.native_name(),
+                        "src/ui/preferences.rs::general",
+                        crate::developer::TargetKind::Element,
+                    ))
+                }))
                 .on_click(cx.listener(move |this, _, _, cx| {
                     this.change(Change::Language(choice), cx);
                 })),
@@ -511,6 +704,9 @@ impl Render for PreferencesView {
         let background = prefs.background;
         let error = reader.save_error.clone();
         let release_notifications = reader.release_notifications.clone();
+        let developer_picker = reader.developer.preferences_picker.clone();
+        let developer_reader = self.reader.clone();
+        let developer_context = reader.developer_context(true);
         window.set_window_title(language.text(Text::Preferences));
 
         let mut content = div()
@@ -531,7 +727,8 @@ impl Render for PreferencesView {
                     .py(px(24.))
                     .child(self.reading(language, remember, rtl, background, cx))
                     .child(self.general(language, cx))
-                    .child(self.releases(language, &release_notifications, cx)),
+                    .child(self.releases(language, &release_notifications, cx))
+                    .child(self.developer(language, cx)),
             );
         if let Some(error) = error {
             content = content.child(
@@ -571,6 +768,16 @@ impl Render for PreferencesView {
             .key_context("Preferences")
             .track_focus(&self.focus)
             .on_action(cx.listener(|this, _: &Action, window, cx| {
+                let picker = this
+                    .reader
+                    .upgrade()
+                    .and_then(|entity| entity.read(cx).developer.preferences_picker.clone());
+                if let Some(picker) = picker
+                    && picker.active()
+                {
+                    picker.cancel(window, cx);
+                    return;
+                }
                 close(this.reader.clone(), this.reader_window, window, cx)
             }))
             // These are explicit native menu actions, not Reader key bindings.
@@ -581,6 +788,9 @@ impl Render for PreferencesView {
             .bg(cx.theme().background)
             .text_color(cx.theme().foreground)
             .text_size(px(13.))
+            .children(developer_picker.as_ref().map(|picker| {
+                super::developer_session::frame(picker, developer_reader, developer_context)
+            }))
             .child(content)
             .child(
                 div()
