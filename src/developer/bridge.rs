@@ -10,6 +10,19 @@ use std::time::{Duration, Instant};
 
 const IO_DEADLINE: Duration = Duration::from_secs(2);
 const APPROVAL_DEADLINE: Duration = Duration::from_secs(60);
+
+#[cfg(any(not(test), windows))]
+fn discovery_home() -> Option<std::path::PathBuf> {
+    #[cfg(windows)]
+    {
+        std::env::home_dir()
+    }
+    #[cfg(not(windows))]
+    {
+        directories::BaseDirs::new().map(|dirs| dirs.home_dir().to_path_buf())
+    }
+}
+
 struct Approval {
     request: PairingRequest,
     generation: u64,
@@ -48,7 +61,7 @@ pub struct DeveloperService {
 impl DeveloperService {
     pub fn start() -> Result<Self, String> {
         #[cfg(not(test))]
-        let home = directories::BaseDirs::new().map(|dirs| dirs.home_dir().to_path_buf());
+        let home = discovery_home();
         #[cfg(test)]
         let home: Option<std::path::PathBuf> = None;
         Self::start_with_home(home.as_deref())
@@ -788,6 +801,44 @@ fn serve(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(windows)]
+    #[test]
+    fn discovery_uses_overridden_userprofile_without_appdata() {
+        const CHILD_HOME: &str = "MANGAMEEYA_TEST_DISCOVERY_HOME";
+        if let Some(expected) = std::env::var_os(CHILD_HOME) {
+            let home = discovery_home().unwrap();
+            assert_eq!(home, std::path::PathBuf::from(expected));
+            assert!(!home.join("AppData").exists());
+            let service = DeveloperService::start_with_home(Some(&home)).unwrap();
+            assert!(service._publication.is_some());
+            assert_eq!(
+                fs::read_dir(home.join(".mangameeya/developer"))
+                    .unwrap()
+                    .count(),
+                1
+            );
+            return;
+        }
+        let home = tempfile::tempdir().unwrap();
+        let output = std::process::Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "developer::bridge::tests::discovery_uses_overridden_userprofile_without_appdata",
+                "--nocapture",
+            ])
+            .env("USERPROFILE", home.path())
+            .env(CHILD_HOME, home.path())
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "child failed: {}{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+
     fn send(socket: &mut TcpStream, value: Value) {
         let b = serde_json::to_vec(&value).unwrap();
         socket.write_all(&(b.len() as u32).to_be_bytes()).unwrap();

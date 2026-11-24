@@ -19,16 +19,25 @@ impl Publication {
         let mut directory = home.canonicalize()?;
         for component in [".mangameeya", "developer"] {
             directory.push(component);
-            reject_symlink(&directory)?;
-            if !directory.exists() {
-                #[cfg(unix)]
-                {
-                    use std::os::unix::fs::DirBuilderExt;
-                    let mut builder = fs::DirBuilder::new();
-                    builder.mode(0o700).create(&directory)?;
+            #[cfg(unix)]
+            let result = {
+                use std::os::unix::fs::DirBuilderExt;
+                fs::DirBuilder::new().mode(0o700).create(&directory)
+            };
+            #[cfg(not(unix))]
+            let result = fs::create_dir(&directory);
+            match result {
+                Ok(()) => {}
+                Err(e) if e.kind() == io::ErrorKind::AlreadyExists => {
+                    let metadata = fs::symlink_metadata(&directory)?;
+                    if metadata.file_type().is_symlink() {
+                        return Err(io::ErrorKind::PermissionDenied.into());
+                    }
+                    if !metadata.is_dir() {
+                        return Err(e);
+                    }
                 }
-                #[cfg(not(unix))]
-                fs::create_dir(&directory)?;
+                Err(e) => return Err(e),
             }
             #[cfg(unix)]
             {
@@ -171,12 +180,95 @@ mod tests {
         drop(record);
         assert_eq!(fs::metadata(path).unwrap().len(), 128 * 1024 * 1024);
     }
+    #[test]
+    fn preexisting_directories_are_accepted() {
+        let home = tempfile::tempdir().unwrap();
+        let directory = home.path().join(".mangameeya/developer");
+        fs::create_dir_all(&directory).unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            for path in [&directory, directory.parent().unwrap()] {
+                fs::set_permissions(path, fs::Permissions::from_mode(0o755)).unwrap();
+            }
+        }
+        let record = Publication::publish(home.path(), &"a".repeat(64), 1234).unwrap();
+        assert!(record.path.is_file());
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            for path in [&directory, directory.parent().unwrap()] {
+                assert_eq!(
+                    fs::metadata(path).unwrap().permissions().mode() & 0o777,
+                    0o700
+                );
+            }
+            assert_eq!(
+                fs::metadata(&record.path).unwrap().permissions().mode() & 0o777,
+                0o600
+            );
+        }
+    }
+    #[test]
+    fn preexisting_files_are_rejected() {
+        for component in [".mangameeya", ".mangameeya/developer"] {
+            let home = tempfile::tempdir().unwrap();
+            let path = home.path().join(component);
+            fs::create_dir_all(path.parent().unwrap()).unwrap();
+            fs::write(&path, b"existing file").unwrap();
+            let error = Publication::publish(home.path(), &"a".repeat(64), 1)
+                .err()
+                .unwrap();
+            assert_eq!(error.kind(), io::ErrorKind::AlreadyExists);
+            assert_eq!(fs::read(path).unwrap(), b"existing file");
+        }
+    }
+    #[test]
+    fn concurrent_fresh_home_publications_succeed() {
+        use std::sync::{Arc, Barrier};
+        for _ in 0..8 {
+            let home = tempfile::tempdir().unwrap();
+            let barrier = Arc::new(Barrier::new(8));
+            let threads: Vec<_> = (0..8)
+                .map(|index| {
+                    let home = home.path().to_path_buf();
+                    let barrier = Arc::clone(&barrier);
+                    std::thread::spawn(move || {
+                        barrier.wait();
+                        Publication::publish(&home, &format!("{index:064x}"), 1234)
+                    })
+                })
+                .collect();
+            let records: Vec<_> = threads
+                .into_iter()
+                .map(|thread| thread.join().unwrap().unwrap())
+                .collect();
+            for record in &records {
+                assert_eq!(fs::read(&record.path).unwrap(), record.bytes);
+            }
+            assert_eq!(
+                fs::read_dir(home.path().join(".mangameeya/developer"))
+                    .unwrap()
+                    .count(),
+                records.len()
+            );
+        }
+    }
     #[cfg(unix)]
     #[test]
     fn symlink_directory_is_rejected() {
-        let home = tempfile::tempdir().unwrap();
-        let other = tempfile::tempdir().unwrap();
-        std::os::unix::fs::symlink(other.path(), home.path().join(".mangameeya")).unwrap();
-        assert!(Publication::publish(home.path(), &"a".repeat(64), 1).is_err());
+        for component in [".mangameeya", ".mangameeya/developer"] {
+            let home = tempfile::tempdir().unwrap();
+            let other = tempfile::tempdir().unwrap();
+            let path = home.path().join(component);
+            fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::os::unix::fs::symlink(other.path(), &path).unwrap();
+            let error = Publication::publish(home.path(), &"a".repeat(64), 1)
+                .err()
+                .unwrap();
+            assert_eq!(error.kind(), io::ErrorKind::PermissionDenied);
+            assert!(fs::symlink_metadata(path).unwrap().file_type().is_symlink());
+            assert_eq!(fs::read_dir(other.path()).unwrap().count(), 0);
+        }
     }
 }

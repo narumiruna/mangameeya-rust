@@ -340,7 +340,7 @@ export class Bridge {
   private retired = new Set<string>();
   private pending = new Map<
     string,
-    { type: string; resolve: (x: Obj) => void; reject: (e: Error) => void }
+    { type: string; capture?: string; resolve: (x: Obj) => void; reject: (e: Error) => void }
   >();
   capture = "";
   closed = false;
@@ -404,7 +404,10 @@ export class Bridge {
             const p = this.pending.get(x.id);
             if (!p && this.retired.delete(x.id)) continue;
             if (!p || (x.type !== p.type && x.type !== "error")) fail();
-            if (x.type === "hello_ok") this.capture = x.capture_id;
+            if (x.type === "hello_ok") {
+              if (p.capture !== undefined && x.capture_id !== p.capture) fail();
+              this.capture = x.capture_id;
+            }
             this.pending.delete(x.id);
             x.type === "error"
               ? p.reject(new BridgeError(x.code))
@@ -461,6 +464,7 @@ export class Bridge {
       }, timeout);
       this.pending.set(id, {
         type: expected,
+        capture: type === "pair_request" ? params.instance_id : undefined,
         resolve: (x) => {
           cleanup();
           resolve(x);

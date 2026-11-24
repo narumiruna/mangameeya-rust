@@ -1157,9 +1157,21 @@ and comic content. Explicitly submitted feedback text is shared with Pi.
 `~/.mangameeya/developer/`, probes only `127.0.0.1`, and validates the live instance
 ID. Records contain exactly the discovery/protocol versions, instance ID, port,
 and App version; no capability, workspace, session, or feedback is published.
-Invalid, incompatible, unsafe, and stale records are ignored. One available App
-is selected directly; multiple Apps require a Pi chooser. Canceling the chooser
-does not send an approval request.
+Invalid, incompatible, unsafe, and stale records are ignored. Each attempt reads
+at most 256 directory entries and probes at most 32 candidates. A per-extension
+directory cursor resumes across failed attempts, including after the probe deadline.
+Records are read only when a probe can start. The cursor closes at EOF, errors,
+unsafe or replaced directories, and session shutdown. The next attempt after EOF
+starts a new scan. Records are never deleted by Pi.
+One available App is selected directly; multiple Apps require a Pi chooser.
+Canceling the chooser does not send an approval request.
+
+Windows discovery uses `std::env::home_dir()` to match Pi's `USERPROFILE` lookup,
+without changing the settings directory. Tests use a child process with an
+overridden profile that has no AppData directories. Pairing replies must match
+the selected instance ID before feedback can be dispatched. A trust check runs
+every 100 ms while a connection attempt is pending and cancels it on revocation;
+this is not an atomic notification from the trust system.
 
 The App allows one pending request for 60 seconds. Its confirmation displays the
 requester's workspace and session as client-supplied values. Allow authorizes only

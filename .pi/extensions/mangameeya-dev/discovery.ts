@@ -1,4 +1,4 @@
-import { constants, lstatSync, openSync, closeSync, fstatSync, readSync, opendirSync, type Stats } from "node:fs";
+import { constants, lstatSync, openSync, closeSync, fstatSync, readSync, opendirSync, type Dir, type Stats } from "node:fs";
 import { homedir } from "node:os";
 import { join, dirname } from "node:path";
 import { Bridge, BridgeError, object, text } from "./bridge.ts";
@@ -8,23 +8,36 @@ function safe(s: Stats) {
   return process.platform === "win32" ||
     (s.uid === process.getuid!() && (s.mode & 0o022) === 0);
 }
-// Fixed allocations and entry limits also apply to invalid records.
-export function records(directory = join(homedir(), ".mangameeya", "developer")): Instance[] {
-  const result: Instance[] = [];
-  try {
-    for (const path of [dirname(directory), directory]) {
-      const s = lstatSync(path);
-      if (!s.isDirectory() || !safe(s)) return [];
-    }
-    const dir = opendirSync(directory, { bufferSize: 16 });
+export class DiscoveryRecords {
+  private dir?: Dir;
+  private identity?: Stats;
+  constructor(private directory = join(homedir(), ".mangameeya", "developer")) {}
+  close() {
+    const dir = this.dir;
+    this.dir = undefined;
+    this.identity = undefined;
+    dir?.closeSync();
+  }
+  // Resume raw enumeration across attempts. Read only when a probe can start.
+  *read(): Generator<Instance> {
     try {
-      for (let n = 0; n < 256 && result.length < 32; n++) {
-        const entry = dir.readSync();
-        if (!entry) break;
+      const parent = lstatSync(dirname(this.directory)), current = lstatSync(this.directory);
+      if ([parent, current].some(s => !s.isDirectory() || !safe(s))) {
+        this.close();
+        return;
+      }
+      if (current.ino !== this.identity?.ino || current.dev !== this.identity?.dev) this.close();
+      this.dir ??= opendirSync(this.directory, { bufferSize: 16 });
+      this.identity = current;
+      let found = 0;
+      for (let n = 0; n < 256 && found < 32; n++) {
+        const entry = this.dir.readSync();
+        if (!entry) { this.close(); break; }
         if (!/^[0-9a-f]{64}\.json$/.test(entry.name) || !entry.isFile()) continue;
         let fd: number | undefined;
+        let candidate: Instance | undefined;
         try {
-          const path = join(directory, entry.name), before = lstatSync(path);
+          const path = join(this.directory, entry.name), before = lstatSync(path);
           if (!before.isFile() || !safe(before) || before.size > 2048) continue;
           fd = openSync(path, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0) | (constants.O_NONBLOCK ?? 0));
           const s = fstatSync(fd);
@@ -38,35 +51,39 @@ export function records(directory = join(homedir(), ".mangameeya", "developer"))
           if (x.v !== 1 || x.protocol_version !== 1 || x.instance_id !== entry.name.slice(0, -5) ||
               !Number.isInteger(x.port) || x.port < 1 || x.port > 65535) continue;
           text(x.app_version, 64);
-          result.push(x as Instance);
+          candidate = x as Instance;
         } catch { /* Invalid or replaced records are not discovery candidates. */ }
         finally { if (fd !== undefined) closeSync(fd); }
+        if (candidate) { found++; yield candidate; }
       }
-    } finally { dir.closeSync(); }
-  } catch { /* Missing or unsafe directories require manual pairing. */ }
-  return result;
+    } catch { this.close(); /* Missing or unsafe directories require manual pairing. */ }
+  }
 }
-export async function discover(signal: AbortSignal, check: () => void, candidates = records()): Promise<Instance[]> {
+export async function discover(signal: AbortSignal, check: () => void, candidates: Iterable<Instance>): Promise<Instance[]> {
   const available: Instance[] = [];
-  let next = 0;
+  const iterator = candidates[Symbol.iterator]();
   const deadline = Date.now() + 6000;
-  await Promise.all(Array.from({ length: 4 }, async () => {
-    while (next < candidates.length && Date.now() < deadline) {
-      check();
-      signal.throwIfAborted();
-      const candidate = candidates[next++];
-      const client = new Bridge(() => {});
-      const abort = () => client.close("canceled");
-      signal.addEventListener("abort", abort, { once: true });
-      try {
-        const x = await client.probe(candidate.port, candidate.instance_id, signal);
+  try {
+    await Promise.all(Array.from({ length: 4 }, async () => {
+      while (Date.now() < deadline) {
         check();
         signal.throwIfAborted();
-        if (x.available && x.app_version === candidate.app_version) available.push(candidate);
-      } catch { check(); signal.throwIfAborted(); }
-      finally { signal.removeEventListener("abort", abort); client.close(); }
-    }
-  }));
+        const next = iterator.next();
+        if (next.done) break;
+        const candidate = next.value;
+        const client = new Bridge(() => {});
+        const abort = () => client.close("canceled");
+        signal.addEventListener("abort", abort, { once: true });
+        try {
+          const x = await client.probe(candidate.port, candidate.instance_id, signal);
+          check();
+          signal.throwIfAborted();
+          if (x.available && x.app_version === candidate.app_version) available.push(candidate);
+        } catch { check(); signal.throwIfAborted(); }
+        finally { signal.removeEventListener("abort", abort); client.close(); }
+      }
+    }));
+  } finally { iterator.return?.(); }
   check();
   return available.sort((a, b) => a.instance_id.localeCompare(b.instance_id));
 }

@@ -99,6 +99,30 @@ const hello = (s: Socket, x: any) =>
   s.write(
     encode({ v: 1, id: x.id, type: "hello_ok", capture_id: "b".repeat(64) }),
   );
+test("pairing checks instance identity before setting capture or dispatching coalesced feedback", async () => {
+  for (const matched of [false, true]) {
+    const delivered: any[] = [];
+    await server(async port => {
+      const client = new Bridge(x => delivered.push(x));
+      try {
+        const pending = client.pair(port, (matched ? "b" : "c").repeat(64), "session", "workspace", new AbortController().signal);
+        if (matched) {
+          await pending;
+          expect(client.capture).toBe("b".repeat(64));
+          expect(delivered).toHaveLength(1);
+        } else {
+          await expect(pending).rejects.toMatchObject({ code: "protocol_mismatch" });
+          expect(client.capture).toBe("");
+          expect(client.closed).toBe(true);
+          expect(delivered).toEqual([]);
+        }
+      } finally { client.close(); }
+    }, (s, x) => s.write(Buffer.concat([
+      encode({ v: 1, id: x.id, type: "hello_ok", capture_id: "b".repeat(64) }),
+      encode(event()),
+    ])));
+  }
+});
 describe("strict wire validation", () => {
   test("Rust serialized contract fixtures", () => {
     expect(nativeFrames).toHaveLength(5);
@@ -234,6 +258,26 @@ describe("extension wiring", () => {
       ui: { notify: (...args: any[]) => notices.push(args) },
     };
   }
+  test("discovery cursor survives failed commands and closes on session shutdown", async () => {
+    const h = harness(), ctx = uiContext(), owners = new Set<discovery.DiscoveryRecords>();
+    const read = spyOn(discovery.DiscoveryRecords.prototype, "read").mockImplementation(function* (this: discovery.DiscoveryRecords) {
+      owners.add(this);
+    });
+    const close = spyOn(discovery.DiscoveryRecords.prototype, "close");
+    const probe = spyOn(discovery, "discover").mockImplementation(async (_signal, _check, candidates) => {
+      Array.from(candidates);
+      return [];
+    });
+    try {
+      await h.commands.get("mangameeya-connect").handler("", ctx);
+      await h.commands.get("mangameeya-connect").handler("", ctx);
+      expect(read).toHaveBeenCalledTimes(2);
+      expect(owners.size).toBe(1);
+      expect(close).not.toHaveBeenCalled();
+      for (const fn of h.events.get("session_shutdown")!) fn();
+      expect(close).toHaveBeenCalledTimes(1);
+    } finally { probe.mockRestore(); close.mockRestore(); read.mockRestore(); }
+  });
   test("no-argument pairing selects once, waits for App approval and handles denial", async () => {
     for (const denied of [false, true]) {
       const h = harness(), ctx = uiContext();
@@ -241,7 +285,7 @@ describe("extension wiring", () => {
       let arrived!: () => void;
       const pendingApproval = new Promise<void>(r => { arrived = r; });
       await server(async port => {
-        const candidate: discovery.Instance = { v: 1, protocol_version: 1, instance_id: "1".repeat(64), app_version: "1", port };
+        const candidate: discovery.Instance = { v: 1, protocol_version: 1, instance_id: "b".repeat(64), app_version: "1", port };
         const probe = spyOn(discovery, "discover").mockResolvedValue([candidate]);
         try {
           const pairing = h.commands.get("mangameeya-connect").handler("", ctx);
@@ -298,6 +342,25 @@ describe("extension wiring", () => {
       }, () => { pairRequests++; reached(); });
     });
   }
+  test("trust-only revocation cancels App approval before a reply", async () => {
+    const h = harness(), ctx = uiContext();
+    let arrived!: () => void;
+    const waiting = new Promise<void>(r => { arrived = r; });
+    await server(async port => {
+      const candidate: discovery.Instance = { v: 1, protocol_version: 1, instance_id: "b".repeat(64), app_version: "1", port };
+      const probe = spyOn(discovery, "discover").mockResolvedValue([candidate]);
+      try {
+        const pairing = h.commands.get("mangameeya-connect").handler("", ctx);
+        await waiting;
+        ctx.isProjectTrusted = () => false;
+        await pairing;
+        expect(ctx.notices).toEqual([["Waiting for confirmation in the Mangameeya App.", "info"]]);
+        const result = await h.tools.get("mangameeya_status").execute("id", {}, undefined, undefined, ctx);
+        expect(result.isError).toBe(true);
+        expect(result.details.code).toBe("disconnected");
+      } finally { probe.mockRestore(); }
+    }, () => arrived());
+  });
   test("current pairing reports a refused connection", async () => {
     const h = harness(), ctx = uiContext();
     const srv = createServer();

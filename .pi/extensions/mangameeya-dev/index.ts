@@ -8,7 +8,7 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { Bridge, BridgeError, feedback, object, query } from "./bridge.ts";
 
-import { discover, selectInstance } from "./discovery.ts";
+import { DiscoveryRecords, discover, selectInstance } from "./discovery.ts";
 
 export function formatFeedback(f: Record<string, any>) {
   return (
@@ -46,6 +46,8 @@ export class Delivery {
   }
 }
 export default function (pi: ExtensionAPI) {
+  const records = new DiscoveryRecords();
+  pi.on("session_shutdown", () => records.close());
   let bridge: Bridge | undefined,
     active: ExtensionContext | undefined,
     generation = 0;
@@ -80,6 +82,7 @@ export default function (pi: ExtensionAPI) {
       const gen = generation;
       const controller = new AbortController();
       attempt = controller;
+      let trustMonitor: ReturnType<typeof setInterval> | undefined;
       try {
         const root = realpathSync(
           resolve(dirname(fileURLToPath(import.meta.url)), "../../.."),
@@ -101,9 +104,13 @@ export default function (pi: ExtensionAPI) {
               realpathSync(ctx.sessionManager.getCwd()) !== root)
             throw new BridgeError("canceled");
         };
+        trustMonitor = setInterval(() => {
+          try { check(); }
+          catch { if (generation === gen) revoke(); }
+        }, 100);
         let instance;
         if (!manual) {
-          const available = await discover(controller.signal, check);
+          const available = await discover(controller.signal, check, records.read());
           check();
           instance = await selectInstance(available, ctx, controller.signal, check);
           check();
@@ -177,7 +184,7 @@ export default function (pi: ExtensionAPI) {
               : "Mangameeya connection failed. Check local pairing, project trust, and destination.",
             "error",
           );
-      }
+      } finally { clearInterval(trustMonitor); }
     },
   });
   const execute = async (
