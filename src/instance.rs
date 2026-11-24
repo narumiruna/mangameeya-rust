@@ -337,13 +337,43 @@ fn serve(
                 let _ = stream.set_write_timeout(Some(IO_TIMEOUT));
                 let accepted = receive_request(&mut stream, &token)
                     .is_ok_and(|paths| sender.try_send(paths).is_ok());
-                let _ = stream.write_all(&[u8::from(accepted)]);
+                let _ = acknowledge_request(&mut stream, accepted);
             }
             Ok(_) => {}
             Err(error) if error.kind() == io::ErrorKind::WouldBlock => thread::sleep(POLL_INTERVAL),
             Err(_) => break,
         }
     }
+}
+
+fn acknowledge_request(stream: &mut TcpStream, accepted: bool) -> io::Result<()> {
+    let deadline = Instant::now() + IO_TIMEOUT;
+    stream.write_all(&[u8::from(accepted)])?;
+    // Keep the connection open until the peer closes after reading the ACK.
+    // Closing (or shutting down writes) immediately can lose the ACK on Windows,
+    // causing a retry even though the request is already in the queue.
+    // Rejected requests can still have unread bytes. Bound both drain time and
+    // byte count so a peer cannot keep the single listener worker occupied.
+    let mut remaining_bytes = MAX_MESSAGE_BYTES + 4;
+    let mut buffer = [0_u8; 4096];
+    while remaining_bytes > 0 {
+        let remaining = deadline.saturating_duration_since(Instant::now());
+        if remaining.is_zero() {
+            return Err(io::Error::new(
+                io::ErrorKind::TimedOut,
+                "Launch close timed out",
+            ));
+        }
+        stream.set_read_timeout(Some(remaining))?;
+        let count = remaining_bytes.min(buffer.len());
+        match stream.read(&mut buffer[..count]) {
+            Ok(0) => return Ok(()),
+            Ok(count) => remaining_bytes -= count,
+            Err(error) if error.kind() == io::ErrorKind::Interrupted => {}
+            Err(error) => return Err(error),
+        }
+    }
+    Err(io::Error::other("Launch close exceeds its size limit"))
 }
 
 fn receive_request(stream: &mut TcpStream, token: &str) -> io::Result<Vec<PathBuf>> {
@@ -543,6 +573,92 @@ mod tests {
             assert!(receive(&primary).is_empty());
         }
         assert!(primary.try_recv().is_none());
+    }
+
+    #[test]
+    fn fragmented_requests_deliver_one_acknowledged_launch() {
+        let dir = TestDir::new();
+        let primary = primary(&dir.0, vec![]);
+        receive(&primary);
+        let endpoint = read_endpoint(&primary.endpoint_path).unwrap();
+        for index in 0..QUEUE_CAPACITY {
+            let paths = vec![dir.0.join(format!("chapter-{index}.cbz"))];
+            let request = encode_request(&endpoint.token, &paths).unwrap();
+            let mut stream = TcpStream::connect((Ipv4Addr::LOCALHOST, endpoint.port)).unwrap();
+            stream.set_read_timeout(Some(IO_TIMEOUT)).unwrap();
+            stream.set_write_timeout(Some(IO_TIMEOUT)).unwrap();
+            for byte in (request.len() as u32).to_be_bytes() {
+                stream.write_all(&[byte]).unwrap();
+            }
+            for chunk in request.chunks(7) {
+                stream.write_all(chunk).unwrap();
+            }
+            let mut accepted = [0];
+            stream.read_exact(&mut accepted).unwrap();
+            assert_eq!(accepted, [1]);
+            drop(stream);
+            assert_eq!(receive(&primary), paths);
+            assert!(primary.try_recv().is_none());
+        }
+    }
+
+    #[test]
+    fn stalled_peer_after_ack_does_not_enqueue_trailing_frames_or_block_service() {
+        let dir = TestDir::new();
+        let primary = primary(&dir.0, vec![]);
+        receive(&primary);
+        let endpoint = read_endpoint(&primary.endpoint_path).unwrap();
+        let request = encode_request(&endpoint.token, &[]).unwrap();
+        let mut frame = (request.len() as u32).to_be_bytes().to_vec();
+        frame.extend_from_slice(&request);
+        let mut stalled = TcpStream::connect((Ipv4Addr::LOCALHOST, endpoint.port)).unwrap();
+        stalled.set_read_timeout(Some(IO_TIMEOUT)).unwrap();
+        stalled.set_write_timeout(Some(IO_TIMEOUT)).unwrap();
+        stalled.write_all(&frame).unwrap();
+        let mut accepted = [0];
+        stalled.read_exact(&mut accepted).unwrap();
+        assert_eq!(accepted, [1]);
+        assert!(receive(&primary).is_empty());
+        // Trailing frames are drained, not interpreted as additional launches.
+        stalled.write_all(&frame).unwrap();
+        let mut next = TcpStream::connect((Ipv4Addr::LOCALHOST, endpoint.port)).unwrap();
+        next.set_read_timeout(Some(Duration::from_secs(2))).unwrap();
+        next.set_write_timeout(Some(IO_TIMEOUT)).unwrap();
+        let before = Instant::now();
+        next.write_all(&frame).unwrap();
+        next.read_exact(&mut accepted).unwrap();
+        assert_eq!(accepted, [1]);
+        assert!(before.elapsed() < Duration::from_secs(1));
+        assert!(receive(&primary).is_empty());
+        assert!(primary.try_recv().is_none());
+    }
+
+    #[test]
+    fn acknowledgment_waits_for_peer_close_with_a_deadline() {
+        let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let worker = thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            stream.set_write_timeout(Some(IO_TIMEOUT)).unwrap();
+            let before = Instant::now();
+            let result = acknowledge_request(&mut stream, true);
+            (result, before.elapsed())
+        });
+        let mut stream = TcpStream::connect((Ipv4Addr::LOCALHOST, port)).unwrap();
+        stream
+            .set_read_timeout(Some(Duration::from_secs(2)))
+            .unwrap();
+        let mut accepted = [0];
+        stream.read_exact(&mut accepted).unwrap();
+        assert_eq!(accepted, [1]);
+        // Keep the peer open. The worker must wait, but only for its deadline.
+        let (result, elapsed) = worker.join().unwrap();
+        let error = result.unwrap_err();
+        assert!(matches!(
+            error.kind(),
+            io::ErrorKind::TimedOut | io::ErrorKind::WouldBlock
+        ));
+        assert!(elapsed < Duration::from_secs(2));
     }
 
     #[test]
