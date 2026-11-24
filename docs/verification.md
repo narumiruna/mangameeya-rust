@@ -1228,7 +1228,11 @@ file dialogs are not exact selectable targets. Missing targets fail closed.
 
 Disabling revokes pairing and clears captured state. A saved enabled flag starts
 a fresh unpaired service after restart. Invalid sidecar files remain unchanged;
-a save failure can retain the previous startup flag. Back up an invalid sidecar
-before explicit recovery. Older readers ignore this separate file; do not reset
+a save failure before file replacement can retain the previous startup flag.
+The service stays off after a failed opt-out save. Use **Retry saving developer
+setting** in Preferences after the storage error is corrected. A directory-sync
+failure after replacement applies the saved value and shows a separate durability
+warning; retrying the save does not restart an active capture. Back up an invalid
+sidecar before explicit recovery. Older readers ignore this separate file; do not reset
 reading data to downgrade. Requests already handed to Pi cannot be recalled.
 No package publication, version tag, or release workflow dispatch is part of this work.

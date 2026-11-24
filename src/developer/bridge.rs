@@ -289,6 +289,16 @@ impl Peer {
         self.frame_started = None;
         Ok(Some(std::mem::take(&mut self.body)))
     }
+    fn flush_current(&mut self, shared: &Mutex<Shared>) -> io::Result<()> {
+        // Disconnect must not advance the generation between this check and write.
+        // The socket is nonblocking, so the lock does not wait for the reader.
+        let s = shared.lock().unwrap();
+        if self.paired && self.generation != s.generation {
+            self.writes.clear();
+            return Err(io::ErrorKind::ConnectionAborted.into());
+        }
+        self.flush()
+    }
     fn flush(&mut self) -> io::Result<()> {
         if let Some(w) = self.writes.front_mut() {
             if w.started.elapsed() > IO_DEADLINE {
@@ -332,7 +342,7 @@ fn handle(
     }
     if v != PROTOCOL_VERSION {
         let _ = error(peer, id, BridgeError::ProtocolMismatch);
-        let _ = peer.flush();
+        let _ = peer.flush_current(shared);
         return false;
     }
     if !peer.paired {
@@ -379,7 +389,7 @@ fn handle(
     match request {
         Request::Status { id, .. } => {
             let s = shared.lock().unwrap();
-            peer.enqueue(json!({"v":1,"id":id,"type":"status_result","status":{"app_version":env!("CARGO_PKG_VERSION"),"protocol_version":1,"instance_id":s.status.capture_id,"capture_id":s.status.capture_id,"session_id":s.status.session_id,"capture_started_ms":started,"ui_mode":s.ui_mode}}))
+            peer.enqueue(status_response(&id, &s, started))
         }
         Request::Logs {
             id,
@@ -426,6 +436,9 @@ fn handle(
         }
         _ => false,
     }
+}
+fn status_response(id: &str, s: &Shared, started: u64) -> Value {
+    json!({"v":1,"id":id,"type":"status_result","status":{"app_version":env!("CARGO_PKG_VERSION"),"protocol_version":PROTOCOL_VERSION,"instance_id":s.status.capture_id,"capture_id":s.status.capture_id,"session_id":s.status.session_id,"capture_started_ms":started,"ui_mode":s.ui_mode}})
 }
 fn complete(shared: &Mutex<Shared>, event: ServiceEvent) {
     let mut s = shared.lock().unwrap();
@@ -510,7 +523,7 @@ fn serve(
                 }
             }
             if alive {
-                alive = peer.flush().is_ok();
+                alive = peer.flush_current(&shared).is_ok();
             }
             let expired: Vec<_> = peer
                 .acks
@@ -669,9 +682,15 @@ mod tests {
         map.insert("v".into(), json!(1));
         map.insert("id".into(), json!("logs-1"));
         map.insert("type".into(), json!("logs_result"));
+        let status = {
+            let mut s = service.shared.lock().unwrap();
+            s.status.capture_id = capture.clone();
+            s.status.session_id = Some("test".into());
+            status_response("status-1", &s, 1000)
+        };
         let native = json!([
             {"v":1,"id":"hello-1","type":"hello_ok","capture_id":capture},
-            {"v":1,"id":"status-1","type":"status_result","status":{"app_version":"0.9.0","protocol_version":1,"instance_id":capture,"capture_id":capture,"session_id":"test","capture_started_ms":1000,"ui_mode":UiMode::Reading}},
+            status,
             logs,
             {"v":1,"id":item.feedback_id,"type":"feedback","feedback":item},
             {"v":1,"id":"error-1","type":"error","code":BridgeError::CaptureChanged}
@@ -757,13 +776,72 @@ mod tests {
         send(&mut socket, json!({"v":2,"id":"s","type":"status"}));
         assert_eq!(receive(&mut socket)["code"], "protocol_mismatch");
         drop(socket);
-        thread::sleep(Duration::from_millis(30));
+        let deadline = Instant::now() + Duration::from_secs(3);
+        while service.status().state != ConnectionState::WaitingForPi {
+            assert!(
+                Instant::now() < deadline,
+                "disconnected peer was not retired"
+            );
+            thread::sleep(Duration::from_millis(5));
+        }
         let mut socket = connect(&service);
         send(
             &mut socket,
             json!({"v":1,"id":"x","type":"status","unexpected":true}),
         );
         assert_closed(&mut socket);
+    }
+    #[test]
+    fn disconnect_drops_queued_and_partial_diagnostic_writes() {
+        let service = DeveloperService::start().unwrap();
+        let _paired = connect(&service);
+        let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
+        let mut client = TcpStream::connect(listener.local_addr().unwrap()).unwrap();
+        client
+            .set_read_timeout(Some(Duration::from_secs(3)))
+            .unwrap();
+        let (accepted, _) = listener.accept().unwrap();
+        let mut peer = Peer::new(accepted).unwrap();
+        peer.paired = true;
+        peer.generation = service.status().generation;
+        let (events, _receiver) = mpsc::sync_channel(32);
+        let queue = |peer: &mut Peer, request: Value| {
+            assert!(handle(
+                peer,
+                &serde_json::to_vec(&request).unwrap(),
+                &service.shared,
+                &service.logs,
+                &events,
+                1000,
+            ));
+        };
+        queue(&mut peer, json!({"v":1,"id":"s","type":"status"}));
+        while !peer.writes.is_empty() {
+            peer.flush_current(&service.shared).unwrap();
+        }
+        assert_eq!(receive(&mut client)["status"]["session_id"], "test");
+
+        queue(&mut peer, json!({"v":1,"id":"s2","type":"status"}));
+        queue(&mut peer, json!({"v":1,"id":"l","type":"logs"}));
+        assert!(peer.enqueue(
+            json!({"v":1,"id":"f","type":"feedback","feedback":feedback(&service, &"a".repeat(64))})
+        ));
+        // A partially sent frame must not resume after disconnect either.
+        peer.socket.write_all(&peer.writes[0].bytes[..2]).unwrap();
+        peer.writes[0].offset = 2;
+        client.read_exact(&mut [0; 2]).unwrap();
+        service.disconnect();
+        assert_eq!(
+            peer.flush_current(&service.shared).unwrap_err().kind(),
+            io::ErrorKind::ConnectionAborted
+        );
+        assert!(peer.writes.is_empty());
+        drop(peer);
+        assert_closed(&mut client);
+        // Retiring the old generation must not prevent a new authenticated peer.
+        let mut socket = connect(&service);
+        send(&mut socket, json!({"v":1,"id":"s","type":"status"}));
+        assert_eq!(receive(&mut socket)["status"]["session_id"], "test");
     }
     #[test]
     fn fragmented_frames_and_partial_write_resume() {

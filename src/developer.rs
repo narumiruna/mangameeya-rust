@@ -19,6 +19,11 @@ const MAX_LOG_BYTES: usize = 8 * 1024 * 1024;
 pub struct DeveloperPreferences {
     pub enabled: bool,
 }
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PreferenceSave {
+    Durable,
+    DurabilityUnconfirmed,
+}
 impl DeveloperPreferences {
     pub fn load_from(path: &Path) -> Result<Self, String> {
         let file = match File::open(path) {
@@ -36,7 +41,20 @@ impl DeveloperPreferences {
         serde_json::from_slice(&bytes)
             .map_err(|_| "Invalid developer preferences; file preserved".into())
     }
-    pub fn save_to(&self, path: &Path) -> Result<(), String> {
+    pub fn save_to(&self, path: &Path) -> Result<PreferenceSave, String> {
+        self.save_with_directory_sync(path, |parent| {
+            #[cfg(unix)]
+            File::open(parent)?.sync_all()?;
+            #[cfg(not(unix))]
+            let _ = parent;
+            Ok(())
+        })
+    }
+    fn save_with_directory_sync(
+        &self,
+        path: &Path,
+        sync_directory: impl FnOnce(&Path) -> std::io::Result<()>,
+    ) -> Result<PreferenceSave, String> {
         Self::load_from(path)?;
         let parent = path
             .parent()
@@ -51,11 +69,11 @@ impl DeveloperPreferences {
             .map_err(|_| "Cannot write developer preferences")?;
         temp.persist(path)
             .map_err(|_| "Cannot replace developer preferences")?;
-        #[cfg(unix)]
-        File::open(parent)
-            .and_then(|f| f.sync_all())
-            .map_err(|_| "Cannot sync developer preference directory")?;
-        Ok(())
+        Ok(if sync_directory(parent).is_ok() {
+            PreferenceSave::Durable
+        } else {
+            PreferenceSave::DurabilityUnconfirmed
+        })
     }
 }
 
@@ -275,7 +293,8 @@ impl LogStore {
             dropped: ring.dropped,
             truncated: false,
         };
-        for (event, _) in &ring.events {
+        let mut page_bytes = serde_json::to_vec(&page).unwrap().len();
+        for (event, event_bytes) in &ring.events {
             if event.sequence <= page.after.sequence
                 || query.level.is_some_and(|l| l != event.level)
                 || query.target.is_some_and(|t| t != event.target)
@@ -293,14 +312,29 @@ impl LogStore {
                 page.truncated = true;
                 break;
             }
-            page.events.push(event.clone());
+            let candidate_bytes = page_bytes
+                + event_bytes
+                + usize::from(!page.events.is_empty())
+                + event.sequence.to_string().len()
+                - page.after.sequence.to_string().len();
             // Leave headroom for envelope, request ID and truncation metadata.
-            if serde_json::to_vec(&page).unwrap().len() > 60_000 {
-                page.events.pop();
+            if candidate_bytes > 60_000 {
                 page.truncated = true;
                 break;
             }
+            page.events.push(event.clone());
             page.after.sequence = event.sequence;
+            page_bytes = candidate_bytes;
+        }
+        while serde_json::to_vec(&page).unwrap().len() > 60_000 {
+            page.events
+                .pop()
+                .expect("log page metadata fits the byte limit");
+            page.after.sequence = page.events.last().map_or_else(
+                || query.after.as_ref().map_or(0, |cursor| cursor.sequence),
+                |event| event.sequence,
+            );
+            page.truncated = true;
         }
         Ok(page)
     }
@@ -483,6 +517,28 @@ mod tests {
         assert!(DeveloperPreferences::load_from(&p).unwrap().enabled);
         DeveloperPreferences { enabled: false }.save_to(&p).unwrap();
         assert!(!DeveloperPreferences::load_from(&p).unwrap().enabled);
+    }
+    #[test]
+    fn preference_replacement_reports_directory_sync_failure_as_applied() {
+        let d = tempfile::tempdir().unwrap();
+        let path = d.path().join("developer-mode.json");
+        for enabled in [true, false] {
+            let outcome = DeveloperPreferences { enabled }
+                .save_with_directory_sync(&path, |_| Err(std::io::Error::other("sync failed")))
+                .unwrap();
+            assert_eq!(outcome, PreferenceSave::DurabilityUnconfirmed);
+            assert_eq!(
+                DeveloperPreferences::load_from(&path).unwrap().enabled,
+                enabled
+            );
+        }
+        fs::write(&path, b"invalid").unwrap();
+        assert!(
+            DeveloperPreferences { enabled: true }
+                .save_with_directory_sync(&path, |_| panic!("must not sync an unapplied save"))
+                .is_err()
+        );
+        assert_eq!(fs::read(&path).unwrap(), b"invalid");
     }
     #[test]
     fn ring_eviction_filters_and_capture() {

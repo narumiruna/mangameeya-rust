@@ -9,6 +9,7 @@ pub(super) struct DeveloperUi {
     reader_window: AnyWindowHandle,
     pub enabled: bool,
     pub preference_error: bool,
+    pub preference_durability_warning: bool,
     pub service: Option<dev::DeveloperService>,
     pub reader_picker: Option<Picker>,
     pub preferences_picker: Option<Picker>,
@@ -38,6 +39,7 @@ impl DeveloperUi {
             reader_window,
             enabled: loaded.as_ref().is_ok_and(|p| p.enabled),
             preference_error: loaded.is_err(),
+            preference_durability_warning: false,
             service: None,
             reader_picker: None,
             preferences_picker: None,
@@ -294,6 +296,7 @@ fn open_feedback(
             .child(
                 div().id("developer-feedback-input").test_support().child(
                     Textarea::new(&input)
+                        .readonly(pending)
                         .accessibility_id("developer-feedback-editor")
                         .aria_label(language.text(Text::DeveloperRequest))
                         .h((window.viewport_size().height / 4.).clamp(px(48.), px(100.))),
@@ -360,13 +363,13 @@ fn submit(
     let Some(entity) = reader.upgrade() else {
         return;
     };
+    if draft.borrow().pending || draft.borrow().unknown {
+        return;
+    }
     let text = draft.borrow().input.read(cx).value().to_string();
     if text.trim().is_empty() || text.len() > 8192 {
         draft.borrow_mut().message = Some(Text::DeveloperInputLimit);
         window.refresh();
-        return;
-    }
-    if draft.borrow().pending || draft.borrow().unknown {
         return;
     }
     let destination = entity
@@ -425,7 +428,11 @@ fn submit(
         .unwrap()
         .try_send_feedback(d.feedback.clone());
     match result {
-        Ok(()) => d.pending = true,
+        Ok(()) => {
+            d.pending = true;
+            d.message = None;
+            d.input.update(cx, |input, cx| input.set_readonly(true, cx));
+        }
         Err(_) => d.message = Some(Text::DeveloperSendFailed),
     }
     window.refresh();
@@ -542,7 +549,10 @@ impl ReaderView {
         }
     }
     pub(super) fn apply_developer_enabled(&mut self, enabled: bool, cx: &mut Context<Self>) {
-        if enabled == self.developer.enabled {
+        if enabled == self.developer.enabled
+            && !self.developer.preference_error
+            && !self.developer.preference_durability_warning
+        {
             return;
         }
         if !enabled {
@@ -570,17 +580,30 @@ impl ReaderView {
             self.developer.enabled = false;
             self.developer.status = None;
         }
-        match (dev::DeveloperPreferences { enabled })
-            .save_to(&self.settings_path.with_file_name("developer-mode.json"))
-        {
-            Ok(()) => {
+        let saved = (dev::DeveloperPreferences { enabled })
+            .save_to(&self.settings_path.with_file_name("developer-mode.json"));
+        self.developer_preference_saved(enabled, saved, cx);
+    }
+    pub(super) fn developer_preference_saved(
+        &mut self,
+        enabled: bool,
+        saved: Result<dev::PreferenceSave, String>,
+        cx: &mut Context<Self>,
+    ) {
+        match saved {
+            Ok(outcome) => {
                 self.developer.preference_error = false;
-                if enabled {
+                self.developer.preference_durability_warning =
+                    outcome == dev::PreferenceSave::DurabilityUnconfirmed;
+                if enabled && !self.developer.enabled {
                     self.developer.enabled = true;
                     self.developer.start();
                 }
             }
-            Err(_) => self.developer.preference_error = true,
+            Err(_) => {
+                self.developer.preference_error = true;
+                self.developer.preference_durability_warning = false;
+            }
         }
         cx.notify();
     }
@@ -635,6 +658,9 @@ impl ReaderView {
                             if message == Text::DeveloperHandedOff {
                                 d.unknown = true;
                             }
+                            let readonly = d.unknown;
+                            d.input
+                                .update(cx, |input, cx| input.set_readonly(readonly, cx));
                             _ = d.window.update(cx, |_, w, _| w.refresh());
                         }
                     }

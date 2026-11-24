@@ -68,7 +68,7 @@ struct Target {
 #[derive(Default)]
 struct State {
     active: bool,
-    latched: bool,
+    captured_buttons: Vec<MouseButton>,
     release_button: Option<MouseButton>,
     suppress_repeat: bool,
     revision: u64,
@@ -150,11 +150,14 @@ impl Picker {
                     }
                     let mut state = down.state.borrow_mut();
                     let repeat = state.suppress_repeat && event.click_count > 1;
-                    if !state.active && !state.latched && !repeat {
+                    if !state.active && state.captured_buttons.is_empty() && !repeat {
                         state.suppress_repeat = false;
                         return;
                     }
-                    if state.active && !state.latched && event.button == MouseButton::Left {
+                    if state.active
+                        && state.captured_buttons.is_empty()
+                        && event.button == MouseButton::Left
+                    {
                         state.pending =
                             resolve(&state, event.position, window).map(|target| Selected {
                                 metadata: target.metadata.clone(),
@@ -171,10 +174,12 @@ impl Picker {
                                 window_id: window.window_handle().window_id(),
                             });
                     }
-                    if !state.latched {
+                    if state.captured_buttons.is_empty() {
                         state.release_button = Some(event.button);
                     }
-                    state.latched = true;
+                    if !state.captured_buttons.contains(&event.button) {
+                        state.captured_buttons.push(event.button);
+                    }
                     cx.stop_propagation();
                 });
                 let up = paint.clone();
@@ -185,10 +190,13 @@ impl Picker {
                     }
                     let selection = {
                         let mut state = up.state.borrow_mut();
-                        if !state.active && !state.latched {
+                        if !state.active && state.captured_buttons.is_empty() {
                             return;
                         }
                         cx.stop_propagation();
+                        state
+                            .captured_buttons
+                            .retain(|button| *button != event.button);
                         if state
                             .release_button
                             .is_some_and(|button| button != event.button)
@@ -196,7 +204,6 @@ impl Picker {
                             return;
                         }
                         state.release_button = None;
-                        state.latched = false;
                         state.suppress_repeat = true;
                         let selection = state.pending.take().filter(|pending| {
                             let same_context = match (&pending.context, &context) {
@@ -238,7 +245,7 @@ impl Picker {
                         return;
                     }
                     let mut state = motion.state.borrow_mut();
-                    if !state.active && !state.latched {
+                    if !state.active && state.captured_buttons.is_empty() {
                         return;
                     }
                     let hovered =

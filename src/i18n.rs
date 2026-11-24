@@ -110,6 +110,8 @@ translations! {
     DeveloperDiscardDescription => ("Unsent developer feedback will be cleared. Requests already handed to Pi cannot be recalled.", "未送信の内容を削除します。Pi に渡した依頼は取り消せません。", "將清除尚未傳送的開發者回饋。已交給 Pi 的要求無法撤回。"),
     DeveloperDestination => ("Destination: {session}", "送信先：{session}", "目的地：{session}"),
     DeveloperPreferenceError => ("Developer preference error. The existing file was preserved; a failed save can leave the previous startup setting in effect.", "開発者設定のエラーです。既存ファイルは保持されます。保存失敗時は以前の起動設定が残る場合があります。", "開發者設定發生錯誤，已保留原檔。儲存失敗時，下次啟動可能仍使用原設定。"),
+    DeveloperPreferenceDurability => ("Developer setting applied, but storage durability is not confirmed. Retry the save.", "開発者設定は適用されましたが、永続保存を確認できません。保存を再試行してください。", "開發者設定已套用，但無法確認是否已永久儲存。請重試儲存。"),
+    DeveloperPreferenceRetry => ("Retry saving developer setting", "開発者設定の保存を再試行", "重試儲存開發者設定"),
     DeveloperRegion => ("Content region", "コンテンツ領域", "內容區域"),
     BrowseFiles => ("Browse files", "ファイルを参照", "瀏覽檔案"),
     ContinueReading => ("Continue reading", "読書に戻る", "繼續閱讀"),

@@ -396,6 +396,162 @@ fn developer_defaults_off_and_preserves_reader_settings(cx: &mut TestAppContext)
     );
 }
 #[gpui_kit::test]
+fn developer_failed_opt_out_can_retry_without_restarting_service(cx: &mut TestAppContext) {
+    let f = fixture(cx);
+    enable(&f, cx);
+    let path = f.directory.path().join("developer-mode.json");
+    let backup = f.directory.path().join("developer-mode.backup");
+    std::fs::rename(&path, &backup).unwrap();
+    std::fs::create_dir(&path).unwrap();
+    f.view
+        .update(cx, |v, cx| v.apply_developer_enabled(false, cx));
+    pump(&f, cx);
+    f.view.read_with(cx, |v, _| {
+        assert!(!v.developer.enabled);
+        assert!(v.developer.service.is_none());
+        assert!(v.developer.preference_error);
+    });
+    assert!(DeveloperPreferences::load_from(&backup).unwrap().enabled);
+    std::fs::remove_dir(&path).unwrap();
+    std::fs::rename(&backup, &path).unwrap();
+    let pref = open_preferences(&f, cx);
+    cx.update_window(pref, |_, w, cx| {
+        w.scroll(
+            "preferences-content",
+            ScrollDelta::Pixels(point(px(0.), px(-3000.))),
+            cx,
+        );
+    })
+    .unwrap();
+    pump(&f, cx);
+    click_preference(&f, "developer-preference-retry", cx);
+    pump(&f, cx);
+    assert!(!DeveloperPreferences::load_from(&path).unwrap().enabled);
+    f.view.read_with(cx, |v, _| {
+        assert!(!v.developer.enabled);
+        assert!(v.developer.service.is_none());
+        assert!(!v.developer.preference_error);
+    });
+}
+
+#[gpui_kit::test]
+fn developer_applied_preference_with_durability_warning_starts_once(cx: &mut TestAppContext) {
+    let f = fixture(cx);
+    f.view.update(cx, |v, cx| {
+        v.developer_preference_saved(
+            true,
+            Ok(crate::developer::PreferenceSave::DurabilityUnconfirmed),
+            cx,
+        );
+    });
+    pump(&f, cx);
+    let capture = f.view.read_with(cx, |v, _| {
+        assert!(v.developer.enabled);
+        assert!(!v.developer.preference_error);
+        assert!(v.developer.preference_durability_warning);
+        v.developer.service.as_ref().unwrap().status().capture_id
+    });
+    let pref = open_preferences(&f, cx);
+    cx.update_window(pref, |_, w, cx| {
+        w.scroll(
+            "preferences-content",
+            ScrollDelta::Pixels(point(px(0.), px(-3000.))),
+            cx,
+        );
+    })
+    .unwrap();
+    pump(&f, cx);
+    cx.update_window(pref, |_, w, _| {
+        assert!(w.find("developer-preference-durability").visible());
+    })
+    .unwrap();
+    click_preference(&f, "developer-preference-retry", cx);
+    pump(&f, cx);
+    f.view.read_with(cx, |v, _| {
+        assert!(v.developer.enabled);
+        assert!(!v.developer.preference_durability_warning);
+        assert_eq!(
+            v.developer.service.as_ref().unwrap().status().capture_id,
+            capture
+        );
+    });
+    assert!(
+        DeveloperPreferences::load_from(&f.directory.path().join("developer-mode.json"))
+            .unwrap()
+            .enabled
+    );
+}
+
+#[gpui_kit::test]
+fn developer_submitted_text_is_frozen_until_definite_failure(cx: &mut TestAppContext) {
+    for outcome in ["failed", "handed_off", "unknown"] {
+        let f = fixture(cx);
+        enable(&f, cx);
+        let mut stream = pair(&f, cx);
+        pick_open(&f, cx);
+        cx.update_window(f.window, |_, w, cx| {
+            w.click("developer-feedback-input", cx);
+            w.input("Request A", cx);
+            w.click("developer-send", cx);
+            w.click("developer-feedback-input", cx);
+            w.press("ctrl-a", cx);
+            w.input("Request B", cx);
+            w.press("backspace", cx);
+        })
+        .unwrap();
+        let feedback = read_frame(&mut stream);
+        assert_eq!(feedback["feedback"]["text"], "Request A");
+        assert_eq!(
+            f.view
+                .read_with(cx, |v, cx| v.developer.draft_text(cx))
+                .as_deref(),
+            Some("Request A")
+        );
+        if outcome == "unknown" {
+            drop(stream);
+        } else {
+            write_frame(
+                &mut stream,
+                serde_json::json!({"v":1,"id":feedback["id"],"type":"ack","feedback_id":feedback["id"],"outcome":outcome}),
+            );
+        }
+        let deadline = Instant::now() + Duration::from_secs(3);
+        loop {
+            pump(&f, cx);
+            if cx
+                .update_window(f.window, |_, w, _| {
+                    w.try_find("developer-feedback-status").is_some()
+                })
+                .unwrap()
+            {
+                break;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "delivery status did not reach editor"
+            );
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        cx.update_window(f.window, |_, w, cx| {
+            w.click("developer-feedback-input", cx);
+            w.press("ctrl-a", cx);
+            w.input("Request B", cx);
+        })
+        .unwrap();
+        assert_eq!(
+            f.view
+                .read_with(cx, |v, cx| v.developer.draft_text(cx))
+                .as_deref(),
+            Some(if outcome == "failed" {
+                "Request B"
+            } else {
+                "Request A"
+            })
+        );
+    }
+}
+
+#[gpui_kit::test]
 fn developer_picker_freezes_safe_target_without_original_action(cx: &mut TestAppContext) {
     let f = fixture(cx);
     enable(&f, cx);

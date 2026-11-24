@@ -123,7 +123,7 @@ export default function (pi: ExtensionAPI) {
             if (bridge === client) {
               bridge = undefined;
               active = undefined;
-              generation++;
+              // Only explicit revocation supersedes the pending connect attempt.
             }
           },
         );

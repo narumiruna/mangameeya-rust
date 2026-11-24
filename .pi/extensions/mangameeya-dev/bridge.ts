@@ -351,7 +351,13 @@ export class Bridge {
     this.socket.on("close", () => this.close());
     this.socket.on("data", (b) => {
       try {
-        for (const x of this.decoder.push(b)) {
+        const frames = this.decoder.push(b);
+        // A completed frame ends its deadline, even if this chunk starts another.
+        if (frames.length) {
+          clearTimeout(this.frameTimer);
+          this.frameTimer = undefined;
+        }
+        for (const x of frames) {
           if (x.type === "feedback") {
             if (!this.capture || x.feedback.capture_id !== this.capture) fail();
             this.onFeedback(x);

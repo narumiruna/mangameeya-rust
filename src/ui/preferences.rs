@@ -114,6 +114,15 @@ pub(super) fn close(
     ) {
         return;
     }
+    if let Some(entity) = reader.upgrade() {
+        entity.update(cx, |reader, cx| {
+            if reader.developer.preferences_picker.is_some() {
+                reader.developer.preferences_picker =
+                    Some(super::developer::Picker::new("preferences"));
+                cx.notify();
+            }
+        });
+    }
     window.remove_window();
     cx.defer(move |cx| {
         _ = reader_window.update(cx, |_, window, cx| {
@@ -520,6 +529,7 @@ impl PreferencesView {
         let status = reader.developer.state_text();
         let message = reader.developer.status;
         let error = reader.developer.preference_error;
+        let durability_warning = reader.developer.preference_durability_warning;
         let picker = reader.developer.preferences_picker.clone();
         let service = reader.developer.service.is_some();
         let destination = reader
@@ -621,6 +631,22 @@ impl PreferencesView {
                     .text_xs()
                     .text_color(cx.theme().danger)
                     .child(language.text(Text::DeveloperPreferenceError))
+            }))
+            .children(durability_warning.then(|| {
+                div()
+                    .id("developer-preference-durability")
+                    .test_support()
+                    .text_xs()
+                    .text_color(cx.theme().danger)
+                    .child(language.text(Text::DeveloperPreferenceDurability))
+            }))
+            .children((error || durability_warning).then(|| {
+                Button::new("developer-preference-retry")
+                    .small()
+                    .label(language.text(Text::DeveloperPreferenceRetry))
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        this.change(Change::DeveloperMode(enabled), cx);
+                    }))
             }))
             .into_any_element()
     }

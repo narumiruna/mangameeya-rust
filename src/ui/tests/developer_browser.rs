@@ -1,6 +1,212 @@
 //! Native picker coverage for anonymous browser and Files targets.
 
 use super::*;
+use gpui_kit::{MouseDownEvent, MouseUpEvent, PlatformInput};
+use std::{cell::RefCell, rc::Rc};
+
+struct PointerProbe {
+    picker: super::super::developer::Picker,
+    releases: Rc<RefCell<Vec<MouseButton>>>,
+    selections: Rc<RefCell<usize>>,
+}
+
+impl Render for PointerProbe {
+    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+        let selections = self.selections.clone();
+        let releases = self.releases.clone();
+        div()
+            .size_full()
+            .child(
+                self.picker
+                    .frame(None, move |_, _, _| *selections.borrow_mut() += 1),
+            )
+            .child(
+                div()
+                    .relative()
+                    .size_full()
+                    .block_mouse_except_scroll()
+                    .child(self.picker.mark(super::super::developer_session::metadata(
+                        "probe",
+                        "Probe",
+                        "src/ui/tests/developer_browser.rs",
+                        crate::developer::TargetKind::Element,
+                    )))
+                    .child(
+                        gpui_kit::canvas(
+                            |_, _, _| {},
+                            move |_, (), window, _| {
+                                let releases = releases.clone();
+                                window.on_mouse_event(move |event: &MouseUpEvent, phase, _, _| {
+                                    if phase == gpui_kit::DispatchPhase::Bubble {
+                                        releases.borrow_mut().push(event.button);
+                                    }
+                                });
+                            },
+                        )
+                        .size_full(),
+                    ),
+            )
+    }
+}
+
+#[gpui_kit::test]
+fn picker_consumes_every_captured_button_in_all_release_orders(cx: &mut TestAppContext) {
+    use MouseButton::{Left, Middle, Right};
+    let orders = [
+        [Left, Right, Middle],
+        [Left, Middle, Right],
+        [Right, Left, Middle],
+        [Right, Middle, Left],
+        [Middle, Left, Right],
+        [Middle, Right, Left],
+    ];
+    cx.update(init);
+    for cancel in [false, true] {
+        for down_order in orders {
+            for up_order in orders {
+                let picker = super::super::developer::Picker::new("probe");
+                let releases = Rc::new(RefCell::new(Vec::new()));
+                let selections = Rc::new(RefCell::new(0));
+                let (handle, _) = cx.update(|cx| {
+                    gpui_kit::open_window(Default::default(), cx, |_, cx| {
+                        cx.new(|_| PointerProbe {
+                            picker: picker.clone(),
+                            releases: releases.clone(),
+                            selections: selections.clone(),
+                        })
+                    })
+                    .unwrap()
+                });
+                cx.update_window(handle, |_, window, cx| {
+                    picker.start(window, cx);
+                    window.render_frame(cx);
+                    for button in down_order {
+                        window.dispatch_event(
+                            PlatformInput::MouseDown(MouseDownEvent {
+                                button,
+                                position: point(px(10.), px(10.)),
+                                click_count: 1,
+                                ..Default::default()
+                            }),
+                            cx,
+                        );
+                    }
+                    if cancel {
+                        picker.cancel(window, cx);
+                    }
+                    window.render_frame(cx);
+                })
+                .unwrap();
+                for button in up_order {
+                    cx.update_window(handle, |_, window, cx| {
+                        window.dispatch_event(
+                            PlatformInput::MouseUp(MouseUpEvent {
+                                button,
+                                position: point(px(10.), px(10.)),
+                                click_count: 1,
+                                ..Default::default()
+                            }),
+                            cx,
+                        );
+                    })
+                    .unwrap();
+                    cx.run_until_parked();
+                    cx.update_window(handle, |_, window, cx| window.render_frame(cx))
+                        .unwrap();
+                    assert!(
+                        releases.borrow().is_empty(),
+                        "leaked {button:?}: {down_order:?} / {up_order:?}, cancel={cancel}"
+                    );
+                }
+                assert_eq!(
+                    *selections.borrow(),
+                    usize::from(!cancel && down_order[0] == Left)
+                );
+                cx.update_window(handle, |_, window, cx| {
+                    picker.cancel(window, cx);
+                    window.render_frame(cx);
+                    window.dispatch_event(
+                        PlatformInput::MouseUp(MouseUpEvent {
+                            button: Right,
+                            position: point(px(10.), px(10.)),
+                            ..Default::default()
+                        }),
+                        cx,
+                    );
+                    window.remove_window();
+                })
+                .unwrap();
+                assert_eq!(
+                    *releases.borrow(),
+                    vec![Right],
+                    "capture must end after all releases"
+                );
+            }
+        }
+    }
+}
+
+#[gpui_kit::test]
+fn preferences_picker_drops_held_capture_on_actual_close(cx: &mut TestAppContext) {
+    let fixture = fixture(cx);
+    fixture
+        .view
+        .update(cx, |view, cx| view.apply_developer_enabled(true, cx));
+    render_windows(&fixture, cx);
+    let preferences = open_preferences(&fixture, cx);
+    let picker = fixture.view.read_with(cx, |view, _| {
+        view.developer.preferences_picker.clone().unwrap()
+    });
+    cx.update_window(preferences, |_, window, cx| {
+        picker.start(window, cx);
+        window.render_frame(cx);
+        let position = window.find("reading-direction-ltr").bounds().center();
+        window.dispatch_event(
+            PlatformInput::MouseDown(MouseDownEvent {
+                button: MouseButton::Left,
+                position,
+                ..Default::default()
+            }),
+            cx,
+        );
+        super::super::preferences::close(fixture.view.downgrade(), fixture.window, window, cx);
+    })
+    .unwrap();
+    cx.run_until_parked();
+    let reopened = open_preferences(&fixture, cx);
+    cx.update_window(reopened, |_, window, cx| {
+        window.click("reading-direction-ltr", cx)
+    })
+    .unwrap();
+    render_windows(&fixture, cx);
+    fixture.view.read_with(cx, |view, _| {
+        assert!(
+            !view.reader.settings.preferences.rtl,
+            "reopened preferences must accept its first click"
+        );
+        assert!(view.developer.selected_target().is_none());
+    });
+    let picker = fixture.view.read_with(cx, |view, _| {
+        view.developer.preferences_picker.clone().unwrap()
+    });
+    cx.update_window(reopened, |_, window, cx| {
+        picker.start(window, cx);
+        window.render_frame(cx);
+        window.click("reading-direction-rtl", cx);
+    })
+    .unwrap();
+    render_windows(&fixture, cx);
+    fixture.view.read_with(cx, |view, _| {
+        assert_eq!(
+            view.developer.selected_target().unwrap().id,
+            "reading-direction-rtl"
+        );
+        assert!(
+            !view.reader.settings.preferences.rtl,
+            "selection must not change preferences"
+        );
+    });
+}
 
 fn enable_picker(fixture: &Fixture, cx: &mut TestAppContext) {
     fixture.view.update(cx, |view, cx| {

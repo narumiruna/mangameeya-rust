@@ -219,6 +219,74 @@ describe("delivery", () => {
   });
 });
 describe("extension wiring", () => {
+  function uiContext() {
+    const notices: any[] = [];
+    return {
+      notices,
+      cwd: process.cwd(),
+      hasUI: true,
+      isProjectTrusted: () => true,
+      sessionManager: {
+        getSessionId: () => "session",
+        getCwd: () => process.cwd(),
+      },
+      ui: { notify: (...args: any[]) => notices.push(args) },
+    };
+  }
+  test("current pairing reports a refused connection", async () => {
+    const h = harness(), ctx = uiContext();
+    const srv = createServer();
+    await new Promise<void>((r) => srv.listen(0, "127.0.0.1", r));
+    const port = (srv.address() as any).port;
+    await new Promise<void>((r) => srv.close(() => r()));
+    await h.commands.get("mangameeya-connect")
+      .handler(`${port} ${"c".repeat(64)}`, ctx);
+    expect(ctx.notices).toHaveLength(1);
+    expect(ctx.notices[0][1]).toBe("error");
+    expect(JSON.stringify(ctx.notices)).not.toContain("c".repeat(64));
+  });
+  for (const failure of ["timeout", "malformed", "closed", "remote error"]) {
+    test(`current pairing reports ${failure} without credentials`, async () => {
+      const h = harness(), ctx = uiContext();
+      await server(
+        async (port) => {
+          await h.commands.get("mangameeya-connect")
+            .handler(`${port} ${"c".repeat(64)}`, ctx);
+          expect(ctx.notices).toEqual([[
+            "Mangameeya connection failed. Check local pairing, project trust, and destination.",
+            "error",
+          ]]);
+          expect(JSON.stringify(ctx.notices)).not.toContain("c".repeat(64));
+          const result = await h.tools.get("mangameeya_status")
+            .execute("id", {}, undefined, undefined, ctx);
+          expect(result.details.code).toBe("disconnected");
+        },
+        (s, x) => {
+          if (failure === "malformed") s.write(encode({ v: 2, id: x.id, type: "hello_ok" }));
+          if (failure === "closed") s.destroy();
+          if (failure === "remote error") s.write(encode({ v: 1, id: x.id, type: "error", code: "busy" }));
+        },
+      );
+    }, 4000);
+  }
+  for (const action of ["session_shutdown", "session_before_tree", "session_tree", "session_before_switch", "session_before_fork", "disconnect"]) {
+    test(`pending pairing stays silent after ${action}`, async () => {
+      const h = harness(), ctx = uiContext();
+      await server(
+        async (port) => {
+          const pending = h.commands.get("mangameeya-connect")
+            .handler(`${port} ${"c".repeat(64)}`, ctx);
+          await new Promise((r) => setTimeout(r, 20));
+          if (action === "disconnect") await h.commands.get("mangameeya-disconnect").handler();
+          else for (const fn of h.events.get(action)!) fn();
+          await pending;
+          expect(ctx.notices).toEqual([]);
+          expect(h.sent).toEqual([]);
+        },
+        () => {},
+      );
+    });
+  }
   test("idle/busy always use literal followUp and tree closes pairing", async () => {
     for (const idle of [true, false]) {
       const h = harness();
@@ -260,16 +328,7 @@ describe("extension wiring", () => {
     }
   });
   test("superseded connect failure cannot revoke replacement pairing", async () => {
-    const h = harness(),
-      ctx = {
-        cwd: process.cwd(),
-        hasUI: false,
-        isProjectTrusted: () => true,
-        sessionManager: {
-          getSessionId: () => "session",
-          getCwd: () => process.cwd(),
-        },
-      };
+    const h = harness(), ctx = uiContext();
     let ack: any;
     await server(
       async (oldPort) => {
@@ -283,6 +342,8 @@ describe("extension wiring", () => {
               .get("mangameeya-connect")
               .handler(`${newPort} ${"d".repeat(64)}`, ctx);
             await Promise.all([first, second]);
+            expect(ctx.notices).toHaveLength(1);
+            expect(ctx.notices[0][1]).toBe("info");
             peers[0].write(encode(event()));
             const end = Date.now() + 1000;
             while (!ack && Date.now() < end)
@@ -430,6 +491,35 @@ describe("TCP transport", () => {
       },
     );
   });
+  test("frame deadline resets at frame boundaries, not on partial progress", async () => {
+    await server(
+      async (port) => {
+        const received: any[] = [];
+        const c = new Bridge((x) => received.push(x));
+        try {
+          await c.connect(port, "c".repeat(64), "session", "workspace");
+          // Emit exact chunks to avoid dependence on TCP packet coalescing.
+          const socket = (c as any).socket as Socket;
+          const frame = encode(event());
+          socket.emit("data", frame.subarray(0, 1));
+          await new Promise((r) => setTimeout(r, 1100));
+          socket.emit("data", Buffer.concat([frame.subarray(1), frame.subarray(0, 1)]));
+          await new Promise((r) => setTimeout(r, 1100));
+          expect(c.closed).toBe(false);
+          socket.emit("data", frame.subarray(1));
+          expect(received).toHaveLength(2);
+          socket.emit("data", frame.subarray(0, 1));
+          await new Promise((r) => setTimeout(r, 1100));
+          socket.emit("data", frame.subarray(1, 2));
+          await new Promise((r) => setTimeout(r, 1100));
+          expect(c.closed).toBe(true);
+        } finally {
+          c.close();
+        }
+      },
+      (s, x) => hello(s, x),
+    );
+  }, 7000);
   test("incomplete frame deadline permits authenticated idle", async () => {
     await server(
       async (port, peers) => {
