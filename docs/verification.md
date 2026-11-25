@@ -1280,3 +1280,85 @@ warning; retrying the save does not restart an active capture. Back up an invali
 sidecar before explicit recovery. Older readers ignore this separate file; do not reset
 reading data to downgrade. Requests already handed to Pi cannot be recalled.
 No package publication, version tag, or release workflow dispatch is part of this work.
+
+## Browser sort scroll preference
+
+The File browser group in Preferences stores one scroll policy for the next manual
+sort: keep the native-path anchor (default), go to the top, or keep the logical-pixel
+offset. Changing the preference does not move the current reading or browser view.
+Sort-key changes, direction changes, folder grouping, and shuffle use this policy.
+Selecting the current sort key or direction does not rebuild or save settings.
+Search, background metadata updates, refresh, grid appearance, resize, folder
+snapshots, and reading round trips keep the existing anchor behavior. Selection
+remains a native child path and can be outside the viewport after sorting.
+
+`preferences.browser_sort_scroll` accepts `anchor`, `top`, and `offset`. The default
+is omitted when saving; older files load with the existing anchor behavior. Invalid
+values block loading and replacement without changing the source file. Existing
+positions, bookmarks, bookmark images, recent entries, and native paths keep their
+formats. To downgrade to a build without this field, close the application, back up
+`settings.json`, and remove only `preferences.browser_sort_scroll` from a working
+copy. Do not reset reading data or change comic files.
+
+### Verification scope
+
+The settings tests cover legacy defaults, all modes, default omission, rejected
+values, byte preservation, and reading-data preservation. Native event tests cover
+all sort keys, direction, folder grouping, shuffle, same-value no-ops, empty lists,
+and bottom clamping after layout. The fixtures use a separate selected path and a
+nonzero row offset. They check the actual list position and clear path caches for
+Top and Offset. Search and background rebuilds, resize, tile width, metadata display,
+and reading round trips retain their anchor assertions.
+
+Preferences tests cover translated, exclusive choices, 440 × 360 reachability,
+close/reopen, startup from saved settings, no extra save for the current value,
+unchanged reading/browser positions, and visible save failures with reading data
+preserved. Production rendering checks the three languages at both window sizes,
+native choice events at the minimum size, and all three policies using generated
+images, real wheel/menu events, and visible tile positions. The existing selection,
+virtualization, cache, and job-limit checks remain enabled.
+
+### Checks and platform limits
+
+Windows MSVC / Rust 1.99.1 checks before the draft PR commit:
+
+- Browser and lifecycle suite: 47 passed. This run preceded the final metadata and
+  search-fixture improvements.
+- Final `browser_sort_scroll` filter: 10 passed, including the improved sort/search
+  matrix, settings, saved startup choices, and Preferences persistence/failure tests.
+- Full `cargo test --locked --all-features`: 489 passed, 1 failed in the unchanged
+  `developer::bridge::tests::expiry_version_replay_and_strict_operations` test.
+  `receive` failed with Winsock 10054 (`ConnectionReset`) in two full-suite runs.
+  One focused rerun and 30 further focused attempts passed; these do not turn the
+  full-suite failure into a pass. The protocol-mismatch path flushes an error and immediately retires
+  its peer without the closing/drain path used by denials. This is a suspected
+  Windows transport cause, not a verified repair.
+- `cargo fmt --all -- --check` and all-target/all-feature Clippy with `-D warnings`
+  passed. The initial Clippy run found an unnecessary test-only `as_deref`; it was
+  removed before rerunning both checks.
+- Production rendering reached the 300-second tool limit twice. The second run
+  completed the new three-policy geometry checks before the limit, using the real
+  wheel/menu events and generated images. The full rendering suite is not a pass;
+  its remaining scenarios, including the expanded Preferences matrix, are not
+  represented as completed rendering evidence.
+- `git diff --check` and pinned changenote validation passed. Earlier Preferences
+  test failures came from clicking partially clipped controls; the helper now
+  requires full bounds inside the scroll viewport and refreshes the frame after
+  real scroll events.
+
+Logs are under ignored `target/browser-sort-scroll/`: `browser-sort-scroll-focused.log`,
+`preferences-rerun.log`, `tests-precommit.log`, `tests-rerun.log`, `bridge-rerun.log`,
+`bridge-repeat.log`, `lint-precommit.log`, `lint-rerun.log`, `rendering-precommit.log`,
+and `rendering-rerun.log`.
+
+The user requested PR publication after the full-suite blocker was reported. The
+PR remains a draft, not a claim that the plan or validation is complete. The
+unrelated developer transport code is unchanged. The failing full suite and
+incomplete rendering check must be resolved before merge; no test or gate was
+removed. Exact-commit check results and CI status belong in the draft PR.
+
+Windows headless native events and geometry do not establish macOS Metal pixels,
+physical input, assistive-technology output, or every DPI. Maintainers with
+macOS or Linux hosts must run the corresponding settings, Preferences, browser, and
+production rendering checks. Normal platform CI gates remain required before release.
+No package, version tag, or release workflow is part of this change.

@@ -3,7 +3,7 @@
 use super::{Command, ReaderView, background_color, release_notifications::ReleaseNotifications};
 use crate::{
     i18n::{Language, Text},
-    settings::Background,
+    settings::{Background, BrowserSortScroll},
 };
 use gpui_kit::assets::IconName;
 use gpui_kit::base::TestTextExt;
@@ -22,6 +22,7 @@ pub(super) enum Change {
     Remember(bool),
     Direction(bool),
     Background(Background),
+    BrowserSortScroll(BrowserSortScroll),
     Language(Language),
     ReleaseStartupCheck(bool),
     DeveloperMode(bool),
@@ -656,7 +657,90 @@ impl PreferencesView {
             .into_any_element()
     }
 
-    fn general(&self, language: Language, cx: &mut Context<Self>) -> impl IntoElement {
+    fn file_browser(
+        &self,
+        language: Language,
+        selected: BrowserSortScroll,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement {
+        let mut options = div().flex().flex_wrap().gap_3();
+        for (value, id, title, description) in [
+            (
+                BrowserSortScroll::Anchor,
+                "browser-sort-scroll-anchor",
+                Text::BrowserSortScrollAnchor,
+                Text::BrowserSortScrollAnchorDescription,
+            ),
+            (
+                BrowserSortScroll::Top,
+                "browser-sort-scroll-top",
+                Text::BrowserSortScrollTop,
+                Text::BrowserSortScrollTopDescription,
+            ),
+            (
+                BrowserSortScroll::Offset,
+                "browser-sort-scroll-offset",
+                Text::BrowserSortScrollOffset,
+                Text::BrowserSortScrollOffsetDescription,
+            ),
+        ] {
+            options = options.child(
+                div()
+                    .flex()
+                    .flex_col()
+                    .min_w_0()
+                    .w_full()
+                    .gap_1()
+                    .child(
+                        div().flex().flex_wrap().child(
+                            Self::option(id, language.text(title), selected == value, cx)
+                                .h_auto()
+                                .when(self.picker(cx).is_some(), |button| {
+                                    button.relative().block_mouse_except_scroll()
+                                })
+                                .children(self.marker(id, language.text(title), cx))
+                                .on_click(cx.listener(move |this, _, _, cx| {
+                                    this.change(Change::BrowserSortScroll(value), cx);
+                                })),
+                        ),
+                    )
+                    .child(
+                        div()
+                            .text_xs()
+                            .text_color(cx.theme().muted_foreground)
+                            .child(language.text(description)),
+                    ),
+            );
+        }
+        div()
+            .id("file-browser-preferences")
+            .test_support()
+            .role(gpui_kit::Role::Group)
+            .aria_label(language.text(Text::FileBrowser))
+            .flex()
+            .flex_col()
+            .min_w_0()
+            .gap_3()
+            .child(
+                div()
+                    .font_weight(gpui_kit::FontWeight::MEDIUM)
+                    .child(language.text(Text::FileBrowser)),
+            )
+            .child(Self::label(
+                language,
+                Text::BrowserSortScroll,
+                Text::BrowserSortScrollDescription,
+                cx,
+            ))
+            .child(options)
+    }
+
+    fn general(
+        &self,
+        language: Language,
+        browser_sort_scroll: BrowserSortScroll,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement {
         let mut languages = div().flex().flex_wrap().gap_2();
         for choice in Language::ALL {
             languages = languages.child(
@@ -712,6 +796,7 @@ impl PreferencesView {
                     ))
                     .child(languages),
             )
+            .child(self.file_browser(language, browser_sort_scroll, cx))
     }
 }
 
@@ -733,6 +818,7 @@ impl Render for PreferencesView {
         let remember = prefs.remember_position;
         let rtl = prefs.rtl;
         let background = prefs.background;
+        let browser_sort_scroll = prefs.browser_sort_scroll;
         let error = reader.save_error.clone();
         let release_notifications = reader.release_notifications.clone();
         let developer_picker = reader.developer.preferences_picker.clone();
@@ -757,7 +843,7 @@ impl Render for PreferencesView {
                     .px(px(28.))
                     .py(px(24.))
                     .child(self.reading(language, remember, rtl, background, cx))
-                    .child(self.general(language, cx))
+                    .child(self.general(language, browser_sort_scroll, cx))
                     .child(self.releases(language, &release_notifications, cx))
                     .child(self.developer(language, cx)),
             );
