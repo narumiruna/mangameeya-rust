@@ -741,6 +741,13 @@ impl ReaderView {
                 self.dirty = true;
                 cx.notify();
             }
+            Change::BrowserSortScroll(value)
+                if self.reader.settings.preferences.browser_sort_scroll != value =>
+            {
+                self.reader.settings.preferences.browser_sort_scroll = value;
+                self.dirty = true;
+                cx.notify();
+            }
             _ => {}
         }
     }
@@ -1552,9 +1559,13 @@ impl ReaderView {
                     if command == BrowserToggleFoldersFirst {
                         self.browser.model.folders_first = !self.browser.model.folders_first;
                     } else {
-                        self.browser.model.descending = command == BrowserDescending;
+                        let descending = command == BrowserDescending;
+                        if self.browser.model.descending == descending {
+                            return;
+                        }
+                        self.browser.model.descending = descending;
                     }
-                    self.rebuild_browser(cx);
+                    self.reorder_browser(cx);
                 }
             }
             OpenFile => self.request_dialog(false, window, cx),

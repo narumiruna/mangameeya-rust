@@ -1,6 +1,9 @@
 //! Native central-browser events, state, geometry, and request lifecycle checks.
 
 use super::*;
+
+#[path = "browser_sort_scroll.rs"]
+mod browser_sort_scroll;
 use crate::{book::DirectoryEntry, browser::SortKey};
 use gpui_kit::{Modifiers, PlatformInput, ScrollDelta, ScrollEvent, test::TestQueryExt};
 
@@ -46,7 +49,7 @@ fn replace_search(fixture: &Fixture, value: &str, cx: &mut TestAppContext) {
 }
 
 fn click_menu_item(window: &mut Window, label: &str, cx: &mut App) {
-    let item = window.find_by_label(label);
+    let item = window.within("popup-menu").find_by_label(label);
     let menu = window.find("popup-menu").bounds();
     window.click_at("popup-menu", item.bounds().center() - menu.origin, cx);
 }
@@ -1151,7 +1154,19 @@ fn ten_thousand_entries_use_virtual_rows_and_retain_native_selection_after_sort(
 
 #[gpui_kit::test]
 fn grid_book_round_trip_restores_query_sort_selection_and_exact_scroll(cx: &mut TestAppContext) {
+    for policy in browser_sort_scroll::POLICIES {
+        grid_book_round_trip_with_policy(policy, cx);
+    }
+}
+
+fn grid_book_round_trip_with_policy(
+    policy: crate::settings::BrowserSortScroll,
+    cx: &mut TestAppContext,
+) {
     let fixture = fixture(cx);
+    fixture.view.update(cx, |view, _| {
+        view.reader.settings.preferences.browser_sort_scroll = policy
+    });
     let folder = book(&fixture, "round-trip", 120);
     browse(&fixture, &folder, cx);
     replace_search(&fixture, ".png", cx);
@@ -1401,7 +1416,19 @@ fn generation_change_rejects_cover_results_and_refresh_clears_cached_failures(
 fn column_and_tile_width_changes_keep_the_native_item_and_row_displacement(
     cx: &mut TestAppContext,
 ) {
+    for policy in browser_sort_scroll::POLICIES {
+        column_and_tile_width_with_policy(policy, cx);
+    }
+}
+
+fn column_and_tile_width_with_policy(
+    policy: crate::settings::BrowserSortScroll,
+    cx: &mut TestAppContext,
+) {
     let fixture = fixture(cx);
+    fixture.view.update(cx, |view, _| {
+        view.reader.settings.preferences.browser_sort_scroll = policy
+    });
     pump(&fixture, cx);
     install_listing(
         &fixture,
@@ -1694,7 +1721,19 @@ fn long_names_paint_two_or_three_lines_at_each_cover_width(cx: &mut TestAppConte
 fn metadata_toggle_changes_row_height_without_losing_the_native_scroll_anchor(
     cx: &mut TestAppContext,
 ) {
+    for policy in browser_sort_scroll::POLICIES {
+        metadata_toggle_with_policy(policy, cx);
+    }
+}
+
+fn metadata_toggle_with_policy(
+    policy: crate::settings::BrowserSortScroll,
+    cx: &mut TestAppContext,
+) {
     let fixture = fixture(cx);
+    fixture.view.update(cx, |view, _| {
+        view.reader.settings.preferences.browser_sort_scroll = policy
+    });
     pump(&fixture, cx);
     let listing = synthetic_listing(fixture.directory.path().join("metadata"), 500);
     install_listing(&fixture, listing, cx);

@@ -14,6 +14,21 @@ const MAX_SETTINGS_BYTES: u64 = 8 * 1024 * 1024;
 
 #[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
+pub enum BrowserSortScroll {
+    #[default]
+    Anchor,
+    Top,
+    Offset,
+}
+
+impl BrowserSortScroll {
+    fn is_anchor(&self) -> bool {
+        *self == Self::Anchor
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
 pub enum FitMode {
     #[default]
     Window,
@@ -89,6 +104,8 @@ pub struct Preferences {
     pub sidebar_mode: SidebarMode,
     pub panel_layout: PanelLayoutPreferences,
     pub background: Background,
+    #[serde(skip_serializing_if = "BrowserSortScroll::is_anchor")]
+    pub browser_sort_scroll: BrowserSortScroll,
     pub recursive_folder: bool,
     pub remember_position: bool,
     /// Slideshow interval in seconds, limited to 1 through 120.
@@ -106,6 +123,7 @@ impl Default for Preferences {
             sidebar_mode: SidebarMode::Thumbnails,
             panel_layout: PanelLayoutPreferences::default(),
             background: Background::Black,
+            browser_sort_scroll: BrowserSortScroll::Anchor,
             recursive_folder: true,
             remember_position: true,
             interval: 5,
@@ -565,6 +583,7 @@ mod tests {
             }
         );
         assert_eq!(preferences.background, Background::Black);
+        assert_eq!(preferences.browser_sort_scroll, BrowserSortScroll::Anchor);
         assert!(preferences.recursive_folder);
         assert!(preferences.remember_position);
         assert_eq!(preferences.interval, 5);
@@ -806,6 +825,75 @@ mod tests {
             r#"{"inspector_visible":true,"inspector_visible":false}"#,
         ] {
             assert_invalid_panel_layout_is_preserved(&path, layout);
+        }
+        assert_eq!(fs::read_dir(directory.path()).unwrap().count(), 1);
+    }
+
+    #[test]
+    fn browser_sort_scroll_legacy_defaults_and_round_trips_preserve_reading_data() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("settings.json");
+        let source = br#"{"preferences":{"interval":17},"recent":["book.cbz"],"positions":{"book.cbz":12},"bookmarks":{"book.cbz":8},"bookmark_images":{"book.cbz":{"page":8,"image":"page09.png"}}}"#;
+        fs::write(&path, source).unwrap();
+        let legacy = AppSettings::load_from(&path).unwrap();
+        assert_eq!(
+            legacy.preferences.browser_sort_scroll,
+            BrowserSortScroll::Anchor
+        );
+        assert_eq!(fs::read(&path).unwrap(), source);
+        for (mode, encoded) in [
+            (BrowserSortScroll::Anchor, "anchor"),
+            (BrowserSortScroll::Top, "top"),
+            (BrowserSortScroll::Offset, "offset"),
+        ] {
+            assert_eq!(serde_json::to_value(mode).unwrap(), encoded);
+            let mut settings = legacy.clone();
+            settings.preferences.browser_sort_scroll = mode;
+            settings.save_to(&path).unwrap();
+            assert_eq!(AppSettings::load_from(&path).unwrap(), settings);
+            let json: serde_json::Value =
+                serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+            if mode == BrowserSortScroll::Anchor {
+                assert!(json["preferences"].get("browser_sort_scroll").is_none());
+            } else {
+                assert_eq!(json["preferences"]["browser_sort_scroll"], encoded);
+            }
+        }
+        let explicit: AppSettings =
+            serde_json::from_str(r#"{"preferences":{"browser_sort_scroll":"anchor"}}"#).unwrap();
+        assert_eq!(
+            explicit.preferences.browser_sort_scroll,
+            BrowserSortScroll::Anchor
+        );
+        assert_eq!(fs::read_dir(directory.path()).unwrap().count(), 1);
+    }
+
+    #[test]
+    fn invalid_browser_sort_scroll_preserves_bytes_and_blocks_default_saves() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("settings.json");
+        for value in [
+            r#""unknown""#,
+            r#""Anchor""#,
+            "null",
+            "true",
+            "0",
+            "1.5",
+            "[]",
+            "{}",
+        ] {
+            let source = format!(
+                r#"{{"preferences":{{"browser_sort_scroll":{value}}},"recent":["book.cbz"],"positions":{{"book.cbz":12}},"bookmarks":{{"book.cbz":8}},"bookmark_images":{{"book.cbz":{{"page":8,"image":"page09.png"}}}}}}"#
+            );
+            fs::write(&path, &source).unwrap();
+            let error = AppSettings::load_from(&path).unwrap_err();
+            assert!(error.contains("Invalid settings"), "{error}");
+            assert!(error.contains("The file was not changed"), "{error}");
+            assert!(AppSettings::default().save_to(&path).is_err());
+            let mut fallback = AppSettings::default();
+            fallback.preferences.browser_sort_scroll = BrowserSortScroll::Top;
+            assert!(fallback.save_to(&path).is_err());
+            assert_eq!(fs::read(&path).unwrap(), source.as_bytes());
         }
         assert_eq!(fs::read_dir(directory.path()).unwrap().count(), 1);
     }
@@ -1289,6 +1377,7 @@ mod tests {
                     inspector_visible: false,
                 },
                 background: Background::Paper,
+                browser_sort_scroll: BrowserSortScroll::Offset,
                 recursive_folder: false,
                 remember_position: true,
                 interval: 17,

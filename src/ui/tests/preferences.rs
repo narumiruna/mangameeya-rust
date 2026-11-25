@@ -1,7 +1,331 @@
 //! Separate-window ownership and Preferences regressions.
 
 use super::*;
+use crate::settings::BrowserSortScroll;
 use gpui_kit::WeakEntity;
+
+fn reveal_sort_scroll_option(
+    preferences: AnyWindowHandle,
+    id: &'static str,
+    cx: &mut TestAppContext,
+) {
+    cx.update_window(preferences, |_, window, cx| {
+        window.scroll(
+            "preferences-content",
+            gpui_kit::ScrollDelta::Pixels(point(px(0.), px(10_000.))),
+            cx,
+        );
+        window.refresh();
+    })
+    .unwrap();
+    for _ in 0..48 {
+        let visible = cx
+            .update_window(preferences, |_, window, cx| {
+                window.render_frame(cx);
+                let control = window.find(id);
+                let bounds = control.bounds();
+                let content = window.find("preferences-content").bounds();
+                if control.visible()
+                    && bounds.top() >= content.top()
+                    && bounds.bottom() <= content.bottom()
+                    && bounds.left() >= content.left()
+                    && bounds.right() <= content.right()
+                {
+                    return true;
+                }
+                window.scroll(
+                    "preferences-content",
+                    gpui_kit::ScrollDelta::Pixels(point(px(0.), px(-64.))),
+                    cx,
+                );
+                window.refresh();
+                false
+            })
+            .unwrap();
+        if visible {
+            return;
+        }
+        cx.run_until_parked();
+    }
+    panic!("preference {id} is not reachable");
+}
+
+#[gpui_kit::test]
+fn browser_sort_scroll_choices_are_localized_exclusive_persistent_and_do_not_move_reader(
+    cx: &mut TestAppContext,
+) {
+    let choices = [
+        (
+            BrowserSortScroll::Anchor,
+            "browser-sort-scroll-anchor",
+            Text::BrowserSortScrollAnchor,
+        ),
+        (
+            BrowserSortScroll::Top,
+            "browser-sort-scroll-top",
+            Text::BrowserSortScrollTop,
+        ),
+        (
+            BrowserSortScroll::Offset,
+            "browser-sort-scroll-offset",
+            Text::BrowserSortScrollOffset,
+        ),
+    ];
+    for language in Language::ALL {
+        let mut settings = AppSettings::default();
+        settings.preferences.language = language;
+        let fixture = fixture_with_settings(cx, settings);
+        fixture
+            .sender
+            .send(vec![book(&fixture, "scroll-preference", 4)])
+            .unwrap();
+        pump(&fixture, cx);
+        cx.update_window(fixture.window, |_, window, cx| {
+            fixture
+                .view
+                .update(cx, |view, cx| view.navigate(2, window, cx));
+        })
+        .unwrap();
+        pump(&fixture, cx);
+        let mut preferences = open_preferences(&fixture, cx);
+        cx.update_window(preferences, |_, window, cx| {
+            window.resize(size(px(440.), px(360.)));
+            window.render_frame(cx);
+        })
+        .unwrap();
+        let before = fixture.view.read_with(cx, |view, _| {
+            let reading = view.continuous.logical_scroll_top();
+            let browser = view.browser.grid.logical_scroll_top();
+            (
+                view.reader.current,
+                view.reader.zoom,
+                reading.item_ix,
+                reading.offset_in_item,
+                browser.item_ix,
+                browser.offset_in_item,
+            )
+        });
+        for (mode, id, _) in choices {
+            reveal_sort_scroll_option(preferences, id, cx);
+            cx.update_window(preferences, |_, window, _| {
+                for (value, control, text) in choices {
+                    assert_eq!(window.find(control).label(), Some(language.text(text)));
+                    assert_eq!(
+                        window.find(control).checked(),
+                        Some(value == BrowserSortScroll::Anchor)
+                    );
+                }
+            })
+            .unwrap();
+            click_preference(&fixture, id, cx);
+            pump(&fixture, cx);
+            fixture.view.read_with(cx, |view, _| {
+                assert_eq!(view.reader.settings.preferences.browser_sort_scroll, mode);
+                let reading = view.continuous.logical_scroll_top();
+                let browser = view.browser.grid.logical_scroll_top();
+                assert_eq!(
+                    (
+                        view.reader.current,
+                        view.reader.zoom,
+                        reading.item_ix,
+                        reading.offset_in_item,
+                        browser.item_ix,
+                        browser.offset_in_item
+                    ),
+                    before
+                );
+                assert!(!view.dirty && !view.saving);
+            });
+            cx.update_window(preferences, |_, window, _| {
+                for (value, control, _) in choices {
+                    assert_eq!(window.find(control).checked(), Some(value == mode));
+                }
+            })
+            .unwrap();
+            let path = fixture.directory.path().join("settings.json");
+            // The default choice is a no-op, so it need not create a file.
+            let bytes = std::fs::read(&path).ok();
+            let epoch = fixture
+                .view
+                .read_with(cx, |view, _| view.save_epoch.load(Ordering::SeqCst));
+            click_preference(&fixture, id, cx);
+            pump(&fixture, cx);
+            assert_eq!(std::fs::read(&path).ok(), bytes);
+            fixture.view.read_with(cx, |view, _| {
+                assert_eq!(view.save_epoch.load(Ordering::SeqCst), epoch)
+            });
+            assert_eq!(
+                AppSettings::load_from(&path)
+                    .unwrap()
+                    .preferences
+                    .browser_sort_scroll,
+                mode
+            );
+            cx.update_window(preferences, |_, window, cx| window.press("escape", cx))
+                .unwrap();
+            pump(&fixture, cx);
+            preferences = open_preferences(&fixture, cx);
+            reveal_sort_scroll_option(preferences, id, cx);
+            cx.update_window(preferences, |_, window, _| {
+                assert_eq!(window.find(id).checked(), Some(true))
+            })
+            .unwrap();
+            // Restore the default to check the initial exclusive state on the next pass.
+            reveal_sort_scroll_option(preferences, "browser-sort-scroll-anchor", cx);
+            click_preference(&fixture, "browser-sort-scroll-anchor", cx);
+            pump(&fixture, cx);
+        }
+        cx.update_window(preferences, |_, window, cx| window.press("escape", cx))
+            .unwrap();
+        pump(&fixture, cx);
+    }
+}
+
+#[gpui_kit::test]
+fn choosing_sort_scroll_policy_does_not_move_or_reorder_a_scrolled_browser(
+    cx: &mut TestAppContext,
+) {
+    let fixture = fixture(cx);
+    let folder = book(&fixture, "scrolled-policy", 120);
+    cx.update_window(fixture.window, |_, window, cx| {
+        fixture
+            .view
+            .update(cx, |view, cx| view.browse(folder, window, cx));
+    })
+    .unwrap();
+    pump(&fixture, cx);
+    fixture.view.update(cx, |view, cx| {
+        let offset = ListOffset {
+            item_ix: 5,
+            offset_in_item: px(23.),
+        };
+        let listing = view.listing.as_ref().unwrap();
+        let anchor = listing.entries[view.browser.model.order[5 * view.browser.columns]]
+            .entry_path
+            .clone();
+        let selected = listing.entries[view.browser.model.order[6 * view.browser.columns + 1]]
+            .entry_path
+            .clone();
+        assert_ne!(anchor, selected);
+        view.browser.model.selected = Some(selected);
+        view.browser.grid.scroll_to(offset);
+        view.browser.scroll_anchor = Some((anchor, offset));
+        cx.notify();
+    });
+    render_windows(&fixture, cx);
+    let snapshot = |view: &ReaderView| {
+        let offset = view.browser.grid.logical_scroll_top();
+        let cache = view
+            .browser
+            .scroll_anchor
+            .as_ref()
+            .map(|(path, offset)| (path.clone(), offset.item_ix, offset.offset_in_item));
+        (
+            offset.item_ix,
+            offset.offset_in_item,
+            cache,
+            view.browser.model.order.clone(),
+            view.browser.model.selected.clone(),
+        )
+    };
+    let before = fixture.view.read_with(cx, |view, _| snapshot(view));
+    assert_eq!(before.0, 5);
+    assert_eq!(before.1, px(23.));
+    assert!(before.2.is_some());
+    let preferences = open_preferences(&fixture, cx);
+    for (mode, id) in [
+        (BrowserSortScroll::Top, "browser-sort-scroll-top"),
+        (BrowserSortScroll::Offset, "browser-sort-scroll-offset"),
+    ] {
+        reveal_sort_scroll_option(preferences, id, cx);
+        click_preference(&fixture, id, cx);
+        pump(&fixture, cx);
+        fixture.view.read_with(cx, |view, _| {
+            assert_eq!(view.reader.settings.preferences.browser_sort_scroll, mode);
+            assert_eq!(snapshot(view), before);
+        });
+    }
+}
+
+#[gpui_kit::test]
+fn browser_sort_scroll_is_selected_after_loading_saved_settings(cx: &mut TestAppContext) {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("settings.json");
+    for (mode, id) in [
+        (BrowserSortScroll::Top, "browser-sort-scroll-top"),
+        (BrowserSortScroll::Offset, "browser-sort-scroll-offset"),
+    ] {
+        let mut saved = AppSettings::default();
+        saved.preferences.browser_sort_scroll = mode;
+        saved.save_to(&path).unwrap();
+        let fixture = fixture_with_settings(cx, AppSettings::load_from(&path).unwrap());
+        pump(&fixture, cx);
+        let preferences = open_preferences(&fixture, cx);
+        reveal_sort_scroll_option(preferences, id, cx);
+        cx.update_window(preferences, |_, window, _| {
+            assert_eq!(window.find(id).checked(), Some(true));
+            assert_eq!(
+                window.find("browser-sort-scroll-anchor").checked(),
+                Some(false)
+            );
+        })
+        .unwrap();
+        cx.update_window(preferences, |_, window, cx| window.press("escape", cx))
+            .unwrap();
+        pump(&fixture, cx);
+    }
+}
+
+#[gpui_kit::test]
+fn failed_browser_sort_scroll_save_keeps_reading_data_and_shows_error(cx: &mut TestAppContext) {
+    let fixture = fixture(cx);
+    fixture
+        .sender
+        .send(vec![book(&fixture, "failed-sort-policy", 4)])
+        .unwrap();
+    pump(&fixture, cx);
+    cx.update_window(fixture.window, |_, window, cx| {
+        fixture.view.update(cx, |view, cx| {
+            view.navigate(2, window, cx);
+            view.perform(Command::Bookmark, window, cx);
+        });
+    })
+    .unwrap();
+    pump(&fixture, cx);
+    let path = fixture.directory.path().join("settings.json");
+    let bytes = std::fs::read(&path).unwrap();
+    let mut expected = AppSettings::load_from(&path).unwrap();
+    assert!(!expected.recent.is_empty());
+    assert!(!expected.positions.is_empty());
+    assert!(!expected.bookmarks.is_empty());
+    assert!(!expected.bookmark_images.is_empty());
+    expected.preferences.browser_sort_scroll = BrowserSortScroll::Top;
+    let preferences = open_preferences(&fixture, cx);
+    fixture.view.update(cx, |view, _| {
+        view.settings_path = fixture.directory.path().to_path_buf();
+    });
+    reveal_sort_scroll_option(preferences, "browser-sort-scroll-top", cx);
+    click_preference(&fixture, "browser-sort-scroll-top", cx);
+    pump(&fixture, cx);
+    fixture.view.read_with(cx, |view, _| {
+        assert_eq!(view.reader.settings, expected);
+        assert!(view.save_error.is_some());
+    });
+    assert_eq!(std::fs::read(&path).unwrap(), bytes);
+    cx.update_window(preferences, |_, window, cx| {
+        window.scroll(
+            "preferences-content",
+            gpui_kit::ScrollDelta::Lines(point(0., -100.)),
+            cx,
+        );
+        window.render_frame(cx);
+        assert!(window.find("settings-save-error").visible());
+    })
+    .unwrap();
+    // Restore a writable destination for fixture cleanup without changing the
+    // failed-save evidence above.
+    fixture.view.update(cx, |view, _| view.settings_path = path);
+}
 
 #[gpui_kit::test]
 fn separate_window_can_defer_reader_updates_and_close_without_quitting(cx: &mut TestAppContext) {

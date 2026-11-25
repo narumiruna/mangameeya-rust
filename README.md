@@ -103,6 +103,14 @@ Press `Backspace` while reading to replace only the central canvas with a black 
 
 The browser keeps the query, sort, selection, and scroll position when you return from reading. Reading retains the page, zoom, filters, and scroll position. Browsing pauses the slideshow and disables reading controls. The **Browser** tools tab controls cover size, file names, and metadata. These browser preferences are not saved between launches.
 
+Under **Preferences → General settings → File browser**, choose **Scroll position after sorting**:
+
+1. **Keep scroll anchor** (default): follow the same top-row item and keep its row offset. This is not necessarily the selected book.
+2. **Go to top**: show the first row with no offset.
+3. **Keep scroll offset**: keep the distance from the list top, within the valid scroll range.
+
+The choice is saved for the next manual sort, direction change, folder grouping change, or shuffle. Choosing it does not move the current view. Search, refresh, resize, and return from reading keep their existing behavior. Sort, search, and grid display choices remain window-local. Non-default values are saved as `preferences.browser_sort_scroll` (`top` or `offset`); the default `anchor` is omitted. Before downgrading to a build without this field, close the application, back up `settings.json`, and remove only `preferences.browser_sort_scroll` from a working copy. Keep all other preferences and reading data.
+
 Sort by natural or literal name, modified or created time, size, type, known page count, known reading progress, recent-open order, or a fixed random order. Folder grouping is independent of sort direction; unknown values stay last. Counts come only from opened books or visible cover reads. Sorting does not scan all archives. Recent-open order is not a last-read timestamp.
 
 The default grid shows covers and two-line file names; metadata is off. The header puts the current folder, clickable ancestors, result count, search, sorting, and refresh on one row when space permits. Narrow views use two rows to keep controls accessible. Use **…** to jump to a parent not shown in the path bar. Change the direction or **Folders first** in the sort menu. Shuffle appears only with random sorting. Use the top reading button or `Escape` to return to the retained book.
@@ -138,10 +146,10 @@ The initial size is 560 × 520 logical px, with a 440 × 360 minimum and vertica
 Opening or closing it does not change reader panel visibility, widths, the selected tool tab, or the open book and reading state.
 
 - **Reading**: reading-position memory, reading direction, and Black, Dark gray, or Paper backgrounds. The background applies only to the reading area. Direction changes in either window update both controls; selecting the current direction does not change it.
-- **General settings**: language selection and corrupt-settings backup/reset.
+- **General settings**: language, file browser scroll behavior, and corrupt-settings backup/reset.
 - **New version notifications**: installed version, check status, **Check for updates on startup**, manual **Check for updates**, and **Open download page** when a newer stable version is available.
 
-Changes apply immediately and save automatically. There are no Save or Apply buttons. Save errors appear in Preferences.
+Changes save automatically and apply immediately. The scroll policy applies on the next manual sort; choosing it does not move the current view. There are no Save or Apply buttons. Save errors appear in Preferences.
 While Preferences has focus, `Escape` or `Ctrl+W` closes only that window; macOS `Command+W` and Windows `Alt+F4` do the same. The book stays open, and the application keeps running.
 Reader navigation and zoom shortcuts do not act through Preferences. **File → Close comic** still closes the book, not Preferences.
 Closing the reader or choosing **Quit** closes both windows and exits the application. macOS `Command+Q` also quits.
@@ -249,7 +257,7 @@ GPUI component text uses the matching locale; component strings not supplied by 
 ## Local data
 
 Reading preferences, reading positions, recent files, and bookmarks are stored in the user's `settings.json`. Saves use a temporary file and atomic replacement.
-The independent Preferences window and new version notifications do not change the `settings.json` schema. Existing settings need no conversion.
+Existing settings need no conversion. The default browser scroll behavior adds no JSON field.
 
 - Windows: `%APPDATA%\MangaMeeya\MangaMeeya Rust\config\settings.json`
 - macOS: `~/Library/Application Support/org.MangaMeeya.MangaMeeya-Rust/settings.json`

@@ -1,6 +1,8 @@
 //! Production-window integration checks. macOS uses the real Metal renderer.
 //! Run explicitly with `cargo test --test rendering`.
 
+#[path = "support/browser_sort_scroll.rs"]
+mod browser_sort_scroll;
 #[path = "support/browser_visual.rs"]
 mod browser_visual;
 
@@ -129,7 +131,7 @@ fn reach_preference(
     id: &str,
 ) {
     scroll_preferences(cx, reader, preferences, 10_000.);
-    for _ in 0..24 {
+    for _ in 0..48 {
         if cx
             .update_window(preferences, |_, window, _| preference_in_view(window, id))
             .unwrap()
@@ -172,6 +174,17 @@ fn assert_preferences_hierarchy(window: &mut Window, language: Language, error: 
     assert_eq!(reading.label(), Some(language.text(Text::ReadingTab)));
     assert_eq!(general.label(), Some(language.text(Text::GeneralSettings)));
     assert!(reading.bounds().bottom() < general.bounds().top());
+    let browser = window
+        .within("general-preferences")
+        .find("file-browser-preferences");
+    assert_eq!(browser.label(), Some(language.text(Text::FileBrowser)));
+    assert!(contains_bounds(general.bounds(), browser.bounds()));
+    for (id, text) in browser_sort_scroll::OPTIONS {
+        let control = window.within("file-browser-preferences").find(id);
+        assert_eq!(control.label(), Some(language.text(text)));
+        assert_eq!(control.checked(), Some(id == "browser-sort-scroll-anchor"));
+        assert!(contains_bounds(browser.bounds(), control.bounds()));
+    }
     let releases = window
         .within("preferences-content")
         .find("release-preferences");
@@ -250,6 +263,9 @@ fn capture_preferences_sizes(
         "language-en",
         "language-ja",
         "language-zh-Hant",
+        "browser-sort-scroll-anchor",
+        "browser-sort-scroll-top",
+        "browser-sort-scroll-offset",
         "release-check-on-startup",
         "check-for-updates",
     ];
@@ -275,7 +291,7 @@ fn capture_preferences_sizes(
         .unwrap();
         snapshot(cx, preferences, &name);
         let mut reached = vec![false; controls.len()];
-        for _ in 0..24 {
+        for _ in 0..48 {
             cx.update_window(preferences, |_, window, _| {
                 for (index, id) in controls.iter().enumerate() {
                     reached[index] |= preference_in_view(window, id);
@@ -303,6 +319,9 @@ fn capture_preferences_sizes(
                 reached,
                 "{language:?} {suffix}: control must be fully visible or scroll-reachable: {id}"
             );
+        }
+        if width == 440. && !error {
+            browser_sort_scroll::exercise_options(cx, reader, preferences);
         }
         scroll_preferences(cx, reader, preferences, -10_000.);
         snapshot(cx, preferences, &format!("{name}-scrolled"));
@@ -1973,6 +1992,8 @@ fn main() {
             .save(folder.join(format!("{}.png", index + 1)))
             .unwrap();
     }
+    browser_sort_scroll::capture(&mut cx, temporary.path());
+    eprintln!("Native browser sort scroll geometry checks passed for all three policies.");
     capture_developer_states(&mut cx, temporary.path(), &folder);
     capture_browser_states(&mut cx, temporary.path(), &folder);
     browser_visual::capture(&mut cx, temporary.path());

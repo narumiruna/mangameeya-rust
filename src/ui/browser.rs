@@ -175,7 +175,7 @@ pub(super) struct BrowserUi {
     visible_rows: Rc<RefCell<HashSet<usize>>>,
     search_pending: bool,
     search_language: Option<Language>,
-    scroll_anchor: Option<(PathBuf, ListOffset)>,
+    pub(super) scroll_anchor: Option<(PathBuf, ListOffset)>,
     #[cfg(test)]
     requested_count: usize,
     #[cfg(test)]
@@ -499,7 +499,7 @@ fn sort_text(sort: SortKey) -> Text {
 }
 
 impl ReaderView {
-    fn browser_anchor(&self) -> (Option<PathBuf>, f32) {
+    pub(super) fn browser_anchor(&self) -> (Option<PathBuf>, f32) {
         let top = self.browser.grid.logical_scroll_top();
         if let Some((path, requested)) = &self.browser.scroll_anchor
             && top.item_ix == requested.item_ix
@@ -559,6 +559,27 @@ impl ReaderView {
             self.browser.model.rebuild(listing, &self.reader.settings);
         }
         self.reset_browser_grid(anchor);
+        cx.notify();
+    }
+
+    pub(super) fn reorder_browser(&mut self, cx: &mut Context<Self>) {
+        use crate::settings::BrowserSortScroll;
+
+        let policy = self.reader.settings.preferences.browser_sort_scroll;
+        let anchor = match policy {
+            BrowserSortScroll::Anchor => self.browser_anchor(),
+            BrowserSortScroll::Top | BrowserSortScroll::Offset => (None, 0.),
+        };
+        let offset = self.browser.grid.logical_scroll_top();
+        if let Some(listing) = &self.listing {
+            self.browser.model.rebuild(listing, &self.reader.settings);
+        }
+        self.reset_browser_grid(anchor);
+        match policy {
+            BrowserSortScroll::Anchor => {}
+            BrowserSortScroll::Top => self.browser.grid.scroll_to(ListOffset::default()),
+            BrowserSortScroll::Offset => self.browser.grid.scroll_to(offset),
+        }
         cx.notify();
     }
 
@@ -900,8 +921,10 @@ impl ReaderView {
                     .checked(self.browser.model.sort == sort)
                     .on_click(move |_, _, cx| {
                         _ = owner.update(cx, |this, cx| {
-                            this.browser.model.sort = sort;
-                            this.rebuild_browser(cx);
+                            if this.browser.model.sort != sort {
+                                this.browser.model.sort = sort;
+                                this.reorder_browser(cx);
+                            }
                         });
                     }),
             );
@@ -1374,7 +1397,7 @@ impl ReaderView {
                         .tooltip(language.text(Text::BrowserShuffle))
                         .on_click(cx.listener(|this, _, _, cx| {
                             this.browser.model.shuffle();
-                            this.rebuild_browser(cx);
+                            this.reorder_browser(cx);
                         })),
                 )
             })
